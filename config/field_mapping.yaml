@@ -1,0 +1,133 @@
+# =============================================================================
+# QA Dashboard - Jira Field Mapping Configuration
+# =============================================================================
+# HOW TO FIND CUSTOM FIELD IDs:
+#   1. Start the backend and call GET /api/jira/fields
+#   2. Or: https://<your-jira>.atlassian.net/rest/api/3/field
+#
+# [ASSUMPTION] markers indicate values to verify for your Jira instance.
+# =============================================================================
+
+jira:
+  # [ASSUMPTION] Exact status name for "Ready for Testing" in your workflow.
+  # Common alternatives: "QA", "To Test", "UAT", "Awaiting QA"
+  ready_for_testing_status: "Ready for Testing"
+
+  # All statuses tracked for aging and flow metrics
+  tracked_statuses:
+    - "Ready for Testing"
+    - "In Progress"
+    - "In Review"
+    - "Blocked"
+    - "Open"
+    - "Reopened"
+
+  # ---------------------------------------------------------------------------
+  # CUSTOM FIELD IDs
+  # null = disabled or using standard field fallback
+  # Replace with "customfield_XXXXX" after running GET /api/jira/fields
+  # ---------------------------------------------------------------------------
+  fields:
+    # QA Owner - who is responsible for testing this item
+    # [ASSUMPTION] null = using assignee as QA owner proxy
+    qa_owner: null            # e.g. "customfield_10200"
+
+    # Tests written count - number of test cases written for this item
+    # [ASSUMPTION] null = Xray disabled; test count unavailable
+    test_count: null          # e.g. "customfield_10201"
+
+    # Story points / effort
+    # [ASSUMPTION] Standard Jira Cloud field; may be "customfield_10016"
+    story_points: "story_points"
+
+    # Bundle / Module / Feature grouping field
+    # [ASSUMPTION] null = using Epic Link as bundle/module grouping
+    bundle_field: null        # e.g. "customfield_10300"
+
+    # Activity type field (custom dropdown for activity/module category)
+    # [ASSUMPTION] null = using Labels as activity grouping fallback
+    activity_field: null      # e.g. "customfield_10400"
+
+    # Sprint field - [ASSUMPTION] standard Jira Cloud sprint field
+    sprint_field: "customfield_10020"
+
+    # Epic Link - [ASSUMPTION] standard Jira Cloud epic link
+    # Newer Jira Cloud may use parent instead
+    epic_link_field: "customfield_10014"
+
+    # Epic Name display field
+    epic_name_field: "customfield_10011"
+
+    # Standard Jira fields (do not change unless your instance differs)
+    version_field: "fixVersions"
+    priority_field: "priority"
+    due_date_field: "duedate"
+    components_field: "components"
+    labels_field: "labels"
+
+  # ---------------------------------------------------------------------------
+  # QA TEAM MEMBERS
+  # [ASSUMPTION] Display names are placeholders - update with real names
+  # ---------------------------------------------------------------------------
+  team_members:
+    - id: "63d64812010d3563796fce79"
+      name: "QA Engineer 1"
+      role: "QA Engineer"
+
+    - id: "63d64903491b20ef64b750db"
+      name: "QA Engineer 2"
+      role: "QA Engineer"
+
+    - id: "712020:93e7d8d1-93fd-472c-85ba-031b64d96f16"
+      name: "QA Engineer 3"
+      role: "QA Engineer"
+
+    - id: "712020:4eefeaaf-e7fb-407c-8c32-2adef07c15bc"
+      name: "QA Engineer 4"
+      role: "QA Engineer"
+
+    - id: "712020:dcf5b82a-4cb5-444a-9946-cab93de073fa"
+      name: "QA Engineer 5"
+      role: "QA Engineer"
+
+  # [ASSUMPTION] Empty = monitor all accessible projects. Add keys to filter.
+  projects: []  # e.g. ["PROJ", "APP", "MOBILE"]
+
+  # Aging thresholds (days in "Ready for Testing" status)
+  aging:
+    warning_days: 3
+    critical_days: 7
+    overdue_days: 14
+
+  # [ASSUMPTION] Standard Jira Cloud priority names
+  priorities:
+    critical: ["Highest", "Critical"]
+    high: ["High"]
+    medium: ["Medium"]
+    low: ["Low", "Lowest"]
+
+  # Label used to flag blocker items
+  blocker_label: "blocker"
+
+  # ---------------------------------------------------------------------------
+  # XRAY INTEGRATION PLACEHOLDER
+  # Set enabled: true and fill fields when integrating Xray Test Management
+  # ---------------------------------------------------------------------------
+  xray:
+    enabled: false
+    test_execution_status_field: null
+    test_count_field: null
+    test_plan_field: null
+
+  # ---------------------------------------------------------------------------
+  # FUTURE INTEGRATIONS (placeholders - do not remove)
+  # ---------------------------------------------------------------------------
+  confluence:
+    enabled: false
+    space_key: null
+    page_id: null
+
+  email:
+    enabled: false
+    report_recipients: []
+    report_schedule: "0 8 * * 1"  # Every Monday 8am
