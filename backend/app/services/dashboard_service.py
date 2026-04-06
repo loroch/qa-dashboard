@@ -28,7 +28,12 @@ class DashboardService:
         self.mapper = get_field_mapper()
         self.cache = get_cache()
         self.mapping = get_field_mapping()
-        self.team_members = {m["id"]: m["name"] for m in self.mapping["jira"]["team_members"]}
+
+    @property
+    def team_members(self) -> dict:
+        """Always read fresh from config so reloads take effect."""
+        mapping = get_field_mapping()
+        return {m["id"]: m["name"] for m in mapping["jira"]["team_members"]}
 
     # ------------------------------------------------------------------
     # Fetch helpers

@@ -9,6 +9,38 @@ function fmtDate(str) {
   catch { return str }
 }
 
+const ISSUE_TYPE_COLORS = {
+  'Bug':         'bg-red-100 text-red-700',
+  'Story':       'bg-green-100 text-green-700',
+  'Task':        'bg-blue-100 text-blue-700',
+  'Sub-task':    'bg-gray-100 text-gray-600',
+  'Epic':        'bg-purple-100 text-purple-700',
+  'Improvement': 'bg-teal-100 text-teal-700',
+}
+
+const STATUS_COLORS = {
+  'Ready for Testing': 'bg-purple-100 text-purple-700',
+  'In Progress':       'bg-blue-100 text-blue-700',
+  'In Review':         'bg-indigo-100 text-indigo-700',
+  'Done':              'bg-green-100 text-green-700',
+  'Blocked':           'bg-red-100 text-red-700',
+  'Open':              'bg-gray-100 text-gray-600',
+  'Reopened':          'bg-orange-100 text-orange-700',
+  'To Do':             'bg-gray-100 text-gray-500',
+}
+
+function IssueTypeBadge({ type }) {
+  if (!type) return <span className="text-gray-400 text-xs">—</span>
+  const cls = ISSUE_TYPE_COLORS[type] || 'bg-gray-100 text-gray-600'
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{type}</span>
+}
+
+function StatusBadge({ status }) {
+  if (!status) return <span className="text-gray-400 text-xs">—</span>
+  const cls = STATUS_COLORS[status] || 'bg-gray-100 text-gray-600'
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${cls}`}>{status}</span>
+}
+
 function SortIcon({ field, sortField, sortDir }) {
   if (sortField !== field) return <ChevronUp className="h-3 w-3 text-gray-300" />
   return sortDir === 'asc'
@@ -70,6 +102,8 @@ export function IssueTable({ issues = [], loading = false, compact = false }) {
             <tr>
               {col('Key', 'key')}
               {col('Summary', 'summary')}
+              {col('Type', 'issue_type')}
+              {col('Status', 'status')}
               {col('QA Owner', 'qa_owner')}
               {col('Priority', 'priority')}
               {col('Version', 'fix_versions')}
@@ -101,6 +135,12 @@ export function IssueTable({ issues = [], loading = false, compact = false }) {
                 </td>
                 <td className="px-3 py-2.5 max-w-xs">
                   <span className="line-clamp-2 text-gray-800">{issue.summary}</span>
+                </td>
+                <td className="px-3 py-2.5 whitespace-nowrap">
+                  <IssueTypeBadge type={issue.issue_type} />
+                </td>
+                <td className="px-3 py-2.5 whitespace-nowrap">
+                  <StatusBadge status={issue.status} />
                 </td>
                 <td className="px-3 py-2.5 whitespace-nowrap text-gray-600 text-xs">
                   {issue.qa_owner?.display_name || issue.assignee?.display_name || '—'}
