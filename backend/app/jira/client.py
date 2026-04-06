@@ -26,7 +26,7 @@ class JiraClient:
             self._client = httpx.AsyncClient(
                 auth=self.auth,
                 headers={"Accept": "application/json", "Content-Type": "application/json"},
-                timeout=self.timeout,
+                timeout=90,
             )
         return self._client
 

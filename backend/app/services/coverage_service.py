@@ -40,10 +40,12 @@ class CoverageService:
         all_issues = []
         start = 0
         while True:
+            print(f"[coverage] _fetch_all page start={start} jql={jql[:80]}")
             batch = await self.jira.search_issues(
                 jql, fields=fields, max_results=page_size, start_at=start
             )
             all_issues.extend(batch)
+            print(f"[coverage] _fetch_all got {len(batch)} items, total so far: {len(all_issues)}")
             if len(batch) < page_size:
                 break
             start += page_size
@@ -194,35 +196,30 @@ class CoverageService:
             self.cache.invalidate(CACHE_KEY_UNLINKED)
 
         async def fetch():
-            # Fetch Test issues created in the last 4 months only
-            jql = 'issuetype = Test AND created >= "-120d" ORDER BY created DESC'
-            tests_raw = await self._fetch_all(
+            # Fetch unlinked tests using exact JQL verified in Jira
+            jql = 'issuetype = Test AND created >= "-120d" AND text ~ "Test Case" AND text ~ "is tested by" AND parent IS EMPTY ORDER BY created DESC'
+            logger.info(f"[coverage] Unlinked tests JQL: {jql}")
+            print(f"[coverage] Unlinked tests JQL: {jql}")
+
+            tests_raw = await self.jira.search_issues(
                 jql,
-                fields=["summary", "status", "fixVersions", "issuelinks", "parent"],
-                page_size=100,
+                fields=["summary", "status", "fixVersions"],
+                max_results=200,
+                start_at=0,
             )
+            logger.info(f"[coverage] Fetched {len(tests_raw)} unlinked test issues")
+            print(f"[coverage] Fetched {len(tests_raw)} unlinked test issues")
 
-            unlinked = []
-            for issue in tests_raw:
-                f = issue.get("fields", {})
-                links = f.get("issuelinks") or []
-                # Has outward "Test Case" link → linked to a story
-                has_story_link = any(
-                    lk.get("type", {}).get("name") == "Test Case"
-                    and lk.get("outwardIssue")
-                    for lk in links
-                )
-                if not has_story_link:
-                    versions = [v["name"] for v in (f.get("fixVersions") or [])]
-                    unlinked.append({
-                        "key":      issue["key"],
-                        "url":      self._issue_url(issue["key"]),
-                        "summary":  f.get("summary", ""),
-                        "status":   (f.get("status") or {}).get("name", ""),
-                        "versions": versions,
-                    })
-
-            return unlinked
+            return [
+                {
+                    "key":      issue["key"],
+                    "url":      self._issue_url(issue["key"]),
+                    "summary":  issue.get("fields", {}).get("summary", ""),
+                    "status":   (issue.get("fields", {}).get("status") or {}).get("name", ""),
+                    "versions": [v["name"] for v in (issue.get("fields", {}).get("fixVersions") or [])],
+                }
+                for issue in tests_raw
+            ]
 
         return await self.cache.get_or_fetch(CACHE_KEY_UNLINKED, fetch, ttl=300)
 
