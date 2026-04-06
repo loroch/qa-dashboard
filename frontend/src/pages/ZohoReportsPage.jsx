@@ -4,8 +4,8 @@ import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { Header } from '../components/layout/Header'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import { AgingBadge } from '../components/common/Badge'
-import { ExternalLink, Link, BarChart2, ChevronUp, ChevronDown, X } from 'lucide-react'
-import { format, parseISO } from 'date-fns'
+import { ExternalLink, Link, BarChart2, ChevronUp, ChevronDown, X, Calendar } from 'lucide-react'
+import { format, parseISO, subMonths } from 'date-fns'
 import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api', timeout: 60000 })
@@ -66,8 +66,16 @@ function FilterChip({ label, onRemove }) {
 const TABS = ['By Project & Status', 'Zoho ↔ Jira Linked']
 const PAGE_SIZE = 30
 
+const DATE_RANGE_OPTIONS = [
+  { label: 'All time', value: 0 },
+  { label: 'Last month', value: 1 },
+  { label: 'Last 2 months', value: 2 },
+  { label: 'Last 3 months', value: 3 },
+]
+
 export default function ZohoReportsPage() {
   const [tab, setTab] = useState('By Project & Status')
+  const [monthRange, setMonthRange] = useState(0)
 
   // ── By Project filters & sort ──
   const [projSearch, setProjSearch] = useState('')
@@ -100,8 +108,32 @@ export default function ZohoReportsPage() {
   ])
 
   // ── By Project: filter + sort ──
+  // When a date range is active, re-derive from all tickets in the linked report;
+  // when no date range, use the full pre-aggregated project report.
+  const byProjectBase = useMemo(() => {
+    if (!monthRange) return projectQuery.data?.by_project || []
+    // Re-aggregate from date-filtered linked data
+    const map = {}
+    const cutoff = subMonths(new Date(), monthRange)
+    const allRows = linkedQuery.data || []
+    const dateFiltered = allRows.filter(r => r.zoho_created && parseISO(r.zoho_created) >= cutoff)
+    dateFiltered.forEach(r => {
+      const proj = r.zoho_project_name || 'No Project'
+      const stat = r.zoho_status || 'Unknown'
+      if (!map[proj]) map[proj] = { project_name: proj, total: 0, statuses: {} }
+      map[proj].total++
+      map[proj].statuses[stat] = (map[proj].statuses[stat] || 0) + 1
+    })
+    return Object.values(map).map(p => ({
+      ...p,
+      statuses: Object.entries(p.statuses)
+        .map(([status, count]) => ({ status, count }))
+        .sort((a, b) => b.count - a.count),
+    }))
+  }, [projectQuery.data, linkedQuery.data, monthRange])
+
   const byProject = useMemo(() => {
-    let rows = projectQuery.data?.by_project || []
+    let rows = byProjectBase
     if (projSearch) {
       rows = rows.filter(p => p.project_name.toLowerCase().includes(projSearch.toLowerCase()))
     }
@@ -113,17 +145,21 @@ export default function ZohoReportsPage() {
       const bv = projSort.field === 'total' ? b.total : b.project_name.toLowerCase()
       return projSort.dir === 'asc' ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1)
     })
-  }, [projectQuery.data, projSearch, projStatusFilter, projSort])
+  }, [byProjectBase, projSearch, projStatusFilter, projSort])
 
   const allZohoStatuses = useMemo(() => {
-    const all = projectQuery.data?.by_project || []
     const set = new Set()
-    all.forEach(p => p.statuses.forEach(s => set.add(s.status)))
+    byProjectBase.forEach(p => p.statuses.forEach(s => set.add(s.status)))
     return [...set].sort()
-  }, [projectQuery.data])
+  }, [byProjectBase])
 
-  // ── Linked: filter + sort ──
-  const allLinked = linkedQuery.data || []
+  // ── Linked: date filter + filter + sort ──
+  const allLinked = useMemo(() => {
+    const rows = linkedQuery.data || []
+    if (!monthRange) return rows
+    const cutoff = subMonths(new Date(), monthRange)
+    return rows.filter(r => r.zoho_created && parseISO(r.zoho_created) >= cutoff)
+  }, [linkedQuery.data, monthRange])
 
   const uniqueProjects    = [...new Set(allLinked.map(r => r.zoho_project_name).filter(Boolean))].sort()
   const uniqueZohoStatus  = [...new Set(allLinked.map(r => r.zoho_status).filter(Boolean))].sort()
@@ -184,6 +220,26 @@ export default function ZohoReportsPage() {
       />
 
       <div className="flex-1 p-6 space-y-4 overflow-auto">
+
+        {/* Date range filter */}
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-gray-400" />
+          <span className="text-sm text-gray-500">Created:</span>
+          <div className="flex gap-1">
+            {DATE_RANGE_OPTIONS.map(opt => (
+              <button key={opt.value}
+                onClick={() => setMonthRange(opt.value)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                  monthRange === opt.value
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-white border border-gray-200 text-gray-600 hover:border-brand-300'
+                }`}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <div className="card p-0 overflow-hidden">
           {/* Tabs */}
           <div className="flex border-b border-gray-200 bg-gray-50">
@@ -411,9 +467,11 @@ export default function ZohoReportsPage() {
                             <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 text-xs">
                               {row.jira_fix_versions?.join(', ') || '—'}
                             </td>
-                            <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 text-xs">
+                            <td className="px-3 py-2.5 text-gray-500 text-xs max-w-[180px]">
                               {row.jira_parent_key
-                                ? <span title={row.jira_parent_summary}>{row.jira_parent_key}</span>
+                                ? <span title={row.jira_parent_key} className="line-clamp-2">
+                                    {row.jira_parent_summary || row.jira_parent_key}
+                                  </span>
                                 : row.jira_epic || '—'}
                             </td>
                             <td className="px-3 py-2.5 whitespace-nowrap">

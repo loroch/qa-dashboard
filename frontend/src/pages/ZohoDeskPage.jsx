@@ -1,12 +1,12 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { Header } from '../components/layout/Header'
 import { SummaryCard } from '../components/cards/SummaryCard'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import { Badge, AgingBadge, PriorityBadge } from '../components/common/Badge'
-import { ExternalLink, Ticket, AlertTriangle, Users, Building2 } from 'lucide-react'
-import { format, parseISO } from 'date-fns'
+import { ExternalLink, Ticket, AlertTriangle, Users, Building2, Calendar } from 'lucide-react'
+import { format, parseISO, subMonths } from 'date-fns'
 import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api', timeout: 30000 })
@@ -21,6 +21,13 @@ const STATUS_COLORS = {
   'Pending':  'bg-orange-100 text-orange-700',
   'Resolved': 'bg-green-100 text-green-700',
 }
+
+const DATE_RANGE_OPTIONS = [
+  { label: 'All time', value: 0 },
+  { label: 'Last month', value: 1 },
+  { label: 'Last 2 months', value: 2 },
+  { label: 'Last 3 months', value: 3 },
+]
 
 function StatusBadge({ status }) {
   const cls = STATUS_COLORS[status] || 'bg-gray-100 text-gray-600'
@@ -94,6 +101,7 @@ function TicketTable({ tickets = [] }) {
 
 export default function ZohoDeskPage() {
   const [tab, setTab] = useState('By Department')
+  const [monthRange, setMonthRange] = useState(0)
 
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['zoho-dashboard'],
@@ -103,15 +111,62 @@ export default function ZohoDeskPage() {
 
   const { lastRefresh, isRefreshing, refresh } = useAutoRefresh([['zoho-dashboard']])
 
+  // Filter all tickets by created date
+  const filteredTickets = useMemo(() => {
+    const tickets = data?.all_tickets || []
+    if (!monthRange) return tickets
+    const cutoff = subMonths(new Date(), monthRange)
+    return tickets.filter(t => t.created && parseISO(t.created) >= cutoff)
+  }, [data, monthRange])
+
+  // Re-derive aggregated views from filtered tickets
+  const byDept = useMemo(() => {
+    const map = {}
+    filteredTickets.forEach(t => {
+      const dept = t.department_name || 'Unknown'
+      if (!map[dept]) map[dept] = { department: dept, count: 0, open: 0, overdue: 0, tickets: [] }
+      map[dept].count++
+      if (t.status === 'Open') map[dept].open++
+      if (t.aging_level === 'overdue' || t.is_overdue) map[dept].overdue++
+      map[dept].tickets.push(t)
+    })
+    return Object.values(map).sort((a, b) => b.count - a.count)
+  }, [filteredTickets])
+
+  const byAssignee = useMemo(() => {
+    const map = {}
+    filteredTickets.forEach(t => {
+      const name = t.assignee_name || 'Unassigned'
+      if (!map[name]) map[name] = { assignee: name, count: 0, overdue: 0 }
+      map[name].count++
+      if (t.aging_level === 'overdue' || t.is_overdue) map[name].overdue++
+    })
+    return Object.values(map).sort((a, b) => b.count - a.count)
+  }, [filteredTickets])
+
+  const byStatus = useMemo(() => {
+    const map = {}
+    filteredTickets.forEach(t => {
+      const s = t.status || 'Unknown'
+      map[s] = (map[s] || 0) + 1
+    })
+    return Object.entries(map).map(([status, count]) => ({ status, count })).sort((a, b) => b.count - a.count)
+  }, [filteredTickets])
+
+  const overdue = useMemo(() =>
+    filteredTickets.filter(t => t.aging_level === 'overdue' || t.is_overdue),
+    [filteredTickets]
+  )
+
+  const summary = useMemo(() => ({
+    total_tickets: filteredTickets.length,
+    open_tickets: filteredTickets.filter(t => t.status === 'Open').length,
+    overdue_tickets: overdue.length,
+    departments: byDept.length,
+  }), [filteredTickets, overdue, byDept])
+
   if (isLoading) return <PageLoader />
   if (isError) return <div className="flex-1 p-6"><ErrorState message={error?.message} onRetry={refetch} /></div>
-
-  const s = data?.summary || {}
-  const byDept = data?.by_department || []
-  const byAssignee = data?.by_assignee || []
-  const byStatus = data?.by_status || []
-  const allTickets = data?.all_tickets || []
-  const overdue = data?.overdue || []
 
   return (
     <div className="flex-1 flex flex-col">
@@ -125,12 +180,37 @@ export default function ZohoDeskPage() {
         ]}
       />
       <div className="flex-1 p-6 space-y-5 overflow-auto">
+
+        {/* Date range filter */}
+        <div className="flex items-center gap-2">
+          <Calendar className="h-4 w-4 text-gray-400" />
+          <span className="text-sm text-gray-500">Created:</span>
+          <div className="flex gap-1">
+            {DATE_RANGE_OPTIONS.map(opt => (
+              <button key={opt.value}
+                onClick={() => setMonthRange(opt.value)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+                  monthRange === opt.value
+                    ? 'bg-brand-600 text-white'
+                    : 'bg-white border border-gray-200 text-gray-600 hover:border-brand-300'
+                }`}>
+                {opt.label}
+              </button>
+            ))}
+          </div>
+          {monthRange > 0 && (
+            <span className="text-xs text-gray-400 ml-1">
+              Showing {filteredTickets.length} of {data?.all_tickets?.length || 0} tickets
+            </span>
+          )}
+        </div>
+
         {/* Summary cards */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-          <SummaryCard title="Total Tickets" value={s.total_tickets} icon={Ticket} color="blue" />
-          <SummaryCard title="Open" value={s.open_tickets} icon={Ticket} color="green" />
-          <SummaryCard title="Overdue" value={s.overdue_tickets} icon={AlertTriangle} color="red" />
-          <SummaryCard title="Departments" value={s.departments} icon={Building2} color="purple" />
+          <SummaryCard title="Total Tickets" value={summary.total_tickets} icon={Ticket} color="blue" />
+          <SummaryCard title="Open" value={summary.open_tickets} icon={Ticket} color="green" />
+          <SummaryCard title="Overdue" value={summary.overdue_tickets} icon={AlertTriangle} color="red" />
+          <SummaryCard title="Departments" value={summary.departments} icon={Building2} color="purple" />
         </div>
 
         {/* Status summary pills */}
@@ -175,6 +255,7 @@ export default function ZohoDeskPage() {
                     <TicketTable tickets={dept.tickets} />
                   </div>
                 ))}
+                {byDept.length === 0 && <p className="text-gray-400 text-sm text-center py-8">No tickets found.</p>}
               </div>
             )}
 
@@ -191,6 +272,7 @@ export default function ZohoDeskPage() {
                     <span className="text-2xl font-bold text-brand-600">{a.count}</span>
                   </div>
                 ))}
+                {byAssignee.length === 0 && <p className="text-gray-400 text-sm text-center py-8">No tickets found.</p>}
               </div>
             )}
 
@@ -203,11 +285,12 @@ export default function ZohoDeskPage() {
                     <StatusBadge status={s.status} />
                   </div>
                 ))}
+                {byStatus.length === 0 && <p className="text-gray-400 text-sm text-center py-8">No tickets found.</p>}
               </div>
             )}
 
             {/* All Tickets */}
-            {tab === 'All Tickets' && <TicketTable tickets={allTickets} />}
+            {tab === 'All Tickets' && <TicketTable tickets={filteredTickets} />}
 
             {/* Overdue */}
             {tab === 'Overdue' && (
