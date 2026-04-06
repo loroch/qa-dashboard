@@ -71,23 +71,23 @@ jira:
   # ---------------------------------------------------------------------------
   team_members:
     - id: "63d64812010d3563796fce79"
-      name: "QA Engineer 1"
+      name: "anats"
       role: "QA Engineer"
 
     - id: "63d64903491b20ef64b750db"
-      name: "QA Engineer 2"
+      name: "Ron Levy"
       role: "QA Engineer"
 
     - id: "712020:93e7d8d1-93fd-472c-85ba-031b64d96f16"
-      name: "QA Engineer 3"
+      name: "Jorge Ulises Alquicira Rojas"
       role: "QA Engineer"
 
     - id: "712020:4eefeaaf-e7fb-407c-8c32-2adef07c15bc"
-      name: "QA Engineer 4"
+      name: "Loro Chichportich"
       role: "QA Engineer"
 
     - id: "712020:dcf5b82a-4cb5-444a-9946-cab93de073fa"
-      name: "QA Engineer 5"
+      name: "Jonathan Cohen"
       role: "QA Engineer"
 
   # [ASSUMPTION] Empty = monitor all accessible projects. Add keys to filter.
