@@ -48,13 +48,57 @@ class JiraClient:
             logger.error(f"Jira connection error for {path}: {e}")
             raise JiraConnectionError(f"Cannot connect to Jira: {e}") from e
 
+    async def post(self, path: str, json: dict | None = None) -> Any:
+        client = await self._get_client()
+        url = f"{self.base_url}/rest/api/3{path}"
+        try:
+            response = await client.post(url, json=json or {})
+            response.raise_for_status()
+            if response.content:
+                return response.json()
+            return {}
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Jira POST error {e.response.status_code} for {path}: {e.response.text[:500]}")
+            raise JiraAPIError(f"Jira returned {e.response.status_code}: {e.response.text[:200]}") from e
+        except httpx.RequestError as e:
+            raise JiraConnectionError(f"Cannot connect to Jira: {e}") from e
+
+    async def put(self, path: str, json: dict | None = None) -> Any:
+        client = await self._get_client()
+        url = f"{self.base_url}/rest/api/3{path}"
+        try:
+            response = await client.put(url, json=json or {})
+            response.raise_for_status()
+            if response.content:
+                return response.json()
+            return {}
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Jira PUT error {e.response.status_code} for {path}: {e.response.text[:500]}")
+            raise JiraAPIError(f"Jira returned {e.response.status_code}: {e.response.text[:200]}") from e
+        except httpx.RequestError as e:
+            raise JiraConnectionError(f"Cannot connect to Jira: {e}") from e
+
     async def search_issues(
         self,
         jql: str,
         fields: list[str] | None = None,
         max_total: int = 5000,
+        max_results: int | None = None,
+        start_at: int = 0,
     ) -> list[dict]:
         """Search Jira issues with automatic pagination."""
+        # If max_results given, do single page fetch
+        if max_results is not None:
+            batch_size = min(max_results, self.max_results)
+            params = {
+                "jql": jql,
+                "startAt": start_at,
+                "maxResults": batch_size,
+                "fields": ",".join(fields or []),
+            }
+            data = await self.get("/search/jql", params)
+            return data.get("issues", [])
+
         all_issues: list[dict] = []
         start_at = 0
         default_fields = [

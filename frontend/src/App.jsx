@@ -10,6 +10,7 @@ import TrendsPage from './pages/TrendsPage'
 import Changelog from './pages/Changelog'
 import ZohoDeskPage from './pages/ZohoDeskPage'
 import ZohoReportsPage from './pages/ZohoReportsPage'
+import TestCoveragePage from './pages/TestCoveragePage'
 
 export default function App() {
   return (
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="/blockers"          element={<BlockersPage />} />
             <Route path="/bugs"              element={<BugsReport />} />
             <Route path="/trends"            element={<TrendsPage />} />
+            <Route path="/coverage"          element={<TestCoveragePage />} />
             <Route path="/zoho"              element={<ZohoDeskPage />} />
             <Route path="/zoho-reports"     element={<ZohoReportsPage />} />
             <Route path="/changelog"         element={<Changelog />} />
