@@ -194,8 +194,8 @@ class CoverageService:
             self.cache.invalidate(CACHE_KEY_UNLINKED)
 
         async def fetch():
-            # Fetch all Test issues with their links
-            jql = 'issuetype = Test ORDER BY created DESC'
+            # Fetch Test issues created in the last 4 months only
+            jql = 'issuetype = Test AND created >= "-120d" ORDER BY created DESC'
             tests_raw = await self._fetch_all(
                 jql,
                 fields=["summary", "status", "fixVersions", "issuelinks", "parent"],

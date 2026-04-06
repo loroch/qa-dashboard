@@ -10,7 +10,7 @@ import {
 } from 'lucide-react'
 import axios from 'axios'
 
-const api = axios.create({ baseURL: '/api', timeout: 60000 })
+const api = axios.create({ baseURL: '/api', timeout: 120000 })
 
 const getVersions    = ()        => api.get('/coverage/versions').then(r => r.data)
 const getByVersion   = (v)       => api.get(`/coverage/by-version?version=${encodeURIComponent(v)}`).then(r => r.data)
@@ -474,7 +474,7 @@ export default function TestCoveragePage() {
               {unlinkedQuery.isLoading && (
                 <div className="text-center py-12">
                   <div className="h-8 w-8 border-2 border-brand-200 border-t-brand-600 rounded-full animate-spin mx-auto mb-3" />
-                  <p className="text-sm text-gray-500">Loading unlinked tests…</p>
+                  <p className="text-sm text-gray-500">Loading unlinked tests (last 4 months)…</p>
                 </div>
               )}
               {unlinkedQuery.isError && <ErrorState message={unlinkedQuery.error?.message} onRetry={unlinkedQuery.refetch} />}
