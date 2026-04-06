@@ -49,6 +49,14 @@ class Settings(BaseSettings):
     # Export
     export_max_rows: int = Field(10000)
 
+    # Zoho Desk
+    zoho_client_id: str = Field("", description="Zoho OAuth client ID")
+    zoho_client_secret: str = Field("", description="Zoho OAuth client secret")
+    zoho_refresh_token: str = Field("", description="Zoho OAuth refresh token")
+    zoho_desk_portal: str = Field("cityshob", description="Zoho Desk portal name")
+    zoho_accounts_url: str = Field("https://accounts.zoho.com")
+    zoho_desk_base_url: str = Field("https://desk.zoho.com")
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",")]

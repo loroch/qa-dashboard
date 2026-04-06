@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, CheckSquare, Users, AlertTriangle,
-  Bug, Clock, TrendingUp, History, Settings
+  Bug, Clock, TrendingUp, History, Ticket, BarChart2
 } from 'lucide-react'
 
 const nav = [
@@ -12,6 +12,8 @@ const nav = [
   { to: '/blockers',       label: 'Blockers',         icon: AlertTriangle },
   { to: '/bugs',           label: 'Bugs (30d)',       icon: Bug },
   { to: '/trends',         label: 'Trends',           icon: TrendingUp },
+  { to: '/zoho',           label: 'Zoho Desk',        icon: Ticket },
+  { to: '/zoho-reports',  label: 'Zoho Reports',     icon: BarChart2 },
   { to: '/changelog',      label: 'Changelog',        icon: History },
 ]
 

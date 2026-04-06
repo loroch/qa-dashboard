@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.database.db import init_db
 from app.services.changelog_service import get_changelog_service
 from app.services.dashboard_service import get_dashboard_service
-from app.api.routes import dashboard, changelog, export, jira_meta
+from app.api.routes import dashboard, changelog, export, jira_meta, zoho
 
 logging.basicConfig(
     level=logging.INFO,
@@ -57,6 +57,8 @@ async def lifespan(app: FastAPI):
     scheduler.shutdown(wait=False)
     from app.jira.client import get_jira_client
     await get_jira_client().close()
+    from app.zoho.client import get_zoho_client
+    await get_zoho_client().close()
     logger.info("QA Dashboard shut down")
 
 
@@ -98,6 +100,7 @@ app.include_router(dashboard.router)
 app.include_router(changelog.router)
 app.include_router(export.router)
 app.include_router(jira_meta.router)
+app.include_router(zoho.router)
 
 
 @app.get("/health")
