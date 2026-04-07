@@ -15,9 +15,14 @@ Built for QA Managers to track team workload, ready-for-testing items, aging, bl
 | **Jira** | Blockers — Highest/Critical priority and blocker-labeled items |
 | **Jira** | Bugs created in the last 30 days |
 | **Jira** | 7-day trend charts + member workload bar chart |
+| **Jira** | Test Coverage — stories/epics by version + unlinked test cases |
 | **Zoho Desk** | Tickets by department, assignee, status with date-range filter |
 | **Zoho Desk** | By-project ticket counts with status breakdown |
 | **Zoho Reports** | Zoho ↔ Jira cross-reference: Bug ID → Jira key, status, fix version, parent |
+| **Test Generator** | Select a fix version → list stories without test cases |
+| **Test Generator** | AI-powered test case generation from Jira story + epic + Confluence context (Claude AI) |
+| **Test Generator** | Inline editing of generated test cases before creating in Jira |
+| **Test Generator** | One-click creation of Test issues in Jira linked to the parent story with fix version |
 | **All pages** | Date range filter: All time / Last 1 month / Last 2 months / Last 3 months |
 | **All pages** | Sort, filter, search, active filter chips |
 | **Export** | CSV + Excel for all major views (tickets, linked report, changelog) |
@@ -53,18 +58,20 @@ qa-dashboard/
 │       │   ├── client.py             # Async Zoho Desk client (OAuth2 auto-refresh)
 │       │   └── mapper.py             # Maps raw Zoho ticket fields → dashboard models
 │       ├── services/
-│       │   ├── dashboard_service.py  # Jira aggregation (RFT, aging, trends)
-│       │   ├── zoho_service.py       # Zoho Desk aggregation (by dept, status, etc.)
-│       │   ├── zoho_jira_service.py  # Cross-reference: Zoho Bug ID → Jira issue
-│       │   ├── cache_service.py      # In-memory TTL cache with per-key locking
-│       │   ├── changelog_service.py  # Audit trail stored in SQLite
-│       │   └── export_service.py     # CSV + Excel export helpers
+│       │   ├── dashboard_service.py      # Jira aggregation (RFT, aging, trends)
+│       │   ├── zoho_service.py           # Zoho Desk aggregation (by dept, status, etc.)
+│       │   ├── zoho_jira_service.py      # Cross-reference: Zoho Bug ID → Jira issue
+│       │   ├── test_generator_service.py # AI test case generation (Jira + Confluence + Claude)
+│       │   ├── cache_service.py          # In-memory TTL cache with per-key locking
+│       │   ├── changelog_service.py      # Audit trail stored in SQLite
+│       │   └── export_service.py         # CSV + Excel export helpers
 │       └── api/routes/
 │           ├── dashboard.py          # /api/dashboard/*
 │           ├── zoho.py               # /api/zoho/*
 │           ├── changelog.py          # /api/changelog
 │           ├── export.py             # /api/export/*
-│           └── jira_meta.py          # /api/jira/*
+│           ├── jira_meta.py          # /api/jira/*
+│           └── test_generator.py     # /api/test-generator/*
 ├── frontend/
 │   └── src/
 │       ├── pages/
@@ -77,6 +84,8 @@ qa-dashboard/
 │       │   ├── TrendsPage.jsx
 │       │   ├── ZohoDeskPage.jsx      # Zoho tickets by dept / assignee / status
 │       │   ├── ZohoReportsPage.jsx   # By-project report + Zoho ↔ Jira linked
+│       │   ├── TestCoveragePage.jsx  # Stories/epics by version + unlinked test cases
+│       │   ├── TestGeneratorPage.jsx # AI test case generator (3-step workflow)
 │       │   └── Changelog.jsx
 │       ├── components/               # Cards, charts, tables, layout, badges
 │       ├── hooks/useAutoRefresh.js   # 5-minute auto-refresh
@@ -124,6 +133,15 @@ ZOHO_DESK_BASE_URL=https://desk.zoho.com
 ```
 
 > See **"Getting API tokens"** section below for how to obtain each credential.
+
+To enable the **Test Generator** (AI-powered test case generation), also add:
+
+```env
+# ── Anthropic / Claude AI ──────────────────────────────────
+ANTHROPIC_API_KEY=sk-ant-...
+```
+
+> Get your API key from https://console.anthropic.com → API Keys.
 
 ### 3. Start the backend
 
@@ -308,6 +326,15 @@ POST http://localhost:8000/api/jira/config/reload
 | GET | `/api/zoho/debug/list-sample` | Raw `cf` fields from first 3 tickets |
 | GET | `/api/zoho/debug/ticket/{id}` | Full raw ticket payload |
 
+### Test Generator
+
+| Method | Endpoint | Description |
+|---|---|---|
+| GET | `/api/test-generator/versions` | List all fix versions from Jira projects |
+| GET | `/api/test-generator/stories?version=X` | Stories in the fix version with no test cases |
+| POST | `/api/test-generator/generate` | Generate test cases via Claude AI for a story |
+| POST | `/api/test-generator/create` | Create approved test cases as Test issues in Jira |
+
 ### Export / Changelog
 
 | Method | Endpoint | Description |
@@ -340,6 +367,7 @@ POST http://localhost:8000/api/jira/config/reload
 | `CORS_ORIGINS` | | `http://localhost:5173` | Allowed frontend origins |
 | `LOG_LEVEL` | | `INFO` | `DEBUG` / `INFO` / `WARNING` |
 | `ENVIRONMENT` | | `development` | `development` disables API docs in prod |
+| `ANTHROPIC_API_KEY` | ✅ (Test Generator) | — | Anthropic API key for Claude AI test case generation |
 
 ---
 
