@@ -60,6 +60,7 @@ class CreateRequest(BaseModel):
     story_key: str
     test_cases: list[TestCaseItem]
     fix_version: str = ""
+    ai_summary: str = ""
 
 
 # ── Endpoints ──────────────────────────────────────────────────────────────────
@@ -164,6 +165,7 @@ async def create_test_cases(req: CreateRequest):
             story_key=req.story_key,
             test_cases=[tc.model_dump() for tc in req.test_cases],
             fix_version=req.fix_version,
+            ai_summary=req.ai_summary,
         )
         return {
             "story_key": req.story_key,

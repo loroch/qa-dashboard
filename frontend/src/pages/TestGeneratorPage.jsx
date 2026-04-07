@@ -508,6 +508,7 @@ export default function TestGeneratorPage() {
       story_key: selectedStory.key,
       test_cases: testCases,
       fix_version: fixVersionForCreate,
+      ai_summary: contextData?.ai_summary || '',
     })
   }
 
