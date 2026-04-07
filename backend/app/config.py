@@ -49,6 +49,9 @@ class Settings(BaseSettings):
     # Export
     export_max_rows: int = Field(10000)
 
+    # Claude / Anthropic
+    anthropic_api_key: str = Field("", description="Anthropic API key for test case generation")
+
     # Zoho Desk
     zoho_client_id: str = Field("", description="Zoho OAuth client ID")
     zoho_client_secret: str = Field("", description="Zoho OAuth client secret")

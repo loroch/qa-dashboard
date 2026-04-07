@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.database.db import init_db
 from app.services.changelog_service import get_changelog_service
 from app.services.dashboard_service import get_dashboard_service
-from app.api.routes import dashboard, changelog, export, jira_meta, zoho, coverage
+from app.api.routes import dashboard, changelog, export, jira_meta, zoho, coverage, test_generator
 
 logging.basicConfig(
     level=logging.INFO,
@@ -102,6 +102,7 @@ app.include_router(export.router)
 app.include_router(jira_meta.router)
 app.include_router(zoho.router)
 app.include_router(coverage.router)
+app.include_router(test_generator.router)
 
 
 @app.get("/health")

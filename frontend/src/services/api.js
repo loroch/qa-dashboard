@@ -54,6 +54,19 @@ export const getChangelog = (params = {}) =>
 export const createChangelogEntry = (data) =>
   api.post('/changelog', data)
 
+// --- Test Case Generator ---
+export const getFixVersions = () =>
+  api.get('/test-generator/versions')
+
+export const getStoriesWithoutTests = (version) =>
+  api.get(`/test-generator/stories?version=${encodeURIComponent(version)}`)
+
+export const generateTestCases = (storyKey) =>
+  api.post('/test-generator/generate', { story_key: storyKey })
+
+export const createTestCases = (data) =>
+  api.post('/test-generator/create', data)
+
 // --- Export ---
 export const exportUrl = (path, params = {}) => {
   const qs = new URLSearchParams(params).toString()
