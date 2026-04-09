@@ -3,6 +3,7 @@ Test Case Generator Service.
 Fetches Jira story + parent epic + Confluence context, then calls Claude
 to generate structured test cases, and creates them in Jira.
 """
+import asyncio
 import base64
 import json
 import logging
@@ -75,19 +76,26 @@ class TestGeneratorService:
 
     async def get_fix_versions(self) -> list[dict]:
         """Return all fix versions across all visible Jira projects, unreleased first."""
-        data = await self.jira.get(
-            "/project/search",
-            {"maxResults": 200, "expand": "versions"},
-        )
+        data = await self.jira.get("/project/search", {"maxResults": 200})
         projects = data.get("values", []) if isinstance(data, dict) else data or []
         logger.info("get_fix_versions: found %d projects", len(projects))
+
+        async def fetch_project_versions(project_key: str) -> list[dict]:
+            try:
+                result = await self.jira.get(f"/project/{project_key}/versions")
+                return result if isinstance(result, list) else []
+            except Exception as exc:
+                logger.warning("Could not fetch versions for project %s: %s", project_key, exc)
+                return []
+
+        project_keys = [p.get("key") for p in projects if p.get("key")]
+        all_results = await asyncio.gather(*[fetch_project_versions(k) for k in project_keys])
 
         versions: list[dict] = []
         seen: set[str] = set()
 
-        for project in projects:
-            project_key = project.get("key", "")
-            for v in project.get("versions") or []:
+        for project_key, project_versions in zip(project_keys, all_results):
+            for v in project_versions:
                 name = v.get("name", "")
                 if name and name not in seen:
                     seen.add(name)
