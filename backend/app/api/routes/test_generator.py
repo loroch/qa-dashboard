@@ -46,6 +46,7 @@ class StoryKeyRequest(BaseModel):
 class GenerateRequest(BaseModel):
     story_key: str
     extra_context: str = ""
+    mode: str = "basic"   # "basic" (1-5) or "extended" (1-10)
 
 
 class TestCaseItem(BaseModel):
@@ -146,7 +147,7 @@ async def generate_test_cases(req: GenerateRequest):
     """Generate test cases for a story using Jira + Confluence context + Claude."""
     try:
         svc = get_test_generator_service()
-        return await svc.generate_test_cases(req.story_key, req.extra_context)
+        return await svc.generate_test_cases(req.story_key, req.extra_context, req.mode)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:

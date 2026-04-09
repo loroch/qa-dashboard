@@ -410,6 +410,7 @@ export default function TestGeneratorPage() {
   const [contextData, setContextData]     = useState(null)
   const [uploadedFiles, setUploadedFiles] = useState([])   // file summaries from backend
   const [extraContext, setExtraContext]   = useState('')    // combined extracted text
+  const [testMode, setTestMode]           = useState('basic')  // "basic" | "extended"
 
   // Step 3 state
   const [testCases, setTestCases]               = useState([])
@@ -496,6 +497,7 @@ export default function TestGeneratorPage() {
     generateMutation.mutate({
       story_key: selectedStory.key,
       extra_context: extraContext,
+      mode: testMode,
     })
   }
 
@@ -518,6 +520,7 @@ export default function TestGeneratorPage() {
     setContextData(null)
     setUploadedFiles([])
     setExtraContext('')
+    setTestMode('basic')
     setTestCases([])
     setCreationReport(null)
     contextMutation.reset()
@@ -816,23 +819,58 @@ export default function TestGeneratorPage() {
               )}
             </div>
 
-            {/* Generate button */}
-            <div className="card px-5 py-4 flex items-center justify-between">
-              <div className="text-xs text-gray-400">
-                <p>Claude will use {contextData.sources_used.length} source{contextData.sources_used.length !== 1 ? 's' : ''}
+            {/* Mode selector + Generate button */}
+            <div className="card px-5 py-4 space-y-4">
+              {/* Mode picker */}
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase mb-2">Test Generation Mode</p>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => setTestMode('basic')}
+                    className={`flex-1 rounded-xl border-2 px-4 py-3 text-left transition-all ${
+                      testMode === 'basic'
+                        ? 'border-brand-500 bg-brand-50'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <p className={`text-sm font-semibold ${testMode === 'basic' ? 'text-brand-700' : 'text-gray-700'}`}>
+                      Basic
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">3–5 test cases · Core paths only</p>
+                  </button>
+                  <button
+                    onClick={() => setTestMode('extended')}
+                    className={`flex-1 rounded-xl border-2 px-4 py-3 text-left transition-all ${
+                      testMode === 'extended'
+                        ? 'border-brand-500 bg-brand-50'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <p className={`text-sm font-semibold ${testMode === 'extended' ? 'text-brand-700' : 'text-gray-700'}`}>
+                      Extended
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">6–10 test cases · Full coverage + edge cases</p>
+                  </button>
+                </div>
+              </div>
+
+              {/* Generate action */}
+              <div className="flex items-center justify-between">
+                <p className="text-xs text-gray-400">
+                  Claude will use {contextData.sources_used.length} source{contextData.sources_used.length !== 1 ? 's' : ''}
                   {uploadedFiles.filter(f => f.ok).length > 0 && ` + ${uploadedFiles.filter(f => f.ok).length} uploaded file${uploadedFiles.filter(f => f.ok).length !== 1 ? 's' : ''}`}
                   {' '}to generate test cases.
                 </p>
+                <button
+                  onClick={handleGenerate}
+                  disabled={isGenerating}
+                  className="btn-primary px-5 py-2.5 text-sm flex items-center gap-2 disabled:opacity-50"
+                >
+                  {isGenerating
+                    ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating with Claude…</>
+                    : <><Sparkles className="h-4 w-4" /> Generate Test Cases</>}
+                </button>
               </div>
-              <button
-                onClick={handleGenerate}
-                disabled={isGenerating}
-                className="btn-primary px-5 py-2.5 text-sm flex items-center gap-2 disabled:opacity-50"
-              >
-                {isGenerating
-                  ? <><Loader2 className="h-4 w-4 animate-spin" /> Generating with Claude…</>
-                  : <><Sparkles className="h-4 w-4" /> Generate Test Cases</>}
-              </button>
             </div>
 
             {/* Generating overlay */}

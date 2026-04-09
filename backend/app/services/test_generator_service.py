@@ -344,7 +344,7 @@ class TestGeneratorService:
     # 4. Generate test cases (Jira + Confluence → Claude)
     # ------------------------------------------------------------------
 
-    async def generate_test_cases(self, story_key: str, extra_context: str = "") -> dict:
+    async def generate_test_cases(self, story_key: str, extra_context: str = "", mode: str = "basic") -> dict:
         """Fetch context from Jira + Confluence, call Claude, return test cases."""
         settings = get_settings()
 
@@ -385,6 +385,7 @@ class TestGeneratorService:
             epic_context=epic_context,
             confluence_context=confluence_context,
             extra_context=extra_context,
+            mode=mode,
         )
         test_cases = await self._call_claude(prompt, settings.anthropic_api_key)
 
@@ -519,9 +520,28 @@ class TestGeneratorService:
         epic_context: str,
         confluence_context: str,
         extra_context: str = "",
+        mode: str = "basic",
     ) -> str:
+        if mode == "extended":
+            count_instruction = (
+                "Generate 6–10 test cases that together give full story coverage.\n"
+                "Include:\n"
+                "  - All acceptance criteria / functional requirements (positive paths)\n"
+                "  - At least 3–5 negative / edge-case scenarios\n"
+                "  - Permission / access-control checks where relevant\n"
+                "  - Performance or SLA criteria where explicitly stated"
+            )
+        else:  # basic
+            count_instruction = (
+                "Generate 3–5 focused test cases covering the most critical paths.\n"
+                "Include:\n"
+                "  - The core happy-path scenario(s)\n"
+                "  - 1–2 key negative / edge-case scenarios\n"
+                "  - Keep scope tight — prioritise quality over quantity"
+            )
+
         lines = [
-            "You are a senior QA engineer. Generate comprehensive test cases for the user story below.",
+            "You are a senior QA engineer. Generate test cases for the user story below.",
             "",
             f"## Story: {story_key} — {story_summary}",
             "",
@@ -537,12 +557,7 @@ class TestGeneratorService:
         lines += [
             "",
             "## Instructions",
-            "Generate 8–15 test cases that together give full story coverage.",
-            "Include:",
-            "  - All acceptance criteria / functional requirements (positive paths)",
-            "  - At least 3–5 negative / edge-case scenarios",
-            "  - Permission / access-control checks where relevant",
-            "  - Performance or SLA criteria where explicitly stated",
+            count_instruction,
             "",
             "For EACH test case output a JSON object with exactly these fields:",
             '  "summary"     : concise test case title (prefix TC-N:)',
