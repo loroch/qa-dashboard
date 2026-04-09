@@ -12,11 +12,11 @@ const nav = [
   { to: '/blockers',       label: 'Blockers',         icon: AlertTriangle },
   { to: '/bugs',           label: 'Bugs (30d)',       icon: Bug },
   { to: '/trends',         label: 'Trends',           icon: TrendingUp },
-  { to: '/coverage',       label: 'Test Coverage',    icon: FlaskConical },
   { to: '/zoho',           label: 'Zoho Desk',        icon: Ticket },
   { to: '/zoho-reports',  label: 'Zoho Reports',     icon: BarChart2 },
-  { to: '/changelog',      label: 'Changelog',        icon: History },
+  { to: '/coverage',       label: 'Test Coverage',    icon: FlaskConical },
   { to: '/test-generator', label: 'Test Generator',   icon: Wand2 },
+  { to: '/changelog',      label: 'Changelog',        icon: History },
 ]
 
 export function Sidebar() {
@@ -30,7 +30,7 @@ export function Sidebar() {
           </div>
           <div>
             <p className="font-bold text-sm leading-tight">QA Dashboard</p>
-            <p className="text-brand-200 text-xs">Manager View</p>
+            <p className="text-brand-200 text-xs">Loro.C Manager View</p>
           </div>
         </div>
       </div>
