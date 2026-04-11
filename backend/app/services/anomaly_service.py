@@ -210,7 +210,7 @@ class AnomalyService:
         jql = f'project = TMT0 AND issuetype = Bug AND created >= "-{days}d" ORDER BY created DESC'
         raw = await self.jira.search_issues(
             jql,
-            fields=["summary", "status", "priority", "created"],
+            fields=["summary", "status", "priority", "created", "parent", "labels", "fixVersions"],
             max_total=5000,
         )
 
@@ -224,6 +224,8 @@ class AnomalyService:
         items = []
         for issue in raw:
             fields = issue.get("fields", {})
+            parent = fields.get("parent") or {}
+            parent_fields = parent.get("fields") or {}
             items.append({
                 "key": issue["key"],
                 "url": self._issue_url(issue["key"]),
@@ -231,7 +233,11 @@ class AnomalyService:
                 "norm": normalize(fields.get("summary", "")),
                 "status": (fields.get("status") or {}).get("name", ""),
                 "priority": (fields.get("priority") or {}).get("name", ""),
-                "created": fields.get("created", ""),
+                "created": (fields.get("created") or "")[:10],
+                "parent_key": parent.get("key", ""),
+                "parent_summary": parent_fields.get("summary", ""),
+                "labels": fields.get("labels") or [],
+                "fix_versions": [v.get("name", "") for v in (fields.get("fixVersions") or [])],
             })
 
         n = len(items)

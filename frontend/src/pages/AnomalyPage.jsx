@@ -728,25 +728,54 @@ function DuplicateBugsTab() {
                         <table className="min-w-full text-sm">
                           <thead className="bg-white border-b border-gray-100 text-xs uppercase tracking-wide text-gray-500">
                             <tr>
-                              <th className="px-4 py-2 text-left">Key</th>
-                              <th className="px-4 py-2 text-left">Summary</th>
-                              <th className="px-4 py-2 text-left">Status</th>
-                              <th className="px-4 py-2 text-left">Priority</th>
-                              <th className="px-4 py-2 text-left">Created</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Key</th>
+                              <th className="px-3 py-2 text-left" style={{ resize: 'horizontal', overflow: 'hidden', minWidth: '160px' }}>Summary</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Status</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Priority</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Parent</th>
+                              <th className="px-3 py-2 text-left">Labels</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Fix Version</th>
+                              <th className="px-3 py-2 text-left whitespace-nowrap">Created</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-gray-100 bg-white">
                             {cluster.bugs.map(b => (
                               <tr key={b.key} className="hover:bg-gray-50">
-                                <td className="px-4 py-2 whitespace-nowrap">
+                                <td className="px-3 py-2 whitespace-nowrap">
                                   <IssueLink issueKey={b.key} url={b.url} />
                                 </td>
-                                <td className="px-4 py-2 text-gray-700 max-w-sm truncate">{b.summary}</td>
-                                <td className="px-4 py-2 whitespace-nowrap"><StatusPill status={b.status} /></td>
-                                <td className="px-4 py-2 whitespace-nowrap text-gray-600">{b.priority || '—'}</td>
-                                <td className="px-4 py-2 whitespace-nowrap text-gray-500 text-xs">
-                                  {b.created ? b.created.slice(0, 10) : '—'}
+                                <td className="px-3 py-2 text-gray-700 break-words whitespace-normal">{b.summary}</td>
+                                <td className="px-3 py-2 whitespace-nowrap"><StatusPill status={b.status} /></td>
+                                <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-600">{b.priority || '—'}</td>
+                                <td className="px-3 py-2 whitespace-nowrap">
+                                  {b.parent_key
+                                    ? <div>
+                                        <IssueLink issueKey={b.parent_key} url={`/browse/${b.parent_key}`} />
+                                        {b.parent_summary && (
+                                          <p className="text-xs text-gray-400 truncate max-w-[140px]">{b.parent_summary}</p>
+                                        )}
+                                      </div>
+                                    : <span className="text-gray-300 text-xs">—</span>}
                                 </td>
+                                <td className="px-3 py-2">
+                                  {b.labels && b.labels.length > 0
+                                    ? <div className="flex flex-wrap gap-1">
+                                        {b.labels.map(l => (
+                                          <span key={l} className="inline-block bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded">{l}</span>
+                                        ))}
+                                      </div>
+                                    : <span className="text-gray-300 text-xs">—</span>}
+                                </td>
+                                <td className="px-3 py-2">
+                                  {b.fix_versions && b.fix_versions.length > 0
+                                    ? <div className="flex flex-wrap gap-1">
+                                        {b.fix_versions.map(v => (
+                                          <span key={v} className="inline-block bg-green-50 text-green-700 text-xs px-1.5 py-0.5 rounded">{v}</span>
+                                        ))}
+                                      </div>
+                                    : <span className="text-gray-300 text-xs">—</span>}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">{b.created || '—'}</td>
                               </tr>
                             ))}
                           </tbody>
