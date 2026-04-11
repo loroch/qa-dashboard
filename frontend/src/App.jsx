@@ -12,6 +12,7 @@ import ZohoDeskPage from './pages/ZohoDeskPage'
 import ZohoReportsPage from './pages/ZohoReportsPage'
 import TestCoveragePage from './pages/TestCoveragePage'
 import TestGeneratorPage from './pages/TestGeneratorPage'
+import AnomalyPage from './pages/AnomalyPage'
 
 export default function App() {
   return (
@@ -32,6 +33,7 @@ export default function App() {
             <Route path="/zoho-reports"     element={<ZohoReportsPage />} />
             <Route path="/changelog"         element={<Changelog />} />
             <Route path="/test-generator"    element={<TestGeneratorPage />} />
+            <Route path="/anomaly"           element={<AnomalyPage />} />
           </Routes>
         </main>
       </div>
