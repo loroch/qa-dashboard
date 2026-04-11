@@ -66,7 +66,7 @@ class AnomalyService:
         )
 
     async def _fetch_tests_without_parent(self) -> dict:
-        jql = "issuetype = Test AND parent is EMPTY ORDER BY created DESC"
+        jql = "project = TMT0 AND issuetype = Test AND parent is EMPTY ORDER BY created DESC"
         raw = await self.jira.search_issues(
             jql,
             fields=["summary", "status", "issuelinks"],
@@ -156,7 +156,7 @@ class AnomalyService:
         )
 
     async def _fetch_incomplete_bugs(self, days: int) -> dict:
-        jql = f'issuetype = Bug AND created >= "-{days}d" ORDER BY created DESC'
+        jql = f'project = TMT0 AND issuetype = Bug AND created >= "-{days}d" ORDER BY created DESC'
         raw = await self.jira.search_issues(
             jql,
             fields=["summary", "status", "fixVersions", "parent", "customfield_10020", "priority"],
@@ -199,7 +199,7 @@ class AnomalyService:
         )
 
     async def _fetch_duplicate_bugs(self, days: int) -> dict:
-        jql = f'issuetype = Bug AND created >= "-{days}d" ORDER BY created DESC'
+        jql = f'project = TMT0 AND issuetype = Bug AND created >= "-{days}d" ORDER BY created DESC'
         raw = await self.jira.search_issues(
             jql,
             fields=["summary", "status", "priority", "created"],
