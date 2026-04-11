@@ -11,8 +11,9 @@ import difflib
 import logging
 import re
 from collections import defaultdict
+from datetime import datetime, timezone, timedelta
 
-from app.config import get_settings
+from app.config import get_settings, get_field_mapping
 from app.jira.client import get_jira_client
 from app.services.cache_service import get_cache
 
@@ -306,6 +307,167 @@ class AnomalyService:
         clusters.sort(key=lambda c: c["max_similarity"], reverse=True)
 
         return {"clusters": clusters, "total_clusters": len(clusters)}
+
+    # ── Section 4: Team Activity ────────────────────────────────────────────
+
+    async def get_team_activity(self, days: int, force_refresh: bool = False) -> dict:
+        cache_key = f"anomaly:team_activity:{days}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            return await self._fetch_team_activity(days)
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=180)
+
+    async def _fetch_team_activity(self, days: int) -> dict:
+        mapping = get_field_mapping()
+        team_members = mapping["jira"]["team_members"]  # [{id, name, role}]
+        team_ids = {m["id"] for m in team_members}
+        member_by_id = {m["id"]: m for m in team_members}
+
+        # Cutoff timestamp
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%S%z")
+
+        # Fetch recently updated TMT0 bugs
+        jql = f'project = TMT0 AND issuetype = Bug AND updated >= "-{days}d" ORDER BY updated DESC'
+        raw = await self.jira.search_issues(
+            jql,
+            fields=["summary", "status", "comment"],
+            max_total=500,
+        )
+
+        if not raw:
+            return self._empty_activity(team_members)
+
+        # Fetch changelogs for all issues concurrently (max 20 at a time)
+        sem = asyncio.Semaphore(20)
+
+        async def fetch_changelog(key: str):
+            async with sem:
+                try:
+                    data = await self.jira.get(f"/issue/{key}/changelog", {"maxResults": 100})
+                    return key, data.get("values", [])
+                except Exception as exc:
+                    logger.warning("changelog fetch failed for %s: %s", key, exc)
+                    return key, []
+
+        issue_keys = [i["key"] for i in raw]
+        changelog_results = await asyncio.gather(*[fetch_changelog(k) for k in issue_keys])
+        changelog_by_key = {k: v for k, v in changelog_results}
+
+        # Build issue summary lookup
+        summary_by_key = {i["key"]: (i.get("fields") or {}).get("summary", "") for i in raw}
+
+        # Initialise per-member buckets
+        members_data: dict[str, dict] = {}
+        for m in team_members:
+            members_data[m["id"]] = {
+                "account_id": m["id"],
+                "name": m["name"],
+                "role": m.get("role", ""),
+                "status_changes": [],
+                "comments": [],
+            }
+
+        # Extract status changes from changelogs
+        for issue_key, changelog_entries in changelog_by_key.items():
+            for entry in changelog_entries:
+                author = entry.get("author") or {}
+                author_id = author.get("accountId", "")
+                if author_id not in team_ids:
+                    continue
+
+                created_str = entry.get("created", "")
+                try:
+                    entry_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if entry_dt < cutoff:
+                    continue
+
+                for item in entry.get("items", []):
+                    if item.get("field") == "status":
+                        members_data[author_id]["status_changes"].append({
+                            "issue_key": issue_key,
+                            "issue_url": self._issue_url(issue_key),
+                            "issue_summary": summary_by_key.get(issue_key, ""),
+                            "from_status": item.get("fromString", ""),
+                            "to_status": item.get("toString", ""),
+                            "timestamp": created_str[:16].replace("T", " "),
+                        })
+
+        # Extract comments by team members
+        for issue in raw:
+            issue_key = issue["key"]
+            fields = issue.get("fields") or {}
+            comment_data = fields.get("comment") or {}
+            for comment in comment_data.get("comments", []):
+                author = comment.get("author") or {}
+                author_id = author.get("accountId", "")
+                if author_id not in team_ids:
+                    continue
+
+                created_str = comment.get("created", "")
+                try:
+                    entry_dt = datetime.fromisoformat(created_str.replace("Z", "+00:00"))
+                except ValueError:
+                    continue
+                if entry_dt < cutoff:
+                    continue
+
+                # Extract plain text from Atlassian Document Format body
+                body = comment.get("body") or {}
+                text = self._extract_adf_text(body) if isinstance(body, dict) else str(body)
+
+                members_data[author_id]["comments"].append({
+                    "issue_key": issue_key,
+                    "issue_url": self._issue_url(issue_key),
+                    "issue_summary": summary_by_key.get(issue_key, ""),
+                    "comment_preview": text[:300].strip(),
+                    "timestamp": created_str[:16].replace("T", " "),
+                })
+
+        # Sort each member's activity by timestamp descending
+        for md in members_data.values():
+            md["status_changes"].sort(key=lambda x: x["timestamp"], reverse=True)
+            md["comments"].sort(key=lambda x: x["timestamp"], reverse=True)
+
+        members = list(members_data.values())
+        total = sum(len(m["status_changes"]) + len(m["comments"]) for m in members)
+
+        return {
+            "members": members,
+            "total_activities": total,
+            "days": days,
+            "issues_scanned": len(raw),
+        }
+
+    def _empty_activity(self, team_members: list) -> dict:
+        return {
+            "members": [
+                {"account_id": m["id"], "name": m["name"], "role": m.get("role", ""),
+                 "status_changes": [], "comments": []}
+                for m in team_members
+            ],
+            "total_activities": 0,
+            "days": 0,
+            "issues_scanned": 0,
+        }
+
+    def _extract_adf_text(self, node: dict, depth: int = 0) -> str:
+        """Recursively extract plain text from Atlassian Document Format."""
+        if depth > 10:
+            return ""
+        node_type = node.get("type", "")
+        if node_type == "text":
+            return node.get("text", "")
+        parts = []
+        for child in node.get("content", []):
+            parts.append(self._extract_adf_text(child, depth + 1))
+        sep = "\n" if node_type in ("paragraph", "bulletList", "listItem", "heading") else ""
+        return sep.join(p for p in parts if p)
 
 
 # ── Singleton ───────────────────────────────────────────────────────────────

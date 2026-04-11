@@ -5,7 +5,7 @@ import { Header } from '../components/layout/Header'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import {
   ExternalLink, Zap, AlertCircle, ChevronDown, ChevronRight,
-  X, Check
+  X, Check, ArrowRight, MessageSquare, User
 } from 'lucide-react'
 import axios from 'axios'
 
@@ -19,8 +19,10 @@ const getIncompleteBugs = (days, refresh) =>
   api.get(`/anomaly/incomplete-bugs?days=${days}${refresh ? '&refresh=true' : ''}`).then(r => r.data)
 const getDuplicateBugs = (days, refresh) =>
   api.get(`/anomaly/duplicate-bugs?days=${days}${refresh ? '&refresh=true' : ''}`).then(r => r.data)
+const getTeamActivity = (days, refresh) =>
+  api.get(`/anomaly/team-activity?days=${days}${refresh ? '&refresh=true' : ''}`).then(r => r.data)
 
-const TABS = ['Tests Without Parent', 'Incomplete Bugs', 'Duplicate Bugs']
+const TABS = ['Tests Without Parent', 'Incomplete Bugs', 'Duplicate Bugs', 'Team Activity']
 
 const STATUS_COLORS = {
   'Done':              'bg-green-100 text-green-700',
@@ -793,6 +795,225 @@ function DuplicateBugsTab() {
   )
 }
 
+// ── Section 4: Team Activity ──────────────────────────────────────────────────
+
+const ACTIVITY_DAYS_OPTIONS = [
+  { value: 1,  label: '24h' },
+  { value: 3,  label: '3 days' },
+  { value: 7,  label: '7 days' },
+  { value: 30, label: '30 days' },
+]
+
+function ActivityDaysPicker({ value, onChange }) {
+  return (
+    <div className="flex gap-2">
+      {ACTIVITY_DAYS_OPTIONS.map(opt => (
+        <button
+          key={opt.value}
+          onClick={() => onChange(opt.value)}
+          className={`px-3 py-1 rounded-full text-sm font-medium transition-colors ${
+            value === opt.value
+              ? 'bg-brand-600 text-white'
+              : 'border border-gray-300 text-gray-600 hover:bg-gray-50'
+          }`}
+        >
+          {opt.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
+function MemberCard({ member }) {
+  const [section, setSection] = useState('status') // 'status' | 'comments'
+  const totalActivity = member.status_changes.length + member.comments.length
+  const initials = member.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+
+  return (
+    <div className="border border-gray-200 rounded-xl overflow-hidden bg-white shadow-sm">
+      {/* Member header */}
+      <div className="flex items-center gap-3 px-4 py-3 bg-gray-50 border-b border-gray-200">
+        <div className="h-9 w-9 rounded-full bg-brand-600 text-white flex items-center justify-center text-sm font-bold shrink-0">
+          {initials}
+        </div>
+        <div className="flex-1 min-w-0">
+          <p className="font-semibold text-gray-900 text-sm">{member.name}</p>
+          <p className="text-xs text-gray-500">{member.role}</p>
+        </div>
+        <div className="flex gap-3 text-xs shrink-0">
+          <span className="flex items-center gap-1 text-brand-700 font-medium">
+            <ArrowRight size={12} />
+            {member.status_changes.length} status changes
+          </span>
+          <span className="flex items-center gap-1 text-purple-700 font-medium">
+            <MessageSquare size={12} />
+            {member.comments.length} comments
+          </span>
+        </div>
+      </div>
+
+      {totalActivity === 0 ? (
+        <p className="text-sm text-gray-400 italic px-4 py-4">No activity in this period.</p>
+      ) : (
+        <>
+          {/* Sub-tab toggle */}
+          <div className="flex border-b border-gray-100 px-4 pt-2 gap-4">
+            <button
+              onClick={() => setSection('status')}
+              className={`pb-2 text-xs font-medium transition-colors border-b-2 ${
+                section === 'status'
+                  ? 'border-brand-600 text-brand-700'
+                  : 'border-transparent text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              Status Changes ({member.status_changes.length})
+            </button>
+            <button
+              onClick={() => setSection('comments')}
+              className={`pb-2 text-xs font-medium transition-colors border-b-2 ${
+                section === 'comments'
+                  ? 'border-purple-600 text-purple-700'
+                  : 'border-transparent text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              Comments ({member.comments.length})
+            </button>
+          </div>
+
+          {/* Status changes table */}
+          {section === 'status' && (
+            member.status_changes.length === 0 ? (
+              <p className="text-sm text-gray-400 italic px-4 py-3">No status changes in this period.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-white text-gray-400 uppercase tracking-wide border-b border-gray-100">
+                    <tr>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Issue</th>
+                      <th className="px-4 py-2 text-left">Summary</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">From</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">To</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {member.status_changes.map((sc, i) => (
+                      <tr key={i} className="hover:bg-gray-50">
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <IssueLink issueKey={sc.issue_key} url={sc.issue_url} />
+                        </td>
+                        <td className="px-4 py-2 text-gray-600 max-w-[240px] truncate">{sc.issue_summary}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{sc.from_status || '—'}</span>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <span className="flex items-center gap-1">
+                            <ArrowRight size={10} className="text-gray-400" />
+                            <span className="bg-brand-50 text-brand-700 px-1.5 py-0.5 rounded text-xs font-medium">{sc.to_status}</span>
+                          </span>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-gray-400">{sc.timestamp}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+
+          {/* Comments table */}
+          {section === 'comments' && (
+            member.comments.length === 0 ? (
+              <p className="text-sm text-gray-400 italic px-4 py-3">No comments in this period.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-white text-gray-400 uppercase tracking-wide border-b border-gray-100">
+                    <tr>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Issue</th>
+                      <th className="px-4 py-2 text-left">Summary</th>
+                      <th className="px-4 py-2 text-left">Comment Preview</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {member.comments.map((c, i) => (
+                      <tr key={i} className="hover:bg-gray-50 align-top">
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <IssueLink issueKey={c.issue_key} url={c.issue_url} />
+                        </td>
+                        <td className="px-4 py-2 text-gray-600 max-w-[180px] truncate">{c.issue_summary}</td>
+                        <td className="px-4 py-2 text-gray-700 max-w-[320px]">
+                          <p className="line-clamp-3 whitespace-pre-wrap leading-relaxed">{c.comment_preview || '—'}</p>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-gray-400">{c.timestamp}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
+function TeamActivityTab() {
+  const [days, setDays] = useState(7)
+
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['anomaly-team-activity', days],
+    queryFn: () => getTeamActivity(days, false),
+    staleTime: 3 * 60 * 1000,
+  })
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-500">
+          Status changes and comments by QA team members on TMT0 bugs in the last{' '}
+          <strong>{ACTIVITY_DAYS_OPTIONS.find(o => o.value === days)?.label}</strong>.
+        </p>
+        <ActivityDaysPicker value={days} onChange={setDays} />
+      </div>
+
+      {isLoading && <PageLoader />}
+      {isError && <ErrorState message={error?.message} />}
+
+      {data && (
+        <>
+          <div className="flex gap-4 text-xs text-gray-500">
+            <span>{data.total_activities} total activities</span>
+            <span>·</span>
+            <span>{data.issues_scanned} bugs scanned</span>
+          </div>
+
+          {data.members.length === 0 ? (
+            <div className="text-center py-16 text-gray-400">
+              <User size={40} className="mx-auto mb-3 opacity-30" />
+              <p className="text-base font-medium">No team members configured</p>
+            </div>
+          ) : (
+            <div className="space-y-4">
+              {data.members
+                .slice()
+                .sort((a, b) =>
+                  (b.status_changes.length + b.comments.length) -
+                  (a.status_changes.length + a.comments.length)
+                )
+                .map(member => (
+                  <MemberCard key={member.account_id} member={member} />
+                ))}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────────
 
 export default function AnomalyPage() {
@@ -831,12 +1052,14 @@ export default function AnomalyPage() {
         (bugsData.no_sprint?.length ?? 0)
       : null,
     'Duplicate Bugs': dupData?.total_clusters ?? null,
+    'Team Activity': null,  // no badge count on this tab
   }
 
   const tabColors = {
     'Tests Without Parent': 'orange',
     'Incomplete Bugs': 'red',
     'Duplicate Bugs': 'orange',
+    'Team Activity': 'blue',
   }
 
   const handleRefresh = async () => {
@@ -888,6 +1111,7 @@ export default function AnomalyPage() {
           {activeTab === 'Tests Without Parent' && <TestsWithoutParentTab />}
           {activeTab === 'Incomplete Bugs'       && <IncompleteBugsTab />}
           {activeTab === 'Duplicate Bugs'        && <DuplicateBugsTab />}
+          {activeTab === 'Team Activity'         && <TeamActivityTab />}
         </div>
       </div>
     </div>

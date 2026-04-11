@@ -26,6 +26,7 @@ router = APIRouter(prefix="/api/anomaly", tags=["anomaly"])
 
 VALID_INCOMPLETE_DAYS = {8, 30, 60}
 VALID_DUPLICATE_DAYS = {30, 60, 90}
+VALID_ACTIVITY_DAYS  = {1, 3, 7, 30}
 
 
 # ── Request models ──────────────────────────────────────────────────────────
@@ -103,4 +104,25 @@ async def get_duplicate_bugs(
         raise
     except Exception as exc:
         logger.error("get_duplicate_bugs failed (days=%s): %s", days, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/team-activity")
+async def get_team_activity(
+    days: int = Query(7, description="Time window: 1, 3, 7, or 30 days"),
+    refresh: bool = Query(False),
+):
+    """Return status changes and comments made by QA team members within the window."""
+    if days not in VALID_ACTIVITY_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"'days' must be one of {sorted(VALID_ACTIVITY_DAYS)}",
+        )
+    try:
+        svc = get_anomaly_service()
+        return await svc.get_team_activity(days, force_refresh=refresh)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("get_team_activity failed (days=%s): %s", days, exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
