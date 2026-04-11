@@ -536,21 +536,64 @@ function BugTable({ bugs, emptyMsg }) {
       <table className="min-w-full text-sm">
         <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
           <tr>
-            <th className="px-4 py-2 text-left">Key</th>
-            <th className="px-4 py-2 text-left">Summary</th>
-            <th className="px-4 py-2 text-left">Status</th>
-            <th className="px-4 py-2 text-left">Priority</th>
+            <th className="px-3 py-2 text-left whitespace-nowrap">Key</th>
+            <th className="px-3 py-2 text-left">Summary</th>
+            <th className="px-3 py-2 text-left whitespace-nowrap">Status</th>
+            <th className="px-3 py-2 text-left whitespace-nowrap">Priority</th>
+            <th className="px-3 py-2 text-left whitespace-nowrap">Parent</th>
+            <th className="px-3 py-2 text-left">Labels</th>
+            <th className="px-3 py-2 text-left whitespace-nowrap">Created</th>
+            <th className="px-3 py-2 text-left whitespace-nowrap">Found In Version</th>
+            <th className="px-3 py-2 text-left">Product / Component</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-gray-100 bg-white">
           {bugs.map(b => (
             <tr key={b.key} className="hover:bg-gray-50">
-              <td className="px-4 py-2 whitespace-nowrap">
+              <td className="px-3 py-2 whitespace-nowrap">
                 <IssueLink issueKey={b.key} url={b.url} />
               </td>
-              <td className="px-4 py-2 text-gray-700 max-w-sm truncate">{b.summary}</td>
-              <td className="px-4 py-2 whitespace-nowrap"><StatusPill status={b.status} /></td>
-              <td className="px-4 py-2 whitespace-nowrap text-gray-600">{b.priority || '—'}</td>
+              <td className="px-3 py-2 text-gray-700 max-w-[220px] truncate">{b.summary}</td>
+              <td className="px-3 py-2 whitespace-nowrap"><StatusPill status={b.status} /></td>
+              <td className="px-3 py-2 whitespace-nowrap text-gray-600 text-xs">{b.priority || '—'}</td>
+              <td className="px-3 py-2 whitespace-nowrap">
+                {b.parent_key
+                  ? <div>
+                      <IssueLink issueKey={b.parent_key} url={`/browse/${b.parent_key}`} />
+                      {b.parent_summary && (
+                        <p className="text-xs text-gray-400 truncate max-w-[140px]">{b.parent_summary}</p>
+                      )}
+                    </div>
+                  : <span className="text-gray-300 text-xs">—</span>}
+              </td>
+              <td className="px-3 py-2">
+                {b.labels && b.labels.length > 0
+                  ? <div className="flex flex-wrap gap-1">
+                      {b.labels.map(l => (
+                        <span key={l} className="inline-block bg-gray-100 text-gray-600 text-xs px-1.5 py-0.5 rounded">{l}</span>
+                      ))}
+                    </div>
+                  : <span className="text-gray-300 text-xs">—</span>}
+              </td>
+              <td className="px-3 py-2 whitespace-nowrap text-xs text-gray-500">{b.created || '—'}</td>
+              <td className="px-3 py-2">
+                {b.found_in_versions && b.found_in_versions.length > 0
+                  ? <div className="flex flex-wrap gap-1">
+                      {b.found_in_versions.map(v => (
+                        <span key={v} className="inline-block bg-blue-50 text-blue-700 text-xs px-1.5 py-0.5 rounded">{v}</span>
+                      ))}
+                    </div>
+                  : <span className="text-gray-300 text-xs">—</span>}
+              </td>
+              <td className="px-3 py-2">
+                {b.components && b.components.length > 0
+                  ? <div className="flex flex-wrap gap-1">
+                      {b.components.map(c => (
+                        <span key={c} className="inline-block bg-purple-50 text-purple-700 text-xs px-1.5 py-0.5 rounded">{c}</span>
+                      ))}
+                    </div>
+                  : <span className="text-gray-300 text-xs">—</span>}
+              </td>
             </tr>
           ))}
         </tbody>

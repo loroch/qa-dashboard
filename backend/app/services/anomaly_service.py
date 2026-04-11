@@ -44,12 +44,20 @@ class AnomalyService:
 
     def _serialize_bug(self, issue: dict) -> dict:
         fields = issue.get("fields", {})
+        parent = fields.get("parent") or {}
+        parent_fields = parent.get("fields") or {}
         return {
             "key": issue["key"],
             "url": self._issue_url(issue["key"]),
             "summary": fields.get("summary", ""),
             "status": (fields.get("status") or {}).get("name", ""),
             "priority": (fields.get("priority") or {}).get("name", ""),
+            "parent_key": parent.get("key", ""),
+            "parent_summary": parent_fields.get("summary", ""),
+            "labels": fields.get("labels") or [],
+            "created": (fields.get("created") or "")[:10],  # YYYY-MM-DD
+            "found_in_versions": [v.get("name", "") for v in (fields.get("versions") or [])],
+            "components": [c.get("name", "") for c in (fields.get("components") or [])],
         }
 
     # ── Section 1: Tests without parent ────────────────────────────────────
@@ -159,7 +167,7 @@ class AnomalyService:
         jql = f'project = TMT0 AND issuetype = Bug AND created >= "-{days}d" ORDER BY created DESC'
         raw = await self.jira.search_issues(
             jql,
-            fields=["summary", "status", "fixVersions", "parent", "customfield_10020", "priority"],
+            fields=["summary", "status", "fixVersions", "versions", "parent", "customfield_10020", "priority", "labels", "created", "components"],
             max_total=5000,
         )
 
