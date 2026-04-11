@@ -461,7 +461,7 @@ function TestsWithoutParentTab() {
                     <td className="px-4 py-3 whitespace-nowrap" onClick={e => e.stopPropagation()}>
                       <IssueLink issueKey={t.key} url={t.url} />
                     </td>
-                    <td className="px-4 py-3 text-gray-700 max-w-xs truncate">{t.summary}</td>
+                    <td className="px-4 py-3 text-gray-700 break-words whitespace-normal">{t.summary}</td>
                     <td className="px-4 py-3 whitespace-nowrap">
                       <StatusPill status={t.status} />
                     </td>
@@ -537,7 +537,7 @@ function BugTable({ bugs, emptyMsg }) {
         <thead className="bg-gray-50 text-xs uppercase tracking-wide text-gray-500">
           <tr>
             <th className="px-3 py-2 text-left whitespace-nowrap">Key</th>
-            <th className="px-3 py-2 text-left">Summary</th>
+            <th className="px-3 py-2 text-left" style={{ resize: 'horizontal', overflow: 'hidden', minWidth: '160px' }}>Summary</th>
             <th className="px-3 py-2 text-left whitespace-nowrap">Status</th>
             <th className="px-3 py-2 text-left whitespace-nowrap">Priority</th>
             <th className="px-3 py-2 text-left whitespace-nowrap">Parent</th>
@@ -553,7 +553,7 @@ function BugTable({ bugs, emptyMsg }) {
               <td className="px-3 py-2 whitespace-nowrap">
                 <IssueLink issueKey={b.key} url={b.url} />
               </td>
-              <td className="px-3 py-2 text-gray-700 max-w-[220px] truncate">{b.summary}</td>
+              <td className="px-3 py-2 text-gray-700 break-words whitespace-normal">{b.summary}</td>
               <td className="px-3 py-2 whitespace-nowrap"><StatusPill status={b.status} /></td>
               <td className="px-3 py-2 whitespace-nowrap text-gray-600 text-xs">{b.priority || '—'}</td>
               <td className="px-3 py-2 whitespace-nowrap">
