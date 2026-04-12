@@ -14,6 +14,9 @@ from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
+# All link type names that indicate a test case covers a story
+TEST_LINK_TYPES = {"Test Case", "Has Test Case", "relates to"}
+
 CACHE_KEY_VERSIONS  = "coverage:versions"
 CACHE_KEY_UNLINKED  = "coverage:unlinked"
 
@@ -104,14 +107,16 @@ class CoverageService:
                 parent = f.get("parent") or {}
                 epic_key = parent.get("key") or f.get("customfield_10014")
 
-                # Count inward "Test Case" links
+                # Count test case links — accept multiple link type names,
+                # check both inward and outward sides
                 links = f.get("issuelinks") or []
-                tc_keys = [
-                    lk["inwardIssue"]["key"]
-                    for lk in links
-                    if lk.get("type", {}).get("name") == "Test Case"
-                    and lk.get("inwardIssue")
-                ]
+                tc_keys = []
+                for lk in links:
+                    if lk.get("type", {}).get("name") in TEST_LINK_TYPES:
+                        for side in ("inwardIssue", "outwardIssue"):
+                            linked = lk.get(side)
+                            if linked:
+                                tc_keys.append(linked["key"])
 
                 stories.append({
                     "key":        issue["key"],
