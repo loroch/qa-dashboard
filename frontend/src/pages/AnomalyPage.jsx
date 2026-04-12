@@ -926,31 +926,29 @@ function MemberCard({ member }) {
             member.comments.length === 0 ? (
               <p className="text-sm text-gray-400 italic px-4 py-3">No comments in this period.</p>
             ) : (
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-xs">
-                  <thead className="bg-white text-gray-400 uppercase tracking-wide border-b border-gray-100">
-                    <tr>
-                      <th className="px-4 py-2 text-left whitespace-nowrap">Issue</th>
-                      <th className="px-4 py-2 text-left">Summary</th>
-                      <th className="px-4 py-2 text-left">Comment Preview</th>
-                      <th className="px-4 py-2 text-left whitespace-nowrap">Time</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-50">
-                    {member.comments.map((c, i) => (
-                      <tr key={i} className="hover:bg-gray-50 align-top">
-                        <td className="px-4 py-2 whitespace-nowrap">
-                          <IssueLink issueKey={c.issue_key} url={c.issue_url} />
-                        </td>
-                        <td className="px-4 py-2 text-gray-600 max-w-[180px] truncate">{c.issue_summary}</td>
-                        <td className="px-4 py-2 text-gray-700 max-w-[320px]">
-                          <p className="line-clamp-3 whitespace-pre-wrap leading-relaxed">{c.comment_preview || '—'}</p>
-                        </td>
-                        <td className="px-4 py-2 whitespace-nowrap text-gray-400">{c.timestamp}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="divide-y divide-gray-100">
+                {member.comments.map((c, i) => (
+                  <div key={i} className="px-4 py-3 hover:bg-gray-50">
+                    {/* Bug label bar */}
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <a
+                        href={c.issue_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 bg-purple-100 text-purple-800 font-mono font-semibold text-xs px-2 py-0.5 rounded hover:bg-purple-200 transition-colors"
+                      >
+                        <MessageSquare size={10} />
+                        {c.issue_key}
+                      </a>
+                      <span className="text-gray-500 text-xs truncate max-w-[320px]">{c.issue_summary}</span>
+                      <span className="ml-auto text-gray-400 text-xs whitespace-nowrap shrink-0">{c.timestamp}</span>
+                    </div>
+                    {/* Comment body */}
+                    <p className="text-gray-700 text-xs leading-relaxed whitespace-pre-wrap pl-1 border-l-2 border-purple-200">
+                      {c.comment_preview || '—'}
+                    </p>
+                  </div>
+                ))}
               </div>
             )
           )}
