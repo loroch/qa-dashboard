@@ -4,7 +4,7 @@ import { Header } from '../components/layout/Header'
 import { IssueTable } from '../components/tables/DataTable'
 import { SummaryCard } from '../components/cards/SummaryCard'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
-import { Bug, AlertTriangle, CheckCircle2, Filter, X } from 'lucide-react'
+import { Bug, AlertTriangle, CheckCircle2, LayoutList } from 'lucide-react'
 import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api', timeout: 60000 })
@@ -15,40 +15,35 @@ const getVersions = () =>
 const getBugsByVersion = (version, signal) =>
   api.get('/dashboard/bugs-by-version', { params: { version }, signal }).then(r => r.data)
 
-// All known Jira statuses we want to offer as filters
-const STATUS_OPTIONS = [
-  'Open',
-  'In Progress',
-  'Ready for Testing',
-  'In Review',
-  'Done',
-  'Closed',
-  'Reopened',
-  'Blocked',
+// Visual config per status — order defines display order
+const STATUS_CONFIG = [
+  { key: 'Open',                  label: 'Open',                  bg: 'bg-gray-50',     border: 'border-gray-300',  text: 'text-gray-700',   activeBg: 'bg-gray-700',    activeText: 'text-white' },
+  { key: 'Reopened',              label: 'Reopened',              bg: 'bg-orange-50',   border: 'border-orange-300',text: 'text-orange-700', activeBg: 'bg-orange-500',  activeText: 'text-white' },
+  { key: 'In Progress',           label: 'In Progress',           bg: 'bg-blue-50',     border: 'border-blue-300',  text: 'text-blue-700',   activeBg: 'bg-blue-600',    activeText: 'text-white' },
+  { key: 'In Review',             label: 'In Review',             bg: 'bg-indigo-50',   border: 'border-indigo-300',text: 'text-indigo-700', activeBg: 'bg-indigo-600',  activeText: 'text-white' },
+  { key: 'Ready for Testing',     label: 'Ready for Testing',     bg: 'bg-purple-50',   border: 'border-purple-300',text: 'text-purple-700', activeBg: 'bg-purple-600',  activeText: 'text-white' },
+  { key: 'Ready for Deployment',  label: 'Ready for Deployment',  bg: 'bg-teal-50',     border: 'border-teal-300',  text: 'text-teal-700',   activeBg: 'bg-teal-600',    activeText: 'text-white' },
+  { key: 'Blocked',               label: 'Blocked',               bg: 'bg-red-50',      border: 'border-red-300',   text: 'text-red-700',    activeBg: 'bg-red-600',     activeText: 'text-white' },
+  { key: 'Done',                  label: 'Done',                  bg: 'bg-green-50',    border: 'border-green-300', text: 'text-green-700',  activeBg: 'bg-green-600',   activeText: 'text-white' },
+  { key: 'Closed',                label: 'Closed',                bg: 'bg-green-50',    border: 'border-green-300', text: 'text-green-700',  activeBg: 'bg-green-700',   activeText: 'text-white' },
 ]
 
-const STATUS_COLORS = {
-  'Done':              'bg-green-100 text-green-700 border-green-200',
-  'Closed':            'bg-green-100 text-green-700 border-green-200',
-  'In Progress':       'bg-blue-100 text-blue-700 border-blue-200',
-  'Ready for Testing': 'bg-purple-100 text-purple-700 border-purple-200',
-  'In Review':         'bg-indigo-100 text-indigo-700 border-indigo-200',
-  'Open':              'bg-gray-100 text-gray-600 border-gray-200',
-  'Reopened':          'bg-orange-100 text-orange-700 border-orange-200',
-  'Blocked':           'bg-red-100 text-red-700 border-red-200',
-}
-
-function StatusPill({ label, active, onClick }) {
-  const base = STATUS_COLORS[label] || 'bg-gray-100 text-gray-600 border-gray-200'
+function StatusToggle({ cfg, count, active, onClick }) {
+  const { label, bg, border, text, activeBg, activeText } = cfg
   return (
     <button
       onClick={onClick}
-      className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-medium border transition-all ${
-        active ? base + ' ring-2 ring-offset-1 ring-current opacity-100' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-400'
-      }`}
+      className={`
+        flex flex-col items-center justify-center px-4 py-3 rounded-xl border-2 font-medium
+        transition-all duration-150 select-none min-w-[120px]
+        ${active
+          ? `${activeBg} ${activeText} border-transparent shadow-md scale-[1.03]`
+          : `${bg} ${text} ${border} hover:shadow-sm hover:scale-[1.01] opacity-80 hover:opacity-100`
+        }
+      `}
     >
-      {active && <X className="h-3 w-3" />}
-      {label}
+      <span className={`text-2xl font-bold leading-none ${active ? activeText : text}`}>{count}</span>
+      <span className={`text-xs mt-1 leading-tight text-center ${active ? 'opacity-90' : 'opacity-75'}`}>{label}</span>
     </button>
   )
 }
@@ -57,7 +52,7 @@ function MiniBar({ label, count, total, color = 'bg-blue-500' }) {
   const pct = total ? Math.round(count / total * 100) : 0
   return (
     <div className="flex items-center gap-2 text-xs">
-      <span className="w-36 text-gray-600 truncate shrink-0">{label}</span>
+      <span className="w-40 text-gray-600 truncate shrink-0">{label}</span>
       <div className="flex-1 bg-gray-100 rounded-full h-2">
         <div className={`${color} h-2 rounded-full`} style={{ width: `${pct}%` }} />
       </div>
@@ -70,14 +65,12 @@ export default function BugsByVersionPage() {
   const [selectedVersion, setSelectedVersion] = useState('')
   const [activeStatuses, setActiveStatuses] = useState(new Set())
 
-  // Fetch all versions (reuse coverage endpoint)
   const { data: versions = [], isLoading: versionsLoading } = useQuery({
     queryKey: ['bug-versions'],
     queryFn: getVersions,
     staleTime: 10 * 60 * 1000,
   })
 
-  // Fetch bugs for selected version
   const {
     data,
     isLoading: bugsLoading,
@@ -94,23 +87,33 @@ export default function BugsByVersionPage() {
   const stats = data?.stats || {}
   const allBugs = data?.bugs || []
 
-  // Statuses actually present in this version's data
-  const presentStatuses = useMemo(() => {
-    const s = new Set(allBugs.map(b => b.status).filter(Boolean))
-    return STATUS_OPTIONS.filter(o => s.has(o))
+  // Count bugs per status (for toggle buttons)
+  const countByStatus = useMemo(() => {
+    const m = {}
+    for (const b of allBugs) {
+      const s = b.status || 'Unknown'
+      m[s] = (m[s] || 0) + 1
+    }
+    return m
   }, [allBugs])
 
-  // Apply status filter
+  // Only show statuses that actually have bugs
+  const presentConfigs = useMemo(
+    () => STATUS_CONFIG.filter(c => countByStatus[c.key] > 0),
+    [countByStatus]
+  )
+
+  // Apply multi-status filter
   const visibleBugs = useMemo(() => {
     if (activeStatuses.size === 0) return allBugs
     return allBugs.filter(b => activeStatuses.has(b.status))
   }, [allBugs, activeStatuses])
 
-  function toggleStatus(s) {
+  function toggleStatus(key) {
     setActiveStatuses(prev => {
       const next = new Set(prev)
-      if (next.has(s)) next.delete(s)
-      else next.add(s)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
   }
@@ -119,14 +122,14 @@ export default function BugsByVersionPage() {
     setActiveStatuses(new Set())
   }
 
+  const isFiltered = activeStatuses.size > 0
+
   return (
     <div className="flex-1 flex flex-col">
-      <Header
-        title="Bugs by Version"
-        onRefresh={() => refetch()}
-      />
+      <Header title="Bugs by Version" onRefresh={() => refetch()} />
 
       <div className="flex-1 p-6 space-y-5 overflow-auto">
+
         {/* Version selector */}
         <div className="card flex items-center gap-4">
           <label className="text-sm font-medium text-gray-700 shrink-0">Fix Version</label>
@@ -134,9 +137,12 @@ export default function BugsByVersionPage() {
             <span className="text-sm text-gray-400">Loading versions…</span>
           ) : (
             <select
-              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-[260px]"
+              className="border border-gray-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-500 min-w-[280px]"
               value={selectedVersion}
-              onChange={e => { setSelectedVersion(e.target.value); setActiveStatuses(new Set()) }}
+              onChange={e => {
+                setSelectedVersion(e.target.value)
+                setActiveStatuses(new Set())
+              }}
             >
               <option value="">— Select a version —</option>
               {versions.map(v => (
@@ -148,17 +154,12 @@ export default function BugsByVersionPage() {
           )}
         </div>
 
-        {/* Loading */}
         {bugsLoading && selectedVersion && (
           <div className="flex justify-center py-16"><PageLoader /></div>
         )}
 
-        {/* Error */}
-        {isError && (
-          <ErrorState message={error?.message} onRetry={refetch} />
-        )}
+        {isError && <ErrorState message={error?.message} onRetry={refetch} />}
 
-        {/* Results */}
         {data && !bugsLoading && (
           <>
             {/* Summary cards */}
@@ -167,43 +168,52 @@ export default function BugsByVersionPage() {
               <SummaryCard title="Open Bugs" value={stats.open ?? 0} icon={AlertTriangle} color="orange" />
               <SummaryCard title="High / Critical" value={stats.high_critical ?? 0} icon={AlertTriangle} color="red" />
               <SummaryCard
-                title="Showing"
+                title={isFiltered ? 'Showing (filtered)' : 'Showing (all)'}
                 value={visibleBugs.length}
-                icon={CheckCircle2}
-                color={activeStatuses.size > 0 ? 'blue' : 'green'}
+                icon={isFiltered ? CheckCircle2 : LayoutList}
+                color={isFiltered ? 'blue' : 'green'}
               />
             </div>
 
-            {/* Status filter pills */}
-            {presentStatuses.length > 0 && (
+            {/* Status filter toggles */}
+            {presentConfigs.length > 0 && (
               <div className="card">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="flex items-center gap-1 text-xs font-medium text-gray-500 mr-1">
-                    <Filter className="h-3.5 w-3.5" /> Filter by status:
-                  </span>
-                  {presentStatuses.map(s => (
-                    <StatusPill
-                      key={s}
-                      label={s}
-                      active={activeStatuses.has(s)}
-                      onClick={() => toggleStatus(s)}
-                    />
-                  ))}
-                  {activeStatuses.size > 0 && (
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-sm font-semibold text-gray-700">
+                    Filter by Status
+                    <span className="ml-2 text-xs font-normal text-gray-400">— click one or more to combine</span>
+                  </p>
+                  {isFiltered && (
                     <button
                       onClick={clearFilters}
-                      className="text-xs text-gray-400 hover:text-gray-600 ml-2 underline"
+                      className="text-xs text-brand-600 hover:text-brand-800 font-medium underline"
                     >
-                      Clear all
+                      Show all ({allBugs.length})
                     </button>
                   )}
                 </div>
+                <div className="flex flex-wrap gap-3">
+                  {presentConfigs.map(cfg => (
+                    <StatusToggle
+                      key={cfg.key}
+                      cfg={cfg}
+                      count={countByStatus[cfg.key] || 0}
+                      active={activeStatuses.has(cfg.key)}
+                      onClick={() => toggleStatus(cfg.key)}
+                    />
+                  ))}
+                </div>
+                {isFiltered && (
+                  <p className="mt-3 text-xs text-gray-500">
+                    Showing <strong>{visibleBugs.length}</strong> of <strong>{allBugs.length}</strong> bugs
+                    for: {[...activeStatuses].join(' + ')}
+                  </p>
+                )}
               </div>
             )}
 
             {/* Charts row */}
             <div className="grid grid-cols-2 gap-4">
-              {/* By Status */}
               {stats.by_status?.length > 0 && (
                 <div className="card">
                   <h3 className="text-sm font-semibold text-gray-700 mb-3">By Status</h3>
@@ -215,10 +225,14 @@ export default function BugsByVersionPage() {
                         count={count}
                         total={stats.total}
                         color={
-                          status === 'Done' || status === 'Closed' ? 'bg-green-500' :
-                          status === 'In Progress' ? 'bg-blue-500' :
-                          status === 'Ready for Testing' ? 'bg-purple-500' :
-                          status === 'Blocked' ? 'bg-red-500' : 'bg-gray-400'
+                          status === 'Done' || status === 'Closed'         ? 'bg-green-500' :
+                          status === 'In Progress'                          ? 'bg-blue-500'  :
+                          status === 'In Review'                            ? 'bg-indigo-500':
+                          status === 'Ready for Testing'                    ? 'bg-purple-500':
+                          status === 'Ready for Deployment'                 ? 'bg-teal-500'  :
+                          status === 'Blocked'                              ? 'bg-red-500'   :
+                          status === 'Reopened'                             ? 'bg-orange-500':
+                          'bg-gray-400'
                         }
                       />
                     ))}
@@ -226,7 +240,6 @@ export default function BugsByVersionPage() {
                 </div>
               )}
 
-              {/* By Priority */}
               {stats.by_priority?.length > 0 && (
                 <div className="card">
                   <h3 className="text-sm font-semibold text-gray-700 mb-3">By Priority</h3>
@@ -238,10 +251,11 @@ export default function BugsByVersionPage() {
                         count={count}
                         total={stats.total}
                         color={
-                          priority === 'Highest' || priority === 'Critical' ? 'bg-red-600' :
-                          priority === 'High' ? 'bg-orange-500' :
-                          priority === 'Medium' ? 'bg-yellow-500' :
-                          priority === 'Low' || priority === 'Lowest' ? 'bg-green-400' : 'bg-gray-300'
+                          priority === 'Highest' || priority === 'Critical' ? 'bg-red-600'    :
+                          priority === 'High'                                ? 'bg-orange-500' :
+                          priority === 'Medium'                              ? 'bg-yellow-500' :
+                          priority === 'Low' || priority === 'Lowest'        ? 'bg-green-400'  :
+                          'bg-gray-300'
                         }
                       />
                     ))}
@@ -272,17 +286,18 @@ export default function BugsByVersionPage() {
             <div className="card">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="text-sm font-semibold text-gray-700">
-                  All Bugs
-                  {activeStatuses.size > 0 && (
-                    <span className="ml-2 text-xs font-normal text-gray-400">
-                      — filtered: {[...activeStatuses].join(', ')}
-                    </span>
-                  )}
+                  {isFiltered
+                    ? `Bugs — ${[...activeStatuses].join(' + ')}`
+                    : 'All Bugs'}
                 </h3>
-                <span className="text-xs text-gray-400">{visibleBugs.length} bug{visibleBugs.length !== 1 ? 's' : ''}</span>
+                <span className="text-xs text-gray-400">
+                  {visibleBugs.length} bug{visibleBugs.length !== 1 ? 's' : ''}
+                </span>
               </div>
               {visibleBugs.length === 0 ? (
-                <p className="text-sm text-gray-400 text-center py-8">No bugs match the selected filters.</p>
+                <p className="text-sm text-gray-400 text-center py-8">
+                  No bugs match the selected statuses.
+                </p>
               ) : (
                 <IssueTable issues={visibleBugs} />
               )}
@@ -290,7 +305,6 @@ export default function BugsByVersionPage() {
           </>
         )}
 
-        {/* Empty state — no version selected */}
         {!selectedVersion && !versionsLoading && (
           <div className="flex flex-col items-center justify-center py-24 text-gray-400">
             <Bug className="h-12 w-12 mb-3 opacity-30" />
