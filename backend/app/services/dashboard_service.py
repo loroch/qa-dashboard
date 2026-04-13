@@ -249,6 +249,65 @@ class DashboardService:
             self.cache.invalidate(CACHE_KEY_BLOCKERS)
         return await self.cache.get_or_fetch(CACHE_KEY_BLOCKERS, lambda: self._fetch_blockers(filters))
 
+    async def get_bugs_by_version(self, version: str, force_refresh: bool = False) -> dict:
+        import hashlib
+        cache_key = f"dashboard:bugs_by_version:{hashlib.md5(version.encode()).hexdigest()[:8]}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                f'project = TMT0 AND issuetype = Bug AND fixVersion = "{version}" '
+                f'ORDER BY created DESC'
+            )
+            issues_raw = await self.jira.search_issues(
+                jql,
+                fields=[
+                    "summary", "status", "priority", "reporter", "assignee",
+                    "created", "updated", "labels", "components",
+                    "fixVersions", "parent", "customfield_10020",
+                ],
+                max_total=2000,
+            )
+            bugs = self.mapper.map_issues(issues_raw)
+
+            by_status: dict[str, int] = defaultdict(int)
+            by_priority: dict[str, int] = defaultdict(int)
+            by_reporter: dict[str, int] = defaultdict(int)
+            for b in bugs:
+                by_status[b.get("status") or "Unknown"] += 1
+                by_priority[b.get("priority") or "None"] += 1
+                reporter_name = (b.get("reporter") or {}).get("display_name") or "Unknown"
+                by_reporter[reporter_name] += 1
+
+            open_bugs = sum(1 for b in bugs if b.get("status_category") != "Done")
+            high_critical = sum(1 for b in bugs if b.get("priority") in ("Highest", "Critical", "High"))
+            priority_order = ["Highest", "Critical", "High", "Medium", "Low", "Lowest", "None"]
+
+            return {
+                "version": version,
+                "bugs": bugs,
+                "stats": {
+                    "total": len(bugs),
+                    "open": open_bugs,
+                    "high_critical": high_critical,
+                    "by_status": [
+                        {"status": s, "count": c}
+                        for s, c in sorted(by_status.items(), key=lambda x: -x[1])
+                    ],
+                    "by_priority": [
+                        {"priority": p, "count": by_priority[p]}
+                        for p in priority_order if p in by_priority
+                    ],
+                    "by_reporter": [
+                        {"reporter": r, "count": c}
+                        for r, c in sorted(by_reporter.items(), key=lambda x: -x[1])
+                    ],
+                },
+            }
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
+
     def _assemble_dashboard(
         self,
         rft: list[dict],

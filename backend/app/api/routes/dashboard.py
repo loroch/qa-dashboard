@@ -115,6 +115,25 @@ async def get_blockers(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/bugs-by-version")
+async def get_bugs_by_version(
+    version: str = Query(..., description="Fix version name"),
+    statuses: Optional[str] = Query(None, description="Comma-separated statuses to filter"),
+    refresh: bool = Query(False),
+):
+    """All bugs for a specific fix version with stats. Statuses filtered server-side."""
+    try:
+        svc = get_dashboard_service()
+        data = await svc.get_bugs_by_version(version, force_refresh=refresh)
+        if statuses:
+            sl = [s.strip().lower() for s in statuses.split(",")]
+            data = {**data, "bugs": [b for b in data["bugs"] if (b.get("status") or "").lower() in sl]}
+        return data
+    except Exception as e:
+        logger.error(f"Bugs-by-version error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/refresh")
 async def manual_refresh():
     """Trigger a full manual cache refresh."""

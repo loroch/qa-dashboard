@@ -28,6 +28,9 @@ export const getBugs = (params = {}) =>
 export const getBlockers = (params = {}) =>
   api.get('/dashboard/blockers', { params })
 
+export const getBugsByVersion = (version, params = {}) =>
+  api.get('/dashboard/bugs-by-version', { params: { version, ...params } })
+
 export const triggerRefresh = () =>
   api.post('/dashboard/refresh')
 
