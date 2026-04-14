@@ -331,17 +331,16 @@ class AnomalyService:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%S%z")
 
+        _extra_fields = ["summary", "status", "priority", "parent",
+                         "fixVersions", "customfield_10020", "comment"]
+
         # Fetch recently updated TMT0 bugs (for status changes + comments)
         jql = f'project = TMT0 AND issuetype = Bug AND updated >= "-{days}d" ORDER BY updated DESC'
         raw, created_raw = await asyncio.gather(
-            self.jira.search_issues(
-                jql,
-                fields=["summary", "status", "comment"],
-                max_total=500,
-            ),
+            self.jira.search_issues(jql, fields=_extra_fields, max_total=500),
             self.jira.search_issues(
                 f'project = TMT0 AND issuetype = Bug AND created >= "-{days}d" AND creator in ({team_ids_jql}) ORDER BY created DESC',
-                fields=["summary", "status", "priority", "creator", "created"],
+                fields=_extra_fields + ["creator", "created"],
                 max_total=500,
             ),
         )
@@ -365,8 +364,34 @@ class AnomalyService:
         changelog_results = await asyncio.gather(*[fetch_changelog(k) for k in issue_keys])
         changelog_by_key = {k: v for k, v in changelog_results}
 
-        # Build issue summary lookup
-        summary_by_key = {i["key"]: (i.get("fields") or {}).get("summary", "") for i in raw}
+        # Build per-issue metadata lookup (summary, parent, fix versions, sprint, priority)
+        def _extract_sprint(sprint_val):
+            if not sprint_val:
+                return ""
+            items = sprint_val if isinstance(sprint_val, list) else [sprint_val]
+            for s in reversed(items):
+                if isinstance(s, dict):
+                    return s.get("name", "")
+                if isinstance(s, str) and "name=" in s:
+                    return s.split("name=")[1].split(",")[0]
+            return ""
+
+        def _meta(issue: dict) -> dict:
+            f = issue.get("fields") or {}
+            parent = f.get("parent") or {}
+            fix_vers = ", ".join(v.get("name", "") for v in (f.get("fixVersions") or []))
+            sprint = _extract_sprint(f.get("customfield_10020"))
+            priority = (f.get("priority") or {}).get("name", "")
+            parent_name = parent.get("fields", {}).get("summary", "") or parent.get("key", "")
+            return {
+                "summary": f.get("summary", ""),
+                "parent_name": parent_name,
+                "fix_versions": fix_vers,
+                "sprint": sprint,
+                "priority": priority,
+            }
+
+        meta_by_key = {i["key"]: _meta(i) for i in raw}
 
         # Initialise per-member buckets
         members_data: dict[str, dict] = {}
@@ -398,10 +423,15 @@ class AnomalyService:
 
                 for item in entry.get("items", []):
                     if item.get("field") == "status":
+                        m = meta_by_key.get(issue_key, {})
                         members_data[author_id]["status_changes"].append({
                             "issue_key": issue_key,
                             "issue_url": self._issue_url(issue_key),
-                            "issue_summary": summary_by_key.get(issue_key, ""),
+                            "issue_summary": m.get("summary", ""),
+                            "parent_name": m.get("parent_name", ""),
+                            "fix_versions": m.get("fix_versions", ""),
+                            "sprint": m.get("sprint", ""),
+                            "priority": m.get("priority", ""),
                             "from_status": item.get("fromString", ""),
                             "to_status": item.get("toString", ""),
                             "timestamp": created_str[:16].replace("T", " "),
@@ -430,10 +460,15 @@ class AnomalyService:
                 body = comment.get("body") or {}
                 text = self._extract_adf_text(body) if isinstance(body, dict) else str(body)
 
+                m = meta_by_key.get(issue_key, {})
                 members_data[author_id]["comments"].append({
                     "issue_key": issue_key,
                     "issue_url": self._issue_url(issue_key),
-                    "issue_summary": summary_by_key.get(issue_key, ""),
+                    "issue_summary": m.get("summary", ""),
+                    "parent_name": m.get("parent_name", ""),
+                    "fix_versions": m.get("fix_versions", ""),
+                    "sprint": m.get("sprint", ""),
+                    "priority": m.get("priority", ""),
                     "comment_preview": text[:300].strip(),
                     "timestamp": created_str[:16].replace("T", " "),
                 })
@@ -450,10 +485,17 @@ class AnomalyService:
             status = (fields.get("status") or {}).get("name", "")
             priority = (fields.get("priority") or {}).get("name", "")
             summary = fields.get("summary", "")
+            parent = fields.get("parent") or {}
+            parent_name = parent.get("fields", {}).get("summary", "") or parent.get("key", "")
+            fix_versions = ", ".join(v.get("name", "") for v in (fields.get("fixVersions") or []))
+            sprint = _extract_sprint(fields.get("customfield_10020"))
             members_data[creator_id]["bugs_opened"].append({
                 "issue_key": issue_key,
                 "issue_url": self._issue_url(issue_key),
                 "issue_summary": summary,
+                "parent_name": parent_name,
+                "fix_versions": fix_versions,
+                "sprint": sprint,
                 "status": status,
                 "priority": priority,
                 "timestamp": created_str,

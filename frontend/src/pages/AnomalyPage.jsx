@@ -42,6 +42,20 @@ function StatusPill({ status }) {
   )
 }
 
+function PriorityBadge({ priority }) {
+  const cls =
+    priority === 'Highest' || priority === 'Critical' ? 'bg-red-100 text-red-700' :
+    priority === 'High'    ? 'bg-orange-100 text-orange-700' :
+    priority === 'Medium'  ? 'bg-yellow-100 text-yellow-700' :
+    priority === 'Low' || priority === 'Lowest' ? 'bg-green-100 text-green-700' :
+    'bg-gray-100 text-gray-500'
+  return (
+    <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${cls}`}>
+      {priority || '—'}
+    </span>
+  )
+}
+
 function IssueLink({ issueKey, url }) {
   if (!issueKey) return <span className="text-gray-400">—</span>
   return (
@@ -905,6 +919,10 @@ function MemberCard({ member }) {
                     <tr>
                       <th className="px-4 py-2 text-left whitespace-nowrap">Issue</th>
                       <th className="px-4 py-2 text-left">Summary</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Parent</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Fix Version</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Sprint</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Priority</th>
                       <th className="px-4 py-2 text-left whitespace-nowrap">From</th>
                       <th className="px-4 py-2 text-left whitespace-nowrap">To</th>
                       <th className="px-4 py-2 text-left whitespace-nowrap">Time</th>
@@ -916,7 +934,13 @@ function MemberCard({ member }) {
                         <td className="px-4 py-2 whitespace-nowrap">
                           <IssueLink issueKey={sc.issue_key} url={sc.issue_url} />
                         </td>
-                        <td className="px-4 py-2 text-gray-600 max-w-[240px] truncate">{sc.issue_summary}</td>
+                        <td className="px-4 py-2 text-gray-600 max-w-[200px] truncate">{sc.issue_summary}</td>
+                        <td className="px-4 py-2 text-gray-500 max-w-[140px] truncate">{sc.parent_name || '—'}</td>
+                        <td className="px-4 py-2 whitespace-nowrap text-gray-500">{sc.fix_versions || '—'}</td>
+                        <td className="px-4 py-2 text-gray-500 max-w-[120px] truncate">{sc.sprint || '—'}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <PriorityBadge priority={sc.priority} />
+                        </td>
                         <td className="px-4 py-2 whitespace-nowrap">
                           <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{sc.from_status || '—'}</span>
                         </td>
@@ -940,29 +964,49 @@ function MemberCard({ member }) {
             member.comments.length === 0 ? (
               <p className="text-sm text-gray-400 italic px-4 py-3">No comments in this period.</p>
             ) : (
-              <div className="divide-y divide-gray-100">
-                {member.comments.map((c, i) => (
-                  <div key={i} className="px-4 py-3 hover:bg-gray-50">
-                    {/* Bug label bar */}
-                    <div className="flex items-center gap-2 mb-1.5">
-                      <a
-                        href={c.issue_url}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1 bg-purple-100 text-purple-800 font-mono font-semibold text-xs px-2 py-0.5 rounded hover:bg-purple-200 transition-colors"
-                      >
-                        <MessageSquare size={10} />
-                        {c.issue_key}
-                      </a>
-                      <span className="text-gray-500 text-xs truncate max-w-[320px]">{c.issue_summary}</span>
-                      <span className="ml-auto text-gray-400 text-xs whitespace-nowrap shrink-0">{c.timestamp}</span>
-                    </div>
-                    {/* Comment body */}
-                    <p className="text-gray-700 text-xs leading-relaxed whitespace-pre-wrap pl-1 border-l-2 border-purple-200">
-                      {c.comment_preview || '—'}
-                    </p>
-                  </div>
-                ))}
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-white text-gray-400 uppercase tracking-wide border-b border-gray-100">
+                    <tr>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Issue</th>
+                      <th className="px-4 py-2 text-left">Summary</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Parent</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Fix Version</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Sprint</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Priority</th>
+                      <th className="px-4 py-2 text-left">Comment</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Time</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {member.comments.map((c, i) => (
+                      <tr key={i} className="hover:bg-purple-50 align-top">
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <a
+                            href={c.issue_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 font-mono text-purple-700 hover:text-purple-900 hover:underline"
+                          >
+                            <MessageSquare size={10} />
+                            {c.issue_key}
+                          </a>
+                        </td>
+                        <td className="px-4 py-2 text-gray-600 max-w-[160px] truncate">{c.issue_summary}</td>
+                        <td className="px-4 py-2 text-gray-500 max-w-[120px] truncate">{c.parent_name || '—'}</td>
+                        <td className="px-4 py-2 whitespace-nowrap text-gray-500">{c.fix_versions || '—'}</td>
+                        <td className="px-4 py-2 text-gray-500 max-w-[120px] truncate">{c.sprint || '—'}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <PriorityBadge priority={c.priority} />
+                        </td>
+                        <td className="px-4 py-2 text-gray-700 max-w-[260px]">
+                          <p className="line-clamp-2 whitespace-pre-wrap leading-relaxed">{c.comment_preview || '—'}</p>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-gray-400">{c.timestamp}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )
           )}
@@ -978,6 +1022,9 @@ function MemberCard({ member }) {
                     <tr>
                       <th className="px-4 py-2 text-left whitespace-nowrap">Issue</th>
                       <th className="px-4 py-2 text-left">Summary</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Parent</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Fix Version</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Sprint</th>
                       <th className="px-4 py-2 text-left whitespace-nowrap">Status</th>
                       <th className="px-4 py-2 text-left whitespace-nowrap">Priority</th>
                       <th className="px-4 py-2 text-left whitespace-nowrap">Opened</th>
@@ -997,17 +1044,15 @@ function MemberCard({ member }) {
                             {b.issue_key}
                           </a>
                         </td>
-                        <td className="px-4 py-2 text-gray-600 max-w-[240px] truncate">{b.issue_summary}</td>
+                        <td className="px-4 py-2 text-gray-600 max-w-[200px] truncate">{b.issue_summary}</td>
+                        <td className="px-4 py-2 text-gray-500 max-w-[140px] truncate">{b.parent_name || '—'}</td>
+                        <td className="px-4 py-2 whitespace-nowrap text-gray-500">{b.fix_versions || '—'}</td>
+                        <td className="px-4 py-2 text-gray-500 max-w-[120px] truncate">{b.sprint || '—'}</td>
                         <td className="px-4 py-2 whitespace-nowrap">
                           <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{b.status || '—'}</span>
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap">
-                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
-                            b.priority === 'Highest' || b.priority === 'Critical' ? 'bg-red-100 text-red-700' :
-                            b.priority === 'High' ? 'bg-orange-100 text-orange-700' :
-                            b.priority === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
-                            'bg-gray-100 text-gray-600'
-                          }`}>{b.priority || '—'}</span>
+                          <PriorityBadge priority={b.priority} />
                         </td>
                         <td className="px-4 py-2 whitespace-nowrap text-gray-400">{b.timestamp}</td>
                       </tr>
