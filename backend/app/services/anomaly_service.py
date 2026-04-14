@@ -325,20 +325,28 @@ class AnomalyService:
         team_members = mapping["jira"]["team_members"]  # [{id, name, role}]
         team_ids = {m["id"] for m in team_members}
         member_by_id = {m["id"]: m for m in team_members}
+        team_ids_jql = ", ".join(team_ids)
 
         # Cutoff timestamp
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
         cutoff_str = cutoff.strftime("%Y-%m-%dT%H:%M:%S%z")
 
-        # Fetch recently updated TMT0 bugs
+        # Fetch recently updated TMT0 bugs (for status changes + comments)
         jql = f'project = TMT0 AND issuetype = Bug AND updated >= "-{days}d" ORDER BY updated DESC'
-        raw = await self.jira.search_issues(
-            jql,
-            fields=["summary", "status", "comment"],
-            max_total=500,
+        raw, created_raw = await asyncio.gather(
+            self.jira.search_issues(
+                jql,
+                fields=["summary", "status", "comment"],
+                max_total=500,
+            ),
+            self.jira.search_issues(
+                f'project = TMT0 AND issuetype = Bug AND created >= "-{days}d" AND creator in ({team_ids_jql}) ORDER BY created DESC',
+                fields=["summary", "status", "priority", "creator", "created"],
+                max_total=500,
+            ),
         )
 
-        if not raw:
+        if not raw and not created_raw:
             return self._empty_activity(team_members)
 
         # Fetch changelogs for all issues concurrently (max 20 at a time)
@@ -369,6 +377,7 @@ class AnomalyService:
                 "role": m.get("role", ""),
                 "status_changes": [],
                 "comments": [],
+                "bugs_opened": [],
             }
 
         # Extract status changes from changelogs
@@ -429,13 +438,35 @@ class AnomalyService:
                     "timestamp": created_str[:16].replace("T", " "),
                 })
 
+        # Extract bugs opened (created) by team members
+        for issue in created_raw:
+            issue_key = issue["key"]
+            fields = issue.get("fields") or {}
+            creator = fields.get("creator") or {}
+            creator_id = creator.get("accountId", "")
+            if creator_id not in team_ids:
+                continue
+            created_str = (fields.get("created") or "")[:16].replace("T", " ")
+            status = (fields.get("status") or {}).get("name", "")
+            priority = (fields.get("priority") or {}).get("name", "")
+            summary = fields.get("summary", "")
+            members_data[creator_id]["bugs_opened"].append({
+                "issue_key": issue_key,
+                "issue_url": self._issue_url(issue_key),
+                "issue_summary": summary,
+                "status": status,
+                "priority": priority,
+                "timestamp": created_str,
+            })
+
         # Sort each member's activity by timestamp descending
         for md in members_data.values():
             md["status_changes"].sort(key=lambda x: x["timestamp"], reverse=True)
             md["comments"].sort(key=lambda x: x["timestamp"], reverse=True)
+            md["bugs_opened"].sort(key=lambda x: x["timestamp"], reverse=True)
 
         members = list(members_data.values())
-        total = sum(len(m["status_changes"]) + len(m["comments"]) for m in members)
+        total = sum(len(m["status_changes"]) + len(m["comments"]) + len(m["bugs_opened"]) for m in members)
 
         return {
             "members": members,
@@ -448,7 +479,7 @@ class AnomalyService:
         return {
             "members": [
                 {"account_id": m["id"], "name": m["name"], "role": m.get("role", ""),
-                 "status_changes": [], "comments": []}
+                 "status_changes": [], "comments": [], "bugs_opened": []}
                 for m in team_members
             ],
             "total_activities": 0,

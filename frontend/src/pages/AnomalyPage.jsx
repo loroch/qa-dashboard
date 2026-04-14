@@ -5,7 +5,7 @@ import { Header } from '../components/layout/Header'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import {
   ExternalLink, Zap, AlertCircle, ChevronDown, ChevronRight,
-  X, Check, ArrowRight, MessageSquare, User
+  X, Check, ArrowRight, MessageSquare, User, Bug
 } from 'lucide-react'
 import axios from 'axios'
 
@@ -825,8 +825,8 @@ function ActivityDaysPicker({ value, onChange }) {
 }
 
 function MemberCard({ member }) {
-  const [section, setSection] = useState('status') // 'status' | 'comments'
-  const totalActivity = member.status_changes.length + member.comments.length
+  const [section, setSection] = useState('status') // 'status' | 'comments' | 'opened'
+  const totalActivity = member.status_changes.length + member.comments.length + (member.bugs_opened || []).length
   const initials = member.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
 
   return (
@@ -848,6 +848,10 @@ function MemberCard({ member }) {
           <span className="flex items-center gap-1 text-purple-700 font-medium">
             <MessageSquare size={12} />
             {member.comments.length} comments
+          </span>
+          <span className="flex items-center gap-1 text-red-600 font-medium">
+            <Bug size={12} />
+            {(member.bugs_opened || []).length} bugs opened
           </span>
         </div>
       </div>
@@ -877,6 +881,16 @@ function MemberCard({ member }) {
               }`}
             >
               Comments ({member.comments.length})
+            </button>
+            <button
+              onClick={() => setSection('opened')}
+              className={`pb-2 text-xs font-medium transition-colors border-b-2 ${
+                section === 'opened'
+                  ? 'border-red-500 text-red-600'
+                  : 'border-transparent text-gray-400 hover:text-gray-600'
+              }`}
+            >
+              Bugs Opened ({(member.bugs_opened || []).length})
             </button>
           </div>
 
@@ -952,6 +966,57 @@ function MemberCard({ member }) {
               </div>
             )
           )}
+
+          {/* Bugs Opened table */}
+          {section === 'opened' && (
+            (member.bugs_opened || []).length === 0 ? (
+              <p className="text-sm text-gray-400 italic px-4 py-3">No bugs opened in this period.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead className="bg-white text-gray-400 uppercase tracking-wide border-b border-gray-100">
+                    <tr>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Issue</th>
+                      <th className="px-4 py-2 text-left">Summary</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Status</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Priority</th>
+                      <th className="px-4 py-2 text-left whitespace-nowrap">Opened</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-50">
+                    {(member.bugs_opened || []).map((b, i) => (
+                      <tr key={i} className="hover:bg-red-50">
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <a
+                            href={b.issue_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="inline-flex items-center gap-1 font-mono text-sm text-red-600 hover:text-red-800 hover:underline"
+                          >
+                            <Bug size={11} />
+                            {b.issue_key}
+                          </a>
+                        </td>
+                        <td className="px-4 py-2 text-gray-600 max-w-[240px] truncate">{b.issue_summary}</td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <span className="bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded text-xs">{b.status || '—'}</span>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap">
+                          <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                            b.priority === 'Highest' || b.priority === 'Critical' ? 'bg-red-100 text-red-700' :
+                            b.priority === 'High' ? 'bg-orange-100 text-orange-700' :
+                            b.priority === 'Medium' ? 'bg-yellow-100 text-yellow-700' :
+                            'bg-gray-100 text-gray-600'
+                          }`}>{b.priority || '—'}</span>
+                        </td>
+                        <td className="px-4 py-2 whitespace-nowrap text-gray-400">{b.timestamp}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
         </>
       )}
     </div>
@@ -998,8 +1063,8 @@ function TeamActivityTab() {
               {data.members
                 .slice()
                 .sort((a, b) =>
-                  (b.status_changes.length + b.comments.length) -
-                  (a.status_changes.length + a.comments.length)
+                  (b.status_changes.length + b.comments.length + (b.bugs_opened || []).length) -
+                  (a.status_changes.length + a.comments.length + (a.bugs_opened || []).length)
                 )
                 .map(member => (
                   <MemberCard key={member.account_id} member={member} />
