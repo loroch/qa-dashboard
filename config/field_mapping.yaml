@@ -70,8 +70,8 @@ jira:
   # [ASSUMPTION] Display names are placeholders - update with real names
   # ---------------------------------------------------------------------------
   team_members:
-    - id: "63d64812010d3563796fce79"
-      name: "anats"
+    - id: "712020:d844f1ce-4a41-46b1-8524-b93bbb948a84"
+      name: "Anat Serban"
       role: "QA Engineer"
 
     - id: "63d64903491b20ef64b750db"
