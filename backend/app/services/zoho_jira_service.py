@@ -95,12 +95,10 @@ class ZohoJiraService:
             raw = await self.zoho.get_all_tickets(max_total=2000)
             tickets = map_tickets(raw, self.desk_base_url)
 
-            # 2. Filter tickets that have a Jira key
-            linked = [t for t in tickets if t.get("jira_key")]
-            logger.info(f"Zoho-Jira: {len(linked)} tickets have Jira keys")
-
-            if not linked:
-                return []
+            # 2. Split: tickets with and without Jira keys
+            linked  = [t for t in tickets if t.get("jira_key")]
+            unlinked = [t for t in tickets if not t.get("jira_key")]
+            logger.info(f"Zoho-Jira: {len(linked)} linked, {len(unlinked)} unlinked")
 
             # 3. Deduplicate Jira keys
             jira_keys = list({t["jira_key"] for t in linked})
@@ -142,11 +140,9 @@ class ZohoJiraService:
                     logger.error(f"Jira batch fetch error: {e}")
 
             # 5. Join Zoho tickets with Jira data
-            result = []
-            for ticket in linked:
-                jira_key = ticket["jira_key"]
-                jira = jira_data.get(jira_key, {})
-                result.append({
+            def _zoho_row(ticket: dict, jira_key: str | None = None) -> dict:
+                jira = jira_data.get(jira_key, {}) if jira_key else {}
+                return {
                     # Zoho fields
                     "zoho_ticket_number": ticket["ticket_number"],
                     "zoho_id": ticket["id"],
@@ -160,20 +156,26 @@ class ZohoJiraService:
                     "zoho_days_open": ticket["days_open"],
                     "zoho_aging_level": ticket["aging_level"],
                     "zoho_created": ticket["created"],
-                    # Jira fields
-                    "bug_id": ticket["bug_id"],
-                    "jira_key": jira_key,
-                    "jira_url": jira.get("jira_url", f"{self.jira_base_url}/browse/{jira_key}"),
+                    # Jira fields (empty for unlinked tickets)
+                    "bug_id": ticket.get("bug_id") or "",
+                    "jira_key": jira_key or "",
+                    "jira_url": jira.get("jira_url", f"{self.jira_base_url}/browse/{jira_key}" if jira_key else ""),
                     "jira_found": bool(jira),
                     "jira_summary": jira.get("jira_summary", ""),
-                    "jira_status": jira.get("jira_status", "Not found"),
+                    "jira_status": jira.get("jira_status", "Not found") if jira_key else "",
                     "jira_status_category": jira.get("jira_status_category", ""),
                     "jira_priority": jira.get("jira_priority", ""),
                     "jira_fix_versions": jira.get("jira_fix_versions", []),
                     "jira_parent_key": jira.get("jira_parent_key"),
                     "jira_parent_summary": jira.get("jira_parent_summary", ""),
                     "jira_epic": jira.get("jira_epic", ""),
-                })
+                }
+
+            result = []
+            for ticket in linked:
+                result.append(_zoho_row(ticket, ticket["jira_key"]))
+            for ticket in unlinked:
+                result.append(_zoho_row(ticket, None))
 
             return sorted(result, key=lambda x: x["zoho_ticket_number"], reverse=True)
 
