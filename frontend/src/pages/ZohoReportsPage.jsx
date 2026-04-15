@@ -4,7 +4,7 @@ import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { Header } from '../components/layout/Header'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import { AgingBadge } from '../components/common/Badge'
-import { ExternalLink, Link, BarChart2, ChevronUp, ChevronDown, X, Calendar } from 'lucide-react'
+import { ExternalLink, Link, BarChart2, ChevronUp, ChevronDown, X, Calendar, Unlink } from 'lucide-react'
 import { format, parseISO, subMonths } from 'date-fns'
 import axios from 'axios'
 
@@ -88,6 +88,7 @@ export default function ZohoReportsPage() {
   const [filterZohoStatus, setFilterZohoStatus] = useState('')
   const [filterJiraStatus, setFilterJiraStatus] = useState('')
   const [filterBugId, setFilterBugId]           = useState('')
+  const [filterNoBug, setFilterNoBug]           = useState(false)
   const [sort, setSort] = useState({ field: 'zoho_ticket_number', dir: 'desc' })
 
   const projectQuery = useQuery({
@@ -171,6 +172,7 @@ export default function ZohoReportsPage() {
     if (filterZohoStatus) rows = rows.filter(r => r.zoho_status === filterZohoStatus)
     if (filterJiraStatus) rows = rows.filter(r => r.jira_status === filterJiraStatus)
     if (filterBugId)      rows = rows.filter(r => (r.bug_id || '').includes(filterBugId) || (r.jira_key || '').toLowerCase().includes(filterBugId.toLowerCase()))
+    if (filterNoBug)      rows = rows.filter(r => !r.jira_key && !r.bug_id)
 
     return [...rows].sort((a, b) => {
       let av = a[sort.field] ?? ''
@@ -179,7 +181,7 @@ export default function ZohoReportsPage() {
       if (typeof bv === 'string') bv = bv.toLowerCase()
       return sort.dir === 'asc' ? (av > bv ? 1 : -1) : (av < bv ? 1 : -1)
     })
-  }, [allLinked, filterProject, filterZohoStatus, filterJiraStatus, filterBugId, sort])
+  }, [allLinked, filterProject, filterZohoStatus, filterJiraStatus, filterBugId, filterNoBug, sort])
 
   const totalPages  = Math.ceil(filteredLinked.length / PAGE_SIZE)
   const pagedLinked = filteredLinked.slice((linkedPage - 1) * PAGE_SIZE, linkedPage * PAGE_SIZE)
@@ -198,10 +200,12 @@ export default function ZohoReportsPage() {
     filterZohoStatus && { label: `Zoho: ${filterZohoStatus}`,        clear: () => setFilterZohoStatus('') },
     filterJiraStatus && { label: `Jira: ${filterJiraStatus}`,        clear: () => setFilterJiraStatus('') },
     filterBugId      && { label: `Bug ID: ${filterBugId}`,           clear: () => setFilterBugId('') },
+    filterNoBug      && { label: 'No Jira Bug',                      clear: () => setFilterNoBug(false) },
   ].filter(Boolean)
 
   const clearAllFilters = () => {
-    setFilterProject(''); setFilterZohoStatus(''); setFilterJiraStatus(''); setFilterBugId('')
+    setFilterProject(''); setFilterZohoStatus(''); setFilterJiraStatus('')
+    setFilterBugId(''); setFilterNoBug(false)
     setLinkedPage(1)
   }
 
@@ -370,6 +374,18 @@ export default function ZohoReportsPage() {
                       value={filterBugId}
                       onChange={e => { setFilterBugId(e.target.value); setLinkedPage(1) }}
                     />
+
+                    <button
+                      onClick={() => { setFilterNoBug(v => !v); setLinkedPage(1) }}
+                      className={`inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-lg border font-medium transition-colors ${
+                        filterNoBug
+                          ? 'bg-red-600 text-white border-red-600'
+                          : 'bg-white text-gray-600 border-gray-200 hover:border-red-400 hover:text-red-600'
+                      }`}
+                    >
+                      <Unlink className="h-3.5 w-3.5" />
+                      No Jira Bug
+                    </button>
 
                     {activeFilters.length > 0 && (
                       <button onClick={clearAllFilters} className="text-xs text-red-500 hover:text-red-700 px-2">
