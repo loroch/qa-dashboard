@@ -134,6 +134,36 @@ async def get_bugs_by_version(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/epics")
+async def get_epics(refresh: bool = Query(False)):
+    """All epics in TMT0 project."""
+    try:
+        svc = get_dashboard_service()
+        return await svc.get_epics(force_refresh=refresh)
+    except Exception as e:
+        logger.error(f"Epics error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/bugs-by-epic")
+async def get_bugs_by_epic(
+    epic_key: str = Query(..., description="Epic issue key e.g. TMT0-12345"),
+    statuses: Optional[str] = Query(None, description="Comma-separated statuses to filter"),
+    refresh: bool = Query(False),
+):
+    """All bugs whose parent is the given Epic, with stats."""
+    try:
+        svc = get_dashboard_service()
+        data = await svc.get_bugs_by_epic(epic_key, force_refresh=refresh)
+        if statuses:
+            sl = [s.strip().lower() for s in statuses.split(",")]
+            data = {**data, "bugs": [b for b in data["bugs"] if (b.get("status") or "").lower() in sl]}
+        return data
+    except Exception as e:
+        logger.error(f"Bugs-by-epic error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.post("/refresh")
 async def manual_refresh():
     """Trigger a full manual cache refresh."""

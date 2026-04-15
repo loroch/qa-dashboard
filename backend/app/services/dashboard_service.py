@@ -308,6 +308,87 @@ class DashboardService:
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
 
+    async def get_epics(self, force_refresh: bool = False) -> list[dict]:
+        cache_key = "dashboard:epics"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            issues_raw = await self.jira.search_issues(
+                "project = TMT0 AND issuetype = Epic ORDER BY summary ASC",
+                fields=["summary", "status"],
+                max_total=500,
+            )
+            return [
+                {
+                    "key": i["key"],
+                    "name": (i.get("fields") or {}).get("summary", i["key"]),
+                    "status": ((i.get("fields") or {}).get("status") or {}).get("name", ""),
+                }
+                for i in issues_raw
+            ]
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=3600)
+
+    async def get_bugs_by_epic(self, epic_key: str, force_refresh: bool = False) -> dict:
+        import hashlib
+        cache_key = f"dashboard:bugs_by_epic:{hashlib.md5(epic_key.encode()).hexdigest()[:8]}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                f'project = TMT0 AND issuetype = Bug AND parent = "{epic_key}" '
+                f'ORDER BY created DESC'
+            )
+            issues_raw = await self.jira.search_issues(
+                jql,
+                fields=[
+                    "summary", "status", "priority", "reporter", "assignee",
+                    "created", "updated", "labels", "components",
+                    "fixVersions", "parent", "customfield_10020",
+                ],
+                max_total=2000,
+            )
+            bugs = self.mapper.map_issues(issues_raw)
+
+            by_status: dict[str, int] = defaultdict(int)
+            by_priority: dict[str, int] = defaultdict(int)
+            by_reporter: dict[str, int] = defaultdict(int)
+            for b in bugs:
+                by_status[b.get("status") or "Unknown"] += 1
+                by_priority[b.get("priority") or "None"] += 1
+                reporter_name = (b.get("reporter") or {}).get("display_name") or "Unknown"
+                by_reporter[reporter_name] += 1
+
+            open_bugs = sum(1 for b in bugs if b.get("status_category") != "Done")
+            high_critical = sum(1 for b in bugs if b.get("priority") in ("Highest", "Critical", "High"))
+            priority_order = ["Highest", "Critical", "High", "Medium", "Low", "Lowest", "None"]
+
+            return {
+                "epic_key": epic_key,
+                "bugs": bugs,
+                "stats": {
+                    "total": len(bugs),
+                    "open": open_bugs,
+                    "high_critical": high_critical,
+                    "by_status": [
+                        {"status": s, "count": c}
+                        for s, c in sorted(by_status.items(), key=lambda x: -x[1])
+                    ],
+                    "by_priority": [
+                        {"priority": p, "count": by_priority[p]}
+                        for p in priority_order if p in by_priority
+                    ],
+                    "by_reporter": [
+                        {"reporter": r, "count": c}
+                        for r, c in sorted(by_reporter.items(), key=lambda x: -x[1])
+                    ],
+                },
+            }
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
+
     def _assemble_dashboard(
         self,
         rft: list[dict],
