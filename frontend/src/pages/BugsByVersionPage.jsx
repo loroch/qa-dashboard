@@ -1,5 +1,5 @@
-import { useState, useMemo } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useState, useMemo, useCallback } from 'react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Header } from '../components/layout/Header'
 import { IssueTable } from '../components/tables/DataTable'
 import { SummaryCard } from '../components/cards/SummaryCard'
@@ -9,10 +9,10 @@ import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api', timeout: 60000 })
 
-const getVersions  = ()        => api.get('/coverage/versions').then(r => r.data)
-const getEpics     = ()        => api.get('/dashboard/epics').then(r => r.data)
-const getByVersion = (v, sig)  => api.get('/dashboard/bugs-by-version', { params: { version: v }, signal: sig }).then(r => r.data)
-const getByEpic    = (k, sig)  => api.get('/dashboard/bugs-by-epic',    { params: { epic_key: k }, signal: sig }).then(r => r.data)
+const getVersions  = (refresh)       => api.get('/coverage/versions', { params: refresh ? { refresh: true } : {} }).then(r => r.data)
+const getEpics     = (refresh)       => api.get('/dashboard/epics',   { params: refresh ? { refresh: true } : {} }).then(r => r.data)
+const getByVersion = (v, refresh, sig) => api.get('/dashboard/bugs-by-version', { params: { version: v, ...(refresh ? { refresh: true } : {}) }, signal: sig }).then(r => r.data)
+const getByEpic    = (k, refresh, sig) => api.get('/dashboard/bugs-by-epic',    { params: { epic_key: k, ...(refresh ? { refresh: true } : {}) }, signal: sig }).then(r => r.data)
 
 // Exact Jira status names in workflow order
 const STATUS_CONFIG = [
@@ -227,29 +227,32 @@ export default function BugsByVersionPage() {
   const [selectedVersion, setSelectedVersion] = useState('')
   const [selectedEpic, setSelectedEpic]       = useState('')
   const [epicSearch, setEpicSearch]           = useState('')
+  const [isRefreshing, setIsRefreshing]       = useState(false)
+  const [lastRefresh, setLastRefresh]         = useState(null)
+  const queryClient = useQueryClient()
 
   const { data: versions = [], isLoading: versionsLoading } = useQuery({
     queryKey: ['bug-versions'],
-    queryFn: getVersions,
+    queryFn: () => getVersions(false),
     staleTime: 10 * 60 * 1000,
   })
 
   const { data: epics = [], isLoading: epicsLoading } = useQuery({
     queryKey: ['dashboard-epics'],
-    queryFn: getEpics,
+    queryFn: () => getEpics(false),
     staleTime: 30 * 60 * 1000,
   })
 
   const versionQuery = useQuery({
     queryKey: ['bugs-by-version', selectedVersion],
-    queryFn: ({ signal }) => getByVersion(selectedVersion, signal),
+    queryFn: ({ signal }) => getByVersion(selectedVersion, false, signal),
     enabled: mode === 'version' && !!selectedVersion,
     staleTime: 5 * 60 * 1000,
   })
 
   const epicQuery = useQuery({
     queryKey: ['bugs-by-epic', selectedEpic],
-    queryFn: ({ signal }) => getByEpic(selectedEpic, signal),
+    queryFn: ({ signal }) => getByEpic(selectedEpic, false, signal),
     enabled: mode === 'epic' && !!selectedEpic,
     staleTime: 5 * 60 * 1000,
   })
@@ -259,6 +262,41 @@ export default function BugsByVersionPage() {
   const activeKey    = mode === 'version' ? selectedVersion : selectedEpic
   const isLoading    = activeQuery.isLoading
   const isError      = activeQuery.isError
+
+  // Force-refresh: bust backend cache + re-run all queries
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true)
+    try {
+      // Invalidate TanStack Query caches
+      queryClient.invalidateQueries({ queryKey: ['bug-versions'] })
+      queryClient.invalidateQueries({ queryKey: ['dashboard-epics'] })
+      queryClient.invalidateQueries({ queryKey: ['bugs-by-version', selectedVersion] })
+      queryClient.invalidateQueries({ queryKey: ['bugs-by-epic', selectedEpic] })
+
+      // Re-fetch with refresh=true to bust the backend cache
+      const promises = [
+        getVersions(true).then(data => queryClient.setQueryData(['bug-versions'], data)),
+        getEpics(true).then(data => queryClient.setQueryData(['dashboard-epics'], data)),
+      ]
+      if (mode === 'version' && selectedVersion) {
+        promises.push(
+          getByVersion(selectedVersion, true).then(data =>
+            queryClient.setQueryData(['bugs-by-version', selectedVersion], data)
+          )
+        )
+      } else if (mode === 'epic' && selectedEpic) {
+        promises.push(
+          getByEpic(selectedEpic, true).then(data =>
+            queryClient.setQueryData(['bugs-by-epic', selectedEpic], data)
+          )
+        )
+      }
+      await Promise.all(promises)
+      setLastRefresh(new Date())
+    } finally {
+      setIsRefreshing(false)
+    }
+  }, [mode, selectedVersion, selectedEpic, queryClient])
 
   // Epic search filter
   const filteredEpics = useMemo(() => {
@@ -279,7 +317,9 @@ export default function BugsByVersionPage() {
     <div className="flex-1 flex flex-col">
       <Header
         title="Bugs by Version / Epic"
-        onRefresh={() => activeQuery.refetch()}
+        lastRefresh={lastRefresh}
+        isRefreshing={isRefreshing}
+        onRefresh={handleRefresh}
       />
 
       <div className="flex-1 p-6 space-y-5 overflow-auto">

@@ -21,11 +21,40 @@ const assignTest     = (body)    => api.post('/coverage/assign-test', body).then
 const TABS = ['By Version', 'Unlinked Tests']
 
 const STATUS_COLORS = {
-  'Done':              'bg-green-100 text-green-700',
-  'In Progress':       'bg-blue-100 text-blue-700',
-  'Ready for Testing': 'bg-purple-100 text-purple-700',
-  'To Do':             'bg-gray-100 text-gray-500',
-  'Blocked':           'bg-red-100 text-red-700',
+  'Done':                  'bg-green-100 text-green-700',
+  'DONE':                  'bg-green-100 text-green-700',
+  'In Progress':           'bg-blue-100 text-blue-700',
+  'Ready for Testing':     'bg-purple-100 text-purple-700',
+  'To Do':                 'bg-gray-100 text-gray-500',
+  'ToDo':                  'bg-gray-100 text-gray-500',
+  'Blocked':               'bg-red-100 text-red-700',
+  'In Review':             'bg-indigo-100 text-indigo-700',
+  'Validation':            'bg-violet-100 text-violet-700',
+  'Ready For Deployment':  'bg-teal-100 text-teal-700',
+  'Monitoring':            'bg-cyan-100 text-cyan-700',
+  'Reopened':              'bg-orange-100 text-orange-700',
+  'Known Issue':           'bg-yellow-100 text-yellow-700',
+  'Removed':               'bg-gray-100 text-gray-400',
+}
+
+function TestStatusSummary({ statuses }) {
+  if (!statuses || Object.keys(statuses).length === 0) return null
+  const entries = Object.entries(statuses).sort((a, b) => b[1] - a[1])
+  return (
+    <div className="flex flex-wrap gap-1">
+      {entries.map(([status, count]) => {
+        const cls = STATUS_COLORS[status] || 'bg-gray-100 text-gray-500'
+        return (
+          <span key={status}
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${cls}`}
+            title={status}>
+            <span className="font-bold">{count}</span>
+            <span className="opacity-75 hidden sm:inline truncate max-w-[80px]">{status}</span>
+          </span>
+        )
+      })}
+    </div>
+  )
 }
 
 function StatusPill({ status }) {
@@ -239,7 +268,7 @@ function EpicRow({ epic, search }) {
           <table className="min-w-full text-sm bg-white">
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
-                {['Story Key', 'Summary', 'Status', 'Test Cases'].map(h => (
+                {['Story Key', 'Summary', 'Status', 'Test Cases', 'Test Status'].map(h => (
                   <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -272,6 +301,9 @@ function EpicRow({ epic, search }) {
                         <span className="text-xs text-red-500 font-medium">No tests</span>
                       </div>
                     )}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <TestStatusSummary statuses={story.test_statuses} />
                   </td>
                 </tr>
               ))}

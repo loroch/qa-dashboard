@@ -1,10 +1,10 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useCallback } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { Header } from '../components/layout/Header'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import { AgingBadge } from '../components/common/Badge'
-import { ExternalLink, Link, BarChart2, ChevronUp, ChevronDown, X, Calendar, Unlink } from 'lucide-react'
+import { ExternalLink, Link, BarChart2, ChevronUp, ChevronDown, X, Calendar, Unlink, Bug, Loader2, CheckCircle, AlertCircle, Paperclip } from 'lucide-react'
 import { format, parseISO, subMonths } from 'date-fns'
 import axios from 'axios'
 
@@ -63,6 +63,383 @@ function FilterChip({ label, onRemove }) {
   )
 }
 
+// ─────────────────────────────────────────────────────────
+// Create Bug Modal
+// ─────────────────────────────────────────────────────────
+function CreateBugModal({ ticket, onClose, onCreated }) {
+  const [form, setForm] = useState({
+    summary: '',
+    description: '',
+    steps_to_reproduce: '',
+    actual_result: '',
+    expected_result: '',
+    severity: 'Medium',
+    environments: '',        // comma-separated string, split on submit
+    found_in_version_id: '',
+    epic_key: '',
+    fix_version_id: '',
+    priority_name: '',
+    sprint_id: '',
+    attachment_ids: [],
+  })
+  const [submitting, setSubmitting] = useState(false)
+  const [result, setResult] = useState(null)   // { key, url } on success
+  const [error, setError]   = useState(null)
+
+  // Fetch meta (epics, fix versions, sprints, priorities)
+  const { data: meta, isLoading: metaLoading } = useQuery({
+    queryKey: ['create-bug-meta'],
+    queryFn: () => api.get('/zoho/create-bug/meta').then(r => r.data),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Fetch ticket detail (description + attachments + suggested priority/severity)
+  const { data: detail, isLoading: detailLoading } = useQuery({
+    queryKey: ['zoho-ticket-detail', ticket.zoho_id],
+    queryFn: () => api.get(`/zoho/ticket/${ticket.zoho_id}/detail`).then(r => r.data),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Pre-fill from detail once loaded
+  useEffect(() => {
+    if (detail) {
+      setForm(f => ({
+        ...f,
+        summary:       f.summary     || detail.subject || '',
+        description:   f.description || detail.description || '',
+        severity:      detail.suggested_severity || f.severity,
+        priority_name: detail.suggested_priority || f.priority_name,
+        // Pre-select ALL attachments
+        attachment_ids: (detail.attachments || []).map(a => String(a.id)),
+      }))
+    }
+  }, [detail])
+
+  const set = (key, val) => setForm(f => ({ ...f, [key]: val }))
+
+  const toggleAttachment = (id) => {
+    setForm(f => ({
+      ...f,
+      attachment_ids: f.attachment_ids.includes(id)
+        ? f.attachment_ids.filter(x => x !== id)
+        : [...f.attachment_ids, id],
+    }))
+  }
+
+  const handleSubmit = async () => {
+    if (!form.summary.trim()) { setError('Summary is required.'); return }
+    setSubmitting(true)
+    setError(null)
+    try {
+      const envList = form.environments
+        ? form.environments.split(',').map(s => s.trim()).filter(Boolean)
+        : []
+      const res = await api.post('/zoho/create-bug', {
+        zoho_ticket_id:      ticket.zoho_id,
+        zoho_ticket_url:     ticket.zoho_url,
+        zoho_ticket_number:  String(ticket.zoho_ticket_number || ''),
+        summary:             form.summary,
+        description:         form.description,
+        steps_to_reproduce:  form.steps_to_reproduce,
+        actual_result:       form.actual_result,
+        expected_result:     form.expected_result,
+        severity:            form.severity || 'Medium',
+        environments:        envList,
+        found_in_version_id: form.found_in_version_id || null,
+        epic_key:            form.epic_key || null,
+        fix_version_id:      form.fix_version_id || null,
+        priority_name:       form.priority_name || null,
+        sprint_id:           form.sprint_id ? Number(form.sprint_id) : null,
+        attachment_ids:      form.attachment_ids,
+      })
+      setResult(res.data)
+      onCreated?.(res.data)
+    } catch (e) {
+      setError(e.response?.data?.detail || e.message || 'Unknown error')
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  const isLoading = metaLoading || detailLoading
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <div className="flex items-center gap-2">
+            <Bug className="h-5 w-5 text-red-500" />
+            <span className="font-semibold text-gray-800">Create Jira Bug</span>
+            <span className="text-xs text-gray-400 ml-1">from Zoho #{ticket.zoho_ticket_number}</span>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 p-1 rounded">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4 space-y-4">
+          {isLoading && (
+            <div className="flex items-center justify-center py-8 gap-2 text-gray-500">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              <span className="text-sm">Loading ticket data…</span>
+            </div>
+          )}
+
+          {!isLoading && result && (
+            <div className="flex flex-col items-center gap-3 py-8 text-center">
+              <CheckCircle className="h-12 w-12 text-green-500" />
+              <p className="text-lg font-semibold text-gray-800">Bug created successfully!</p>
+              <a href={result.url} target="_blank" rel="noopener noreferrer"
+                className="text-brand-600 font-mono font-bold text-lg hover:underline">
+                {result.key} ↗
+              </a>
+              <p className="text-xs text-gray-500">
+                Bug ID <span className="font-mono font-semibold text-gray-700">{result.bug_number}</span> saved to Zoho ticket #{ticket.zoho_ticket_number}
+              </p>
+              <button onClick={onClose} className="mt-2 btn-secondary px-4 py-1.5 text-sm">Close</button>
+            </div>
+          )}
+
+          {!isLoading && !result && (
+            <>
+              {/* Zoho source */}
+              <div className="bg-gray-50 rounded-lg px-4 py-3 text-xs text-gray-500 space-y-0.5">
+                <p><span className="font-medium text-gray-700">Subject:</span> {ticket.zoho_subject}</p>
+                <p><span className="font-medium text-gray-700">Project:</span> {ticket.zoho_project_name || '—'}</p>
+                <a href={ticket.zoho_url} target="_blank" rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-brand-600 hover:underline">
+                  View in Zoho <ExternalLink className="h-3 w-3" />
+                </a>
+              </div>
+
+              {/* Summary */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Summary *</label>
+                <input
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-400"
+                  value={form.summary}
+                  onChange={e => set('summary', e.target.value)}
+                  placeholder="Bug summary…"
+                />
+              </div>
+
+              {/* Description */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Description</label>
+                <textarea
+                  rows={4}
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-400 resize-y"
+                  value={form.description}
+                  onChange={e => set('description', e.target.value)}
+                  placeholder="Describe the issue…"
+                />
+              </div>
+
+              {/* Steps to reproduce */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-1">Steps to Reproduce</label>
+                <textarea
+                  rows={3}
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-400 resize-y"
+                  value={form.steps_to_reproduce}
+                  onChange={e => set('steps_to_reproduce', e.target.value)}
+                  placeholder="1. Go to…&#10;2. Click on…&#10;3. Observe…"
+                />
+              </div>
+
+              {/* Actual / Expected in 2 cols */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Actual Result</label>
+                  <textarea
+                    rows={3}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-400 resize-y"
+                    value={form.actual_result}
+                    onChange={e => set('actual_result', e.target.value)}
+                    placeholder="What actually happened…"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Expected Result</label>
+                  <textarea
+                    rows={3}
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-400 resize-y"
+                    value={form.expected_result}
+                    onChange={e => set('expected_result', e.target.value)}
+                    placeholder="What should have happened…"
+                  />
+                </div>
+              </div>
+
+              {/* Severity + Environments */}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    Severity <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-400"
+                    value={form.severity}
+                    onChange={e => set('severity', e.target.value)}
+                  >
+                    {(meta?.severities || ['Critical','Highest','High','Medium','Low']).map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">
+                    Environments <span className="text-red-500">*</span>
+                    <span className="font-normal text-gray-400 ml-1">(comma-separated)</span>
+                  </label>
+                  <input
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-400"
+                    value={form.environments}
+                    onChange={e => set('environments', e.target.value)}
+                    placeholder="e.g. Web, Mobile, Desktop"
+                  />
+                </div>
+              </div>
+
+              {/* Dropdowns: Epic, Fix Version, Found In Version, Priority, Sprint */}
+              <div className="grid grid-cols-2 gap-3">
+                {/* Epic */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Epic (Parent)</label>
+                  <select
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-400"
+                    value={form.epic_key}
+                    onChange={e => set('epic_key', e.target.value)}
+                  >
+                    <option value="">— No epic —</option>
+                    {(meta?.epics || []).map(e => (
+                      <option key={e.key} value={e.key}>{e.name} ({e.key})</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Fix Version */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Fix Version</label>
+                  <select
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-400"
+                    value={form.fix_version_id}
+                    onChange={e => set('fix_version_id', e.target.value)}
+                  >
+                    <option value="">— No version —</option>
+                    {(meta?.fix_versions || []).map(v => (
+                      <option key={v.id} value={v.id}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Found In Version */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Found In Version</label>
+                  <select
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-400"
+                    value={form.found_in_version_id}
+                    onChange={e => set('found_in_version_id', e.target.value)}
+                  >
+                    <option value="">— Unknown —</option>
+                    {(meta?.found_in_versions || []).map(v => (
+                      <option key={v.id} value={v.id}>{v.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Priority */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Priority</label>
+                  <select
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-400"
+                    value={form.priority_name}
+                    onChange={e => set('priority_name', e.target.value)}
+                  >
+                    <option value="">— Default —</option>
+                    {(meta?.priorities || []).map(p => (
+                      <option key={p.id} value={p.name}>{p.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Sprint */}
+                <div className="col-span-2">
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Sprint</label>
+                  <select
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-400"
+                    value={form.sprint_id}
+                    onChange={e => set('sprint_id', e.target.value)}
+                  >
+                    <option value="">— No sprint —</option>
+                    {(meta?.sprints || []).map(s => (
+                      <option key={s.id} value={s.id}>{s.name}{s.state === 'active' ? ' ✓' : ''}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Attachments */}
+              {detail?.attachments?.length > 0 && (
+                <div>
+                  <label className="block text-xs font-semibold text-gray-600 mb-2">
+                    <Paperclip className="h-3.5 w-3.5 inline mr-1" />
+                    Attachments from Zoho
+                  </label>
+                  <div className="space-y-1.5">
+                    {detail.attachments.map(att => (
+                      <label key={att.id} className="flex items-center gap-2.5 cursor-pointer hover:bg-gray-50 rounded px-2 py-1">
+                        <input
+                          type="checkbox"
+                          className="h-3.5 w-3.5 text-brand-600 rounded"
+                          checked={form.attachment_ids.includes(String(att.id))}
+                          onChange={() => toggleAttachment(String(att.id))}
+                        />
+                        <span className="text-sm text-gray-700">{att.name}</span>
+                        {att.size > 0 && (
+                          <span className="text-xs text-gray-400">
+                            ({(att.size / 1024).toFixed(0)} KB)
+                          </span>
+                        )}
+                      </label>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
+                  <AlertCircle className="h-4 w-4 mt-0.5 flex-shrink-0" />
+                  <span>{error}</span>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        {!result && !isLoading && (
+          <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200">
+            <button onClick={onClose} className="btn-secondary px-4 py-2 text-sm" disabled={submitting}>
+              Cancel
+            </button>
+            <button
+              onClick={handleSubmit}
+              disabled={submitting || !form.summary.trim()}
+              className="inline-flex items-center gap-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white px-4 py-2 rounded-lg text-sm font-medium transition-colors"
+            >
+              {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bug className="h-4 w-4" />}
+              {submitting ? 'Creating…' : 'Create Bug in Jira'}
+            </button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 const TABS = ['By Project & Status', 'Zoho ↔ Jira Linked']
 const PAGE_SIZE = 30
 
@@ -76,6 +453,9 @@ const DATE_RANGE_OPTIONS = [
 export default function ZohoReportsPage() {
   const [tab, setTab] = useState('By Project & Status')
   const [monthRange, setMonthRange] = useState(0)
+
+  // ── Create Bug modal ──
+  const [createBugTicket, setCreateBugTicket] = useState(null)
 
   // ── By Project filters & sort ──
   const [projSearch, setProjSearch] = useState('')
@@ -211,6 +591,13 @@ export default function ZohoReportsPage() {
 
   return (
     <div className="flex-1 flex flex-col">
+      {createBugTicket && (
+        <CreateBugModal
+          ticket={createBugTicket}
+          onClose={() => setCreateBugTicket(null)}
+          onCreated={() => {}}
+        />
+      )}
       <Header
         title="Zoho Reports"
         lastRefresh={lastRefresh}
@@ -439,8 +826,9 @@ export default function ZohoReportsPage() {
                             { label: 'Parent',       field: 'jira_parent_key' },
                             { label: 'Days Open',    field: 'zoho_days_open' },
                             { label: 'Created',      field: 'zoho_created' },
+                            { label: '',             field: null },
                           ].map(({ label, field }) => (
-                            <th key={label}
+                            <th key={label || '_action'}
                               className={`px-3 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap ${field ? 'cursor-pointer hover:text-gray-800 select-none' : ''}`}
                               onClick={() => field && toggleSort(field)}>
                               <span className="inline-flex items-center gap-1">
@@ -495,6 +883,18 @@ export default function ZohoReportsPage() {
                             </td>
                             <td className="px-3 py-2.5 whitespace-nowrap text-gray-400 text-xs">
                               {row.zoho_created ? format(parseISO(row.zoho_created), 'MMM d') : '—'}
+                            </td>
+                            <td className="px-3 py-2.5 whitespace-nowrap">
+                              {!row.jira_key && !row.bug_id && (
+                                <button
+                                  onClick={() => setCreateBugTicket(row)}
+                                  title="Create Jira bug from this ticket"
+                                  className="inline-flex items-center gap-1 text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded px-2 py-1 font-medium transition-colors"
+                                >
+                                  <Bug className="h-3 w-3" />
+                                  Create Bug
+                                </button>
+                              )}
                             </td>
                           </tr>
                         ))}

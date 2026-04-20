@@ -14,6 +14,7 @@ import TestCoveragePage from './pages/TestCoveragePage'
 import TestGeneratorPage from './pages/TestGeneratorPage'
 import AnomalyPage from './pages/AnomalyPage'
 import BugsByVersionPage from './pages/BugsByVersionPage'
+import TestPlansPage from './pages/TestPlansPage'
 
 export default function App() {
   return (
@@ -36,6 +37,7 @@ export default function App() {
             <Route path="/test-generator"    element={<TestGeneratorPage />} />
             <Route path="/anomaly"           element={<AnomalyPage />} />
             <Route path="/bugs-by-version"   element={<BugsByVersionPage />} />
+            <Route path="/test-plans"        element={<TestPlansPage />} />
           </Routes>
         </main>
       </div>

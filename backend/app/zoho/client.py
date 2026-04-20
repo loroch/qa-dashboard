@@ -144,6 +144,28 @@ class ZohoDeskClient:
         logger.info(f"Zoho Desk: fetched {len(all_tickets)} tickets")
         return all_tickets
 
+    async def patch(self, path: str, json: dict, include_org: bool = False) -> Any:
+        await self._ensure_token()
+        client = await self._get_client()
+        headers = {
+            "Authorization": f"Zoho-oauthtoken {self._access_token}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+        if include_org:
+            org_id = await self._get_org_id()
+            headers["orgId"] = org_id
+        url = f"{self.base_url}{path}"
+        try:
+            resp = await client.patch(url, headers=headers, json=json)
+            resp.raise_for_status()
+            return resp.json() if resp.content else {}
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Zoho Desk PATCH error {e.response.status_code} for {path}: {e.response.text[:300]}")
+            raise ZohoDeskAPIError(f"Zoho Desk PATCH {e.response.status_code}: {e.response.text[:200]}") from e
+        except httpx.RequestError as e:
+            raise ZohoDeskError(f"Cannot connect to Zoho Desk: {e}") from e
+
     async def get_departments(self) -> list[dict]:
         data = await self.get("/api/v1/departments", include_org=True)
         return data.get("data", [])

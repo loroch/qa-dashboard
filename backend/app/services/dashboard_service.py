@@ -315,9 +315,9 @@ class DashboardService:
 
         async def fetch():
             issues_raw = await self.jira.search_issues(
-                "project = TMT0 AND issuetype = Epic ORDER BY summary ASC",
+                "project = TMT0 AND issuetype = Epic AND created >= -365d ORDER BY created DESC",
                 fields=["summary", "status"],
-                max_total=500,
+                max_total=2000,
             )
             return [
                 {

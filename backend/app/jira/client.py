@@ -128,7 +128,14 @@ class JiraClient:
             total = data.get("total", 0)
             logger.debug(f"Fetched {len(all_issues)}/{total} issues for JQL: {jql[:80]}")
 
-            if len(all_issues) >= total or not issues:
+            if not issues:
+                break
+            # When total is accurate, stop once we've fetched everything.
+            # When total=0 (Jira quirk for this project), stop only when
+            # the page is shorter than requested — that signals the last page.
+            if total > 0 and len(all_issues) >= total:
+                break
+            if total == 0 and len(issues) < batch_size:
                 break
             start_at += len(issues)
 
@@ -153,6 +160,36 @@ class JiraClient:
 
     async def get_issue_changelog(self, issue_key: str) -> dict:
         return await self.get(f"/issue/{issue_key}/changelog")
+
+    async def agile_get(self, path: str, params: dict | None = None) -> Any:
+        """Call the Jira Agile REST API (/rest/agile/1.0/...)."""
+        client = await self._get_client()
+        url = f"{self.base_url}/rest/agile/1.0{path}"
+        try:
+            response = await client.get(url, params=params or {})
+            response.raise_for_status()
+            return response.json()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Jira Agile API error {e.response.status_code} for {path}: {e.response.text[:500]}")
+            raise JiraAPIError(f"Jira Agile {e.response.status_code}: {e.response.text[:200]}") from e
+        except httpx.RequestError as e:
+            raise JiraConnectionError(f"Cannot connect to Jira Agile: {e}") from e
+
+    async def upload_attachment(self, issue_key: str, filename: str, content_type: str, data: bytes) -> Any:
+        """Upload a file as an attachment to a Jira issue."""
+        import base64
+        encoded = base64.b64encode(f"{self.auth[0]}:{self.auth[1]}".encode()).decode()
+        async with httpx.AsyncClient(timeout=60) as client:
+            resp = await client.post(
+                f"{self.base_url}/rest/api/3/issue/{issue_key}/attachments",
+                headers={
+                    "Authorization": f"Basic {encoded}",
+                    "X-Atlassian-Token": "no-check",
+                },
+                files={"file": (filename, data, content_type)},
+            )
+            resp.raise_for_status()
+            return resp.json()
 
     async def test_connection(self) -> dict:
         """Verify credentials and connectivity."""

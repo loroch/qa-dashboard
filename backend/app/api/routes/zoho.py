@@ -2,12 +2,14 @@
 Zoho Desk API routes.
 """
 import logging
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Query, HTTPException
 from fastapi.responses import Response
+from pydantic import BaseModel
 
 from app.services.zoho_service import get_zoho_service
 from app.services.zoho_jira_service import get_zoho_jira_service
+from app.services.create_bug_service import get_create_bug_service
 from app.zoho.client import get_zoho_client
 
 logger = logging.getLogger(__name__)
@@ -255,6 +257,81 @@ async def export_linked_report_excel(refresh: bool = Query(False)):
             headers={"Content-Disposition": "attachment; filename=zoho_jira_linked.xlsx"},
         )
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/create-bug/meta")
+async def get_create_bug_meta():
+    """
+    Return dropdown data for the Create Bug form:
+    fix_versions, epics, sprints, priorities.
+    """
+    try:
+        svc = get_create_bug_service()
+        return await svc.get_meta()
+    except Exception as e:
+        logger.error(f"Create-bug meta error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ticket/{ticket_id}/detail")
+async def get_zoho_ticket_detail(ticket_id: str):
+    """Full Zoho ticket detail with description and attachment list."""
+    try:
+        svc = get_create_bug_service()
+        return await svc.get_zoho_ticket_detail(ticket_id)
+    except Exception as e:
+        logger.error(f"Zoho ticket detail error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class CreateBugRequest(BaseModel):
+    zoho_ticket_id: str
+    zoho_ticket_url: str
+    zoho_ticket_number: str = ""
+    summary: str
+    description: str = ""
+    steps_to_reproduce: str = ""
+    actual_result: str = ""
+    expected_result: str = ""
+    severity: str = "Medium"
+    environments: List[str] = []
+    found_in_version_id: Optional[str] = None
+    epic_key: Optional[str] = None
+    fix_version_id: Optional[str] = None
+    fix_version_name: Optional[str] = None
+    priority_name: Optional[str] = None
+    sprint_id: Optional[int] = None
+    attachment_ids: List[str] = []
+
+
+@router.post("/create-bug")
+async def create_jira_bug(body: CreateBugRequest):
+    """Create a Jira bug from a Zoho Desk ticket."""
+    try:
+        svc = get_create_bug_service()
+        result = await svc.create_jira_bug(
+            zoho_ticket_id=body.zoho_ticket_id,
+            zoho_ticket_url=body.zoho_ticket_url,
+            zoho_ticket_number=body.zoho_ticket_number,
+            summary=body.summary,
+            description=body.description,
+            steps_to_reproduce=body.steps_to_reproduce,
+            actual_result=body.actual_result,
+            expected_result=body.expected_result,
+            severity=body.severity,
+            environments=body.environments,
+            found_in_version_id=body.found_in_version_id,
+            epic_key=body.epic_key,
+            fix_version_id=body.fix_version_id,
+            fix_version_name=body.fix_version_name,
+            priority_name=body.priority_name,
+            sprint_id=body.sprint_id,
+            attachment_ids=body.attachment_ids,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"Create-bug error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

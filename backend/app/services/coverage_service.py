@@ -15,7 +15,7 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 # All link type names that indicate a test case covers a story
-TEST_LINK_TYPES = {"Test Case", "Has Test Case", "relates to"}
+TEST_LINK_TYPES = {"Test Case", "Has Test Case", "Relates"}
 
 CACHE_KEY_VERSIONS  = "coverage:versions"
 CACHE_KEY_UNLINKED  = "coverage:unlinked"
@@ -111,21 +111,30 @@ class CoverageService:
                 # check both inward and outward sides
                 links = f.get("issuelinks") or []
                 tc_keys = []
+                tc_statuses: dict[str, int] = {}
                 for lk in links:
                     if lk.get("type", {}).get("name") in TEST_LINK_TYPES:
                         for side in ("inwardIssue", "outwardIssue"):
                             linked = lk.get(side)
                             if linked:
                                 tc_keys.append(linked["key"])
+                                # Status is embedded in the link object
+                                st = (
+                                    (linked.get("fields") or {})
+                                    .get("status", {})
+                                    .get("name", "Unknown")
+                                )
+                                tc_statuses[st] = tc_statuses.get(st, 0) + 1
 
                 stories.append({
-                    "key":        issue["key"],
-                    "url":        self._issue_url(issue["key"]),
-                    "summary":    f.get("summary", ""),
-                    "status":     (f.get("status") or {}).get("name", ""),
-                    "epic_key":   epic_key,
-                    "test_count": len(tc_keys),
-                    "test_keys":  tc_keys,
+                    "key":          issue["key"],
+                    "url":          self._issue_url(issue["key"]),
+                    "summary":      f.get("summary", ""),
+                    "status":       (f.get("status") or {}).get("name", ""),
+                    "epic_key":     epic_key,
+                    "test_count":   len(tc_keys),
+                    "test_keys":    tc_keys,
+                    "test_statuses": tc_statuses,
                 })
                 if epic_key:
                     epic_keys.add(epic_key)
