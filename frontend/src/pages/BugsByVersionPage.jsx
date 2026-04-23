@@ -4,7 +4,7 @@ import { Header } from '../components/layout/Header'
 import { IssueTable } from '../components/tables/DataTable'
 import { SummaryCard } from '../components/cards/SummaryCard'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
-import { Bug, AlertTriangle, CheckCircle2, LayoutList, Layers, Tag } from 'lucide-react'
+import { Bug, AlertTriangle, CheckCircle2, LayoutList, Layers, Tag, BookOpen } from 'lucide-react'
 import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api', timeout: 60000 })
@@ -63,6 +63,58 @@ function MiniBar({ label, count, total, color = 'bg-blue-500' }) {
   )
 }
 
+const STORY_STATUS_COLOR = {
+  'Done':                 'bg-green-100 text-green-800 border-green-200',
+  'DONE':                 'bg-green-100 text-green-800 border-green-200',
+  'In Progress':          'bg-blue-100 text-blue-800 border-blue-200',
+  'In Review':            'bg-indigo-100 text-indigo-800 border-indigo-200',
+  'Ready for Testing':    'bg-purple-100 text-purple-800 border-purple-200',
+  'Validation':           'bg-violet-100 text-violet-800 border-violet-200',
+  'Ready For Deployment': 'bg-teal-100 text-teal-800 border-teal-200',
+  'Monitoring':           'bg-cyan-100 text-cyan-800 border-cyan-200',
+  'Blocked':              'bg-red-100 text-red-800 border-red-200',
+  'Reopened':             'bg-orange-100 text-orange-800 border-orange-200',
+  'Known Issue':          'bg-yellow-100 text-yellow-800 border-yellow-200',
+  'Removed':              'bg-gray-100 text-gray-500 border-gray-200',
+  'To Do':                'bg-gray-50 text-gray-600 border-gray-200',
+  'Open':                 'bg-gray-50 text-gray-600 border-gray-200',
+}
+
+function StoryStatusPanel({ stats }) {
+  const total = stats?.stories_total ?? 0
+  const done  = stats?.stories_done  ?? 0
+  const byStatus = stats?.stories_by_status || []
+  if (total === 0) return null
+  const pct = total ? Math.round(done / total * 100) : 0
+
+  return (
+    <div className="card">
+      <div className="flex items-center gap-2 mb-3">
+        <BookOpen className="h-4 w-4 text-indigo-500" />
+        <h3 className="text-sm font-semibold text-gray-700">Story Resolution Status</h3>
+        <span className="ml-auto text-xs text-gray-400">{total} stories · {pct}% done</span>
+      </div>
+      {/* Progress bar */}
+      <div className="w-full bg-gray-100 rounded-full h-2 mb-4">
+        <div className="bg-green-500 h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
+      </div>
+      {/* Status pills */}
+      <div className="flex flex-wrap gap-2">
+        {byStatus.map(({ status, count }) => (
+          <span
+            key={status}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium
+              ${STORY_STATUS_COLOR[status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
+          >
+            {status}
+            <span className="font-bold">{count}</span>
+          </span>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 function BugResults({ data, refetch }) {
   const [activeStatuses, setActiveStatuses] = useState(new Set())
   const allBugs = data?.bugs || []
@@ -108,6 +160,9 @@ function BugResults({ data, refetch }) {
           color={isFiltered ? 'blue' : 'green'}
         />
       </div>
+
+      {/* Story resolution status */}
+      <StoryStatusPanel stats={stats} />
 
       {/* Status filter toggles */}
       {presentConfigs.length > 0 && (

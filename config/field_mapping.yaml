@@ -90,6 +90,10 @@ jira:
       name: "Jonathan Cohen"
       role: "QA Engineer"
 
+    - id: "712020:f4226779-02b8-48a7-860f-258d89e071ec"
+      name: "Rosa Areli Cuatecontzi Monroy"
+      role: "QA Engineer"
+
   # [ASSUMPTION] Empty = monitor all accessible projects. Add keys to filter.
   projects: []  # e.g. ["PROJ", "APP", "MOBILE"]
 

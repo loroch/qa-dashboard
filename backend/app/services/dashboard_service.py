@@ -1,6 +1,7 @@
 """
 Dashboard business logic: aggregates Jira data into dashboard views.
 """
+import asyncio
 import logging
 from collections import defaultdict
 from datetime import datetime, timezone, timedelta
@@ -260,16 +261,27 @@ class DashboardService:
                 f'project = TMT0 AND issuetype = Bug AND fixVersion = "{version}" '
                 f'ORDER BY created DESC'
             )
-            issues_raw = await self.jira.search_issues(
-                jql,
-                fields=[
-                    "summary", "status", "priority", "reporter", "assignee",
-                    "created", "updated", "labels", "components",
-                    "fixVersions", "parent", "customfield_10020",
-                ],
-                max_total=2000,
+            stories_jql = (
+                f'project = TMT0 AND issuetype = Story AND fixVersion = "{version}" '
+                f'ORDER BY status ASC'
             )
-            bugs = self.mapper.map_issues(issues_raw)
+            bugs_raw, stories_raw = await asyncio.gather(
+                self.jira.search_issues(
+                    jql,
+                    fields=[
+                        "summary", "status", "priority", "reporter", "assignee",
+                        "created", "updated", "labels", "components",
+                        "fixVersions", "parent", "customfield_10020",
+                    ],
+                    max_total=2000,
+                ),
+                self.jira.search_issues(
+                    stories_jql,
+                    fields=["summary", "status", "fixVersions", "parent"],
+                    max_total=2000,
+                ),
+            )
+            bugs = self.mapper.map_issues(bugs_raw)
 
             by_status: dict[str, int] = defaultdict(int)
             by_priority: dict[str, int] = defaultdict(int)
@@ -279,6 +291,11 @@ class DashboardService:
                 by_priority[b.get("priority") or "None"] += 1
                 reporter_name = (b.get("reporter") or {}).get("display_name") or "Unknown"
                 by_reporter[reporter_name] += 1
+
+            story_by_status: dict[str, int] = defaultdict(int)
+            for s in stories_raw:
+                st = ((s.get("fields") or {}).get("status") or {}).get("name") or "Unknown"
+                story_by_status[st] += 1
 
             open_bugs = sum(1 for b in bugs if b.get("status_category") != "Done")
             high_critical = sum(1 for b in bugs if b.get("priority") in ("Highest", "Critical", "High"))
@@ -302,6 +319,12 @@ class DashboardService:
                     "by_reporter": [
                         {"reporter": r, "count": c}
                         for r, c in sorted(by_reporter.items(), key=lambda x: -x[1])
+                    ],
+                    "stories_total": len(stories_raw),
+                    "stories_done": story_by_status.get("Done", 0) + story_by_status.get("DONE", 0),
+                    "stories_by_status": [
+                        {"status": s, "count": c}
+                        for s, c in sorted(story_by_status.items(), key=lambda x: -x[1])
                     ],
                 },
             }
@@ -341,16 +364,27 @@ class DashboardService:
                 f'project = TMT0 AND issuetype = Bug AND parent = "{epic_key}" '
                 f'ORDER BY created DESC'
             )
-            issues_raw = await self.jira.search_issues(
-                jql,
-                fields=[
-                    "summary", "status", "priority", "reporter", "assignee",
-                    "created", "updated", "labels", "components",
-                    "fixVersions", "parent", "customfield_10020",
-                ],
-                max_total=2000,
+            stories_jql = (
+                f'project = TMT0 AND issuetype = Story AND parent = "{epic_key}" '
+                f'ORDER BY status ASC'
             )
-            bugs = self.mapper.map_issues(issues_raw)
+            bugs_raw, stories_raw = await asyncio.gather(
+                self.jira.search_issues(
+                    jql,
+                    fields=[
+                        "summary", "status", "priority", "reporter", "assignee",
+                        "created", "updated", "labels", "components",
+                        "fixVersions", "parent", "customfield_10020",
+                    ],
+                    max_total=2000,
+                ),
+                self.jira.search_issues(
+                    stories_jql,
+                    fields=["summary", "status", "parent"],
+                    max_total=2000,
+                ),
+            )
+            bugs = self.mapper.map_issues(bugs_raw)
 
             by_status: dict[str, int] = defaultdict(int)
             by_priority: dict[str, int] = defaultdict(int)
@@ -360,6 +394,11 @@ class DashboardService:
                 by_priority[b.get("priority") or "None"] += 1
                 reporter_name = (b.get("reporter") or {}).get("display_name") or "Unknown"
                 by_reporter[reporter_name] += 1
+
+            story_by_status: dict[str, int] = defaultdict(int)
+            for s in stories_raw:
+                st = ((s.get("fields") or {}).get("status") or {}).get("name") or "Unknown"
+                story_by_status[st] += 1
 
             open_bugs = sum(1 for b in bugs if b.get("status_category") != "Done")
             high_critical = sum(1 for b in bugs if b.get("priority") in ("Highest", "Critical", "High"))
@@ -383,6 +422,12 @@ class DashboardService:
                     "by_reporter": [
                         {"reporter": r, "count": c}
                         for r, c in sorted(by_reporter.items(), key=lambda x: -x[1])
+                    ],
+                    "stories_total": len(stories_raw),
+                    "stories_done": story_by_status.get("Done", 0) + story_by_status.get("DONE", 0),
+                    "stories_by_status": [
+                        {"status": s, "count": c}
+                        for s, c in sorted(story_by_status.items(), key=lambda x: -x[1])
                     ],
                 },
             }
