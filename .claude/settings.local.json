@@ -6,7 +6,21 @@
       "Bash(python3.13 -c \"import anthropic; print\\('ok'\\)\")",
       "Bash(python3.13 -m pip install \"anthropic>=0.30.0\" --no-cache-dir)",
       "Bash(python3.13 -m site --user-site)",
-      "Bash(PYTHONPATH=\"/c/Users/Loroc/AppData/Roaming/Python/Python313/site-packages\" python3.13 -c \"import anthropic; print\\('ok'\\)\")"
+      "Bash(PYTHONPATH=\"/c/Users/Loroc/AppData/Roaming/Python/Python313/site-packages\" python3.13 -c \"import anthropic; print\\('ok'\\)\")",
+      "WebFetch(domain:support.cityshob.com)",
+      "Bash(curl -s \"http://localhost:8000/api/zoho/ticket/350033000020762033/detail\")",
+      "Bash(curl -s \"http://localhost:8000/api/zoho/debug/ticket/350033000020762033\")",
+      "Bash(docker compose *)",
+      "Bash(python -m uvicorn app.main:app --host 0.0.0.0 --port 8000)",
+      "Bash(curl -s \"http://localhost:8000/api/zoho/status\")",
+      "Bash(echo \"PID: $!\")",
+      "Bash(git commit -m ' *)",
+      "Read(//c/Users/Loroc/**)",
+      "mcp__claude_ai_Atlassian__lookupJiraAccountId",
+      "Bash(docker-compose up *)",
+      "Bash(git add *)",
+      "Bash(git push *)",
+      "Bash(gh repo *)"
     ]
   }
 }
