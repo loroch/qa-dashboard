@@ -19,14 +19,21 @@ const ISSUE_TYPE_COLORS = {
 }
 
 const STATUS_COLORS = {
-  'Ready for Testing': 'bg-purple-100 text-purple-700',
-  'In Progress':       'bg-blue-100 text-blue-700',
-  'In Review':         'bg-indigo-100 text-indigo-700',
-  'Done':              'bg-green-100 text-green-700',
-  'Blocked':           'bg-red-100 text-red-700',
-  'Open':              'bg-gray-100 text-gray-600',
-  'Reopened':          'bg-orange-100 text-orange-700',
-  'To Do':             'bg-gray-100 text-gray-500',
+  'To Do':                 'bg-gray-100 text-gray-700',
+  'ToDo':                  'bg-gray-100 text-gray-700',
+  'Open':                  'bg-gray-100 text-gray-700',
+  'In Progress':           'bg-blue-100 text-blue-700',
+  'In Review':             'bg-indigo-100 text-indigo-700',
+  'Ready for Testing':     'bg-purple-100 text-purple-700',
+  'Validation':            'bg-violet-100 text-violet-700',
+  'Ready For Deployment':  'bg-teal-100 text-teal-700',
+  'Monitoring':            'bg-cyan-100 text-cyan-700',
+  'Done':                  'bg-green-100 text-green-700',
+  'DONE':                  'bg-green-100 text-green-700',
+  'Reopened':              'bg-orange-100 text-orange-700',
+  'Known Issue':           'bg-yellow-100 text-yellow-700',
+  'Blocked':               'bg-red-100 text-red-700',
+  'Removed':               'bg-gray-100 text-gray-400',
 }
 
 function IssueTypeBadge({ type }) {
