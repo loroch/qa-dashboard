@@ -202,6 +202,80 @@ class ReleaseNotesService:
                     rn = _extract_text(f.get(RELEASE_NOTES_FIELD))
                     bugs.append({**base, "release_notes": rn})
 
+            # Collect parent keys that are missing from our sets
+            # (stories/epics that don't have fixVersion set won't appear in the JQL)
+            missing = set()
+            for bug in bugs:
+                pk = bug["parent_key"]
+                if pk and pk not in stories and pk not in epics:
+                    missing.add(pk)
+            for story in stories.values():
+                pk = story["parent_key"]
+                if pk and pk not in epics:
+                    missing.add(pk)
+
+            if missing:
+                keys_clause = ",".join(missing)
+                extra_raw = await self.jira.search_issues(
+                    f'key in ({keys_clause})',
+                    fields=[
+                        "summary", "status", "issuetype", "priority",
+                        "assignee", "labels", "parent",
+                    ],
+                    max_total=len(missing) + 10,
+                )
+                for issue in extra_raw:
+                    f      = issue.get("fields", {})
+                    key    = issue["key"]
+                    itype  = (f.get("issuetype") or {}).get("name", "")
+                    status = (f.get("status") or {}).get("name", "")
+                    parent_raw = f.get("parent") or {}
+                    parent_key = parent_raw.get("key", "")
+                    base = {
+                        "key":      key,
+                        "url":      self._issue_url(key),
+                        "summary":  f.get("summary", ""),
+                        "status":   status,
+                        "type":     itype,
+                        "priority": (f.get("priority") or {}).get("name", ""),
+                        "assignee": ((f.get("assignee") or {}).get("displayName") or ""),
+                        "labels":   f.get("labels") or [],
+                        "parent_key": parent_key,
+                    }
+                    if itype == "Epic":
+                        epics[key] = {**base, "stories": [], "bugs": []}
+                    elif itype == "Story":
+                        stories[key] = {**base, "bugs": []}
+
+                # Second pass: collect any still-missing epic parents of newly added stories
+                missing2 = set()
+                for story in stories.values():
+                    pk = story["parent_key"]
+                    if pk and pk not in epics:
+                        missing2.add(pk)
+                if missing2:
+                    extra2 = await self.jira.search_issues(
+                        f'key in ({",".join(missing2)})',
+                        fields=["summary", "status", "issuetype", "priority", "assignee", "labels", "parent"],
+                        max_total=len(missing2) + 10,
+                    )
+                    for issue in extra2:
+                        f   = issue.get("fields", {})
+                        key = issue["key"]
+                        if (f.get("issuetype") or {}).get("name", "") == "Epic":
+                            parent_raw = f.get("parent") or {}
+                            base = {
+                                "key": key, "url": self._issue_url(key),
+                                "summary": f.get("summary", ""),
+                                "status": (f.get("status") or {}).get("name", ""),
+                                "type": "Epic",
+                                "priority": (f.get("priority") or {}).get("name", ""),
+                                "assignee": ((f.get("assignee") or {}).get("displayName") or ""),
+                                "labels": f.get("labels") or [],
+                                "parent_key": parent_raw.get("key", ""),
+                            }
+                            epics[key] = {**base, "stories": [], "bugs": []}
+
             # Wire bugs → stories → epics
             orphan_bugs = []
             for bug in bugs:
