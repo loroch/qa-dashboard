@@ -30,6 +30,18 @@ async def get_release_notes(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/report")
+async def get_release_report(
+    version: str  = Query(..., description="Fix version key"),
+    refresh: bool = Query(False),
+):
+    svc = get_release_notes_service()
+    try:
+        return await svc.get_report_data(version=version, force_refresh=refresh)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.put("/{issue_key}")
 async def update_release_notes(issue_key: str, body: UpdateReleaseNotesRequest):
     svc = get_release_notes_service()

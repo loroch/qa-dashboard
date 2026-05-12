@@ -13,6 +13,7 @@ const api = axios.create({ baseURL: '/api', timeout: 60000 })
 const getVersions    = () => api.get('/coverage/versions').then(r => r.data)
 const getEpics       = () => api.get('/dashboard/epics').then(r => r.data)
 const getIssues      = (params, sig) => api.get('/release-notes', { params, signal: sig }).then(r => r.data)
+const getReport      = (version, sig) => api.get('/release-notes/report', { params: { version }, signal: sig }).then(r => r.data)
 const putReleaseNote = (key, text) => api.put(`/release-notes/${key}`, { text }).then(r => r.data)
 
 const PRIORITY_COLOR = {
@@ -128,26 +129,42 @@ function ReleaseNotesCell({ issueKey, value, description, onSaved }) {
   )
 }
 
-// ── Export helpers ─────────────────────────────────────────────────────────────
-function epicLabel(issue) {
-  if (issue.epic_key && issue.epic_summary) return `${issue.epic_key} — ${issue.epic_summary}`
-  if (issue.epic_key) return issue.epic_key
-  return 'No Epic'
-}
-function storyLabel(issue) {
-  if (issue.story_key && issue.story_summary) return `${issue.story_key} — ${issue.story_summary}`
-  if (issue.story_key) return issue.story_key
-  return '—'
+// ── Report helpers ─────────────────────────────────────────────────────────────
+const STATUS_BADGE = {
+  'Done':                 'bg-green-100 text-green-700',
+  'DONE':                 'bg-green-100 text-green-700',
+  'In Progress':          'bg-blue-100 text-blue-700',
+  'In Review':            'bg-indigo-100 text-indigo-700',
+  'Ready for Testing':    'bg-purple-100 text-purple-700',
+  'Validation':           'bg-violet-100 text-violet-700',
+  'Monitoring':           'bg-yellow-100 text-yellow-700',
+  'Known Issue':          'bg-yellow-100 text-yellow-700',
+  'Blocked':              'bg-red-100 text-red-700',
+  'Reopened':             'bg-orange-100 text-orange-700',
+  'Ready For Deployment': 'bg-teal-100 text-teal-700',
+  'Removed':              'bg-gray-100 text-gray-500',
+  'To Do':                'bg-gray-100 text-gray-600',
 }
 
-function groupByEpic(issues) {
-  const groups = {}
-  for (const issue of issues) {
-    const label = epicLabel(issue)
-    if (!groups[label]) groups[label] = { epicKey: issue.epic_key, items: [] }
-    groups[label].items.push(issue)
+function StatusPill({ status }) {
+  const cls = STATUS_BADGE[status] || 'bg-gray-100 text-gray-600'
+  return (
+    <span className={`inline-block px-1.5 py-0.5 rounded text-xs font-medium whitespace-nowrap ${cls}`}>
+      {status || '—'}
+    </span>
+  )
+}
+
+function countAll(report) {
+  let n = 0
+  for (const epic of report.epics || []) {
+    n += 1
+    for (const story of epic.stories || []) { n += 1 + story.bugs.length }
+    n += epic.bugs.length
   }
-  return groups
+  n += (report.orphan_stories || []).reduce((s, st) => s + 1 + st.bugs.length, 0)
+  n += (report.orphan_bugs || []).length
+  return n
 }
 
 function downloadBlob(content, mimeType, filename) {
@@ -160,94 +177,156 @@ function downloadBlob(content, mimeType, filename) {
   URL.revokeObjectURL(url)
 }
 
-function buildXLS(groups, version) {
+function buildXLS(report) {
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  let rows = `
-    <tr style="background:#1e3a8a">
-      <td colspan="4" style="color:#fff;font-size:15px;font-weight:bold;padding:8px 12px">
-        Release Notes — ${esc(version)}
-      </td>
-    </tr>
-    <tr style="background:#dbeafe">
-      <td style="font-weight:bold;width:110px">Issue Key</td>
-      <td style="font-weight:bold;width:200px">Epic</td>
-      <td style="font-weight:bold;width:180px">Story</td>
-      <td style="font-weight:bold">Release Notes</td>
-    </tr>`
+  const v   = esc(report.version)
+  const COL = 5
 
-  for (const [groupLabel, { items }] of Object.entries(groups)) {
-    rows += `<tr style="background:#eff6ff">
-      <td colspan="4" style="font-weight:bold;color:#1e3a8a;padding:5px 10px">Epic: ${esc(groupLabel)}</td>
-    </tr>`
-    for (const issue of items) {
-      rows += `<tr>
-        <td style="font-family:monospace;color:#1e40af">${esc(issue.key)}</td>
-        <td style="color:#6b7280;font-size:12px">${esc(groupLabel)}</td>
-        <td style="color:#6b7280;font-size:12px">${esc(storyLabel(issue))}</td>
-        <td>${esc(issue.release_notes)}</td>
-      </tr>`
+  const epicRow  = (e)  => `<tr style="background:#1e3a8a;color:#fff;font-weight:bold">
+    <td>Epic</td><td>${esc(e.key)}</td><td colspan="3">${esc(e.summary)}</td></tr>
+    <tr style="background:#1e3a8a;color:#dbeafe;font-size:11px">
+    <td></td><td colspan="4">Status: ${esc(e.status)}</td></tr>`
+
+  const storyRow = (s)  => `<tr style="background:#eff6ff;font-weight:600">
+    <td style="padding-left:16px">Story</td><td>${esc(s.key)}</td><td colspan="2">${esc(s.summary)}</td><td>${esc(s.status)}</td></tr>`
+
+  const bugRow   = (b, indent) => `<tr>
+    <td style="padding-left:${indent}px;color:#6b7280;font-size:11px">Bug</td>
+    <td style="font-family:monospace;color:#1e40af">${esc(b.key)}</td>
+    <td>${esc(b.summary)}</td>
+    <td>${esc(b.status)}</td>
+    <td>${esc(b.release_notes)}</td></tr>`
+
+  let rows = `<tr style="background:#1e3a8a"><td colspan="${COL}" style="color:#fff;font-size:15px;font-weight:bold;padding:10px 12px">Release Notes — ${v}</td></tr>
+  <tr style="background:#dbeafe;font-weight:bold">
+    <td>Type</td><td>Key</td><td>Summary</td><td>Status</td><td>Release Notes</td></tr>`
+
+  const allEpics = [...(report.epics || []), ...(report.orphan_stories || []).map(s => ({ key:'', summary:'No Epic', status:'', stories:[s], bugs:[] })), { key:'', summary:'', status:'', stories:[], bugs: report.orphan_bugs || [] }]
+
+  for (const epic of report.epics || []) {
+    rows += epicRow(epic)
+    for (const story of epic.stories || []) {
+      rows += storyRow(story)
+      for (const bug of story.bugs || []) rows += bugRow(bug, 28)
     }
+    for (const bug of epic.bugs || []) rows += bugRow(bug, 16)
   }
+  for (const story of report.orphan_stories || []) {
+    rows += storyRow(story)
+    for (const bug of story.bugs || []) rows += bugRow(bug, 16)
+  }
+  for (const bug of report.orphan_bugs || []) rows += bugRow(bug, 8)
 
   return `<html><head><meta charset="utf-8"></head><body>
     <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px">
-      ${rows}
-    </table></body></html>`
+      ${rows}</table></body></html>`
 }
 
-function buildHTML(groups, version) {
+function buildHTML(report) {
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const v = esc(report.version)
+  const total = countAll(report)
+
+  const bugRows = (bugs, indent) => bugs.map(b => `
+    <tr class="bug-row">
+      <td class="type-cell" style="padding-left:${indent}px"><span class="badge bug">Bug</span></td>
+      <td><a href="${esc(b.url)}" target="_blank" class="key">${esc(b.key)}</a></td>
+      <td class="summary">${esc(b.summary)}</td>
+      <td><span class="status">${esc(b.status)}</span></td>
+      <td class="rn">${esc(b.release_notes) || '<span class="empty">—</span>'}</td>
+    </tr>`).join('')
+
   let sections = ''
-  for (const [groupLabel, { items }] of Object.entries(groups)) {
-    const rowsHtml = items.map(issue => `
-      <tr>
-        <td class="key"><a href="${esc(issue.url)}" target="_blank">${esc(issue.key)}</a></td>
-        <td class="story">${esc(storyLabel(issue))}</td>
-        <td class="note">${esc(issue.release_notes)}</td>
-      </tr>`).join('')
-    sections += `
-      <section>
-        <h2>Epic: ${esc(groupLabel)}</h2>
-        <table>
-          <thead><tr><th>Key</th><th>Story</th><th>Release Notes</th></tr></thead>
-          <tbody>${rowsHtml}</tbody>
-        </table>
-      </section>`
+  for (const epic of report.epics || []) {
+    let inner = ''
+    for (const story of epic.stories || []) {
+      inner += `<tr class="story-row">
+        <td class="type-cell" style="padding-left:16px"><span class="badge story">Story</span></td>
+        <td><a href="${esc(story.url)}" target="_blank" class="key">${esc(story.key)}</a></td>
+        <td class="summary">${esc(story.summary)}</td>
+        <td><span class="status">${esc(story.status)}</span></td>
+        <td class="rn"></td>
+      </tr>${bugRows(story.bugs || [], 28)}`
+    }
+    inner += bugRows(epic.bugs || [], 16)
+    sections += `<section>
+      <div class="epic-header">
+        <span class="badge epic">Epic</span>
+        <a href="${esc(epic.url)}" target="_blank" class="epic-key">${esc(epic.key)}</a>
+        <span class="epic-title">${esc(epic.summary)}</span>
+        <span class="status ml">${esc(epic.status)}</span>
+      </div>
+      <table><thead><tr>
+        <th style="width:70px">Type</th><th style="width:110px">Key</th>
+        <th>Summary</th><th style="width:140px">Status</th><th style="width:30%">Release Notes</th>
+      </tr></thead><tbody>${inner}</tbody></table>
+    </section>`
+  }
+  // orphans
+  if ((report.orphan_stories || []).length || (report.orphan_bugs || []).length) {
+    let inner = ''
+    for (const s of report.orphan_stories || []) {
+      inner += `<tr class="story-row"><td><span class="badge story">Story</span></td>
+        <td><a href="${esc(s.url)}" target="_blank" class="key">${esc(s.key)}</a></td>
+        <td>${esc(s.summary)}</td><td><span class="status">${esc(s.status)}</span></td><td></td></tr>
+        ${bugRows(s.bugs || [], 16)}`
+    }
+    inner += bugRows(report.orphan_bugs || [], 8)
+    sections += `<section><div class="epic-header"><span class="badge" style="background:#e5e7eb;color:#374151">No Epic</span></div>
+      <table><thead><tr><th>Type</th><th>Key</th><th>Summary</th><th>Status</th><th>Release Notes</th></tr></thead><tbody>${inner}</tbody></table></section>`
   }
 
-  const total = Object.values(groups).reduce((s, g) => s + g.items.length, 0)
   return `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <title>Release Notes — ${esc(version)}</title>
-  <style>
-    body{font-family:Arial,sans-serif;max-width:1100px;margin:40px auto;color:#1f2937;line-height:1.6}
-    header{border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:28px}
-    h1{margin:0;color:#1e3a8a;font-size:24px}
-    .meta{color:#6b7280;font-size:13px;margin-top:4px}
-    section{margin-bottom:32px}
-    h2{background:#eff6ff;border-left:4px solid #1e40af;padding:8px 14px;margin:0 0 0;font-size:13px;color:#1e3a8a;font-weight:700}
-    table{width:100%;border-collapse:collapse;font-size:13px}
-    thead tr{background:#f8fafc;border-bottom:2px solid #e2e8f0}
-    th{text-align:left;padding:7px 12px;color:#475569;font-weight:600;font-size:12px}
-    td{padding:7px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top}
-    tr:last-child td{border-bottom:none}
-    .key{white-space:nowrap;width:110px}
-    .key a{font-family:monospace;color:#1e40af;font-weight:600;text-decoration:none}
-    .key a:hover{text-decoration:underline}
-    .story{color:#64748b;width:200px;font-size:12px}
-    .note{color:#374151}
-  </style>
-</head>
+<html lang="en"><head><meta charset="utf-8"><title>Release Notes — ${v}</title>
+<style>
+  body{font-family:Arial,sans-serif;max-width:1200px;margin:40px auto;color:#1f2937;line-height:1.5}
+  header{border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:28px}
+  h1{margin:0;color:#1e3a8a;font-size:24px}.meta{color:#6b7280;font-size:13px;margin-top:4px}
+  section{margin-bottom:32px}
+  .epic-header{display:flex;align-items:center;gap:10px;background:#1e3a8a;color:#fff;padding:10px 14px;border-radius:6px 6px 0 0}
+  .epic-key{font-family:monospace;color:#93c5fd;font-size:13px;text-decoration:none}
+  .epic-key:hover{text-decoration:underline}
+  .epic-title{font-weight:600;font-size:14px;flex:1}
+  .ml{margin-left:auto}
+  .badge{display:inline-block;padding:2px 7px;border-radius:4px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em}
+  .badge.epic{background:#1e40af;color:#fff}
+  .badge.story{background:#7c3aed;color:#fff}
+  .badge.bug{background:#dc2626;color:#fff}
+  table{width:100%;border-collapse:collapse;font-size:13px;border:1px solid #e2e8f0}
+  th{text-align:left;padding:7px 10px;background:#f8fafc;color:#475569;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:.04em;border-bottom:2px solid #e2e8f0}
+  td{padding:6px 10px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+  .story-row td{background:#faf5ff}
+  .key{font-family:monospace;color:#1e40af;font-weight:600;text-decoration:none;font-size:12px}
+  .key:hover{text-decoration:underline}
+  .summary{color:#374151}.rn{color:#065f46;font-style:italic}
+  .status{font-size:11px;background:#f3f4f6;border-radius:4px;padding:2px 6px;color:#374151}
+  .empty{color:#9ca3af}.type-cell{color:#6b7280}
+</style></head>
 <body>
   <header>
-    <h1>Release Notes — ${esc(version)}</h1>
-    <p class="meta">Generated ${new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })} &nbsp;·&nbsp; ${total} issues</p>
+    <h1>Release Notes — ${v}</h1>
+    <p class="meta">Generated ${new Date().toLocaleDateString('en-US',{year:'numeric',month:'long',day:'numeric'})} &nbsp;·&nbsp; ${total} issues</p>
   </header>
   ${sections}
-</body>
-</html>`
+</body></html>`
+}
+
+// ── Bug row inside the generate report ────────────────────────────────────────
+function BugRow({ bug, indent }) {
+  return (
+    <div className={`flex gap-4 border-b border-gray-50 py-2.5 pr-5 hover:bg-gray-50 transition-colors items-start ${indent}`}>
+      <span className="text-xs font-bold bg-red-100 text-red-700 px-1.5 py-0.5 rounded uppercase tracking-wide shrink-0 mt-0.5">Bug</span>
+      <a href={bug.url} target="_blank" rel="noopener noreferrer"
+        className="font-mono text-xs text-brand-600 hover:underline font-semibold shrink-0 w-24 pt-0.5">{bug.key}</a>
+      <div className="flex-1 min-w-0">
+        <p className="text-xs text-gray-500 truncate">{bug.summary}</p>
+        {bug.release_notes && (
+          <p className="text-sm text-gray-700 leading-relaxed mt-0.5">{bug.release_notes}</p>
+        )}
+      </div>
+      <StatusPill status={bug.status} />
+    </div>
+  )
 }
 
 // ── Main page ─────────────────────────────────────────────────────────────────
@@ -274,19 +353,23 @@ export default function ReleaseNotesPage() {
     staleTime: 30 * 60 * 1000,
   })
 
-  // Generate mode uses the version selector too
-  const effectiveMode = mode === 'generate' ? 'version' : mode
-
-  const params = useMemo(() => {
-    if (effectiveMode === 'version' && selectedVersion) return { version: selectedVersion }
-    if (effectiveMode === 'epic'    && selectedEpic)    return { epic_key: selectedEpic }
+  const tableParams = useMemo(() => {
+    if (mode === 'version' && selectedVersion) return { version: selectedVersion }
+    if (mode === 'epic'    && selectedEpic)    return { epic_key: selectedEpic }
     return null
-  }, [effectiveMode, selectedVersion, selectedEpic])
+  }, [mode, selectedVersion, selectedEpic])
 
   const issuesQuery = useQuery({
-    queryKey: ['release-notes-issues', params],
-    queryFn:  ({ signal }) => getIssues(params, signal),
-    enabled:  !!params,
+    queryKey: ['release-notes-issues', tableParams],
+    queryFn:  ({ signal }) => getIssues(tableParams, signal),
+    enabled:  !!tableParams && mode !== 'generate',
+    staleTime: 5 * 60 * 1000,
+  })
+
+  const reportQuery = useQuery({
+    queryKey: ['release-notes-report', selectedVersion],
+    queryFn:  ({ signal }) => getReport(selectedVersion, signal),
+    enabled:  mode === 'generate' && !!selectedVersion,
     staleTime: 5 * 60 * 1000,
   })
 
@@ -300,17 +383,6 @@ export default function ReleaseNotesPage() {
     }))
   }, [issuesQuery.data, localNotes])
 
-  // Issues with release notes — used by generate mode
-  const issuesWithNotes = useMemo(
-    () => issues.filter(i => i.release_notes?.trim()),
-    [issues]
-  )
-
-  const groupedForGenerate = useMemo(
-    () => groupByEpic(issuesWithNotes),
-    [issuesWithNotes]
-  )
-
   const handleSaved = useCallback((key, text) => {
     setLocalNotes(prev => ({ ...prev, [key]: text }))
   }, [])
@@ -319,16 +391,18 @@ export default function ReleaseNotesPage() {
     setIsRefreshing(true)
     setLocalNotes({})
     try {
-      const refreshParams = params ? { ...params, refresh: true } : null
-      if (refreshParams) {
-        const data = await getIssues(refreshParams)
-        queryClient.setQueryData(['release-notes-issues', params], data)
+      if (mode === 'generate' && selectedVersion) {
+        const data = await getReport(selectedVersion)
+        queryClient.setQueryData(['release-notes-report', selectedVersion], data)
+      } else if (tableParams) {
+        const data = await getIssues({ ...tableParams, refresh: true })
+        queryClient.setQueryData(['release-notes-issues', tableParams], data)
       }
       setLastRefresh(new Date())
     } finally {
       setIsRefreshing(false)
     }
-  }, [params, queryClient])
+  }, [mode, selectedVersion, tableParams, queryClient])
 
   const filteredEpics = useMemo(() => {
     if (!epicSearch.trim()) return epics
@@ -344,14 +418,15 @@ export default function ReleaseNotesPage() {
   const filledCount = issues.filter(i => i.release_notes).length
   const emptyCount  = issues.length - filledCount
 
-  function handleExportXLS() {
-    const html = buildXLS(groupedForGenerate, selectedVersion)
-    downloadBlob(html, 'application/vnd.ms-excel', `release-notes-${selectedVersion}.xls`)
-  }
+  const report = reportQuery.data
 
+  function handleExportXLS() {
+    if (!report) return
+    downloadBlob(buildXLS(report), 'application/vnd.ms-excel', `release-notes-${selectedVersion}.xls`)
+  }
   function handleExportHTML() {
-    const html = buildHTML(groupedForGenerate, selectedVersion)
-    downloadBlob(html, 'text/html', `release-notes-${selectedVersion}.html`)
+    if (!report) return
+    downloadBlob(buildHTML(report), 'text/html', `release-notes-${selectedVersion}.html`)
   }
 
   const tabBtn = (id, Icon, label) => (
@@ -441,113 +516,135 @@ export default function ReleaseNotesPage() {
           )}
         </div>
 
-        {/* Loading */}
-        {issuesQuery.isLoading && params && (
+        {/* Loading — table tabs */}
+        {issuesQuery.isLoading && tableParams && mode !== 'generate' && (
+          <div className="flex justify-center py-16"><PageLoader /></div>
+        )}
+        {/* Loading — generate tab */}
+        {mode === 'generate' && reportQuery.isLoading && selectedVersion && (
           <div className="flex justify-center py-16"><PageLoader /></div>
         )}
 
         {/* Error */}
-        {issuesQuery.isError && (
+        {issuesQuery.isError && mode !== 'generate' && (
           <ErrorState message={issuesQuery.error?.message} onRetry={issuesQuery.refetch} />
+        )}
+        {reportQuery.isError && mode === 'generate' && (
+          <ErrorState message={reportQuery.error?.message} onRetry={reportQuery.refetch} />
         )}
 
         {/* ── GENERATE REPORT VIEW ───────────────────────────────────────── */}
-        {mode === 'generate' && !issuesQuery.isLoading && issuesWithNotes.length > 0 && (
+        {mode === 'generate' && report && !reportQuery.isLoading && (
           <div className="space-y-4">
             {/* Toolbar */}
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="flex items-center gap-3 text-sm">
                 <Newspaper className="h-4 w-4 text-brand-500" />
                 <strong className="text-gray-800">{selectedVersion}</strong>
                 <span className="text-gray-400">|</span>
-                <span className="text-gray-500">{issuesWithNotes.length} issues with notes</span>
-                {emptyCount > 0 && (
-                  <span className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded-full px-2 py-0.5">
-                    {emptyCount} without notes (excluded)
-                  </span>
-                )}
+                <span className="text-gray-500">{countAll(report)} issues</span>
+                <span className="text-gray-400">·</span>
+                <span className="text-gray-500">{(report.epics || []).length} epics</span>
               </div>
               <div className="flex gap-2">
-                <button
-                  onClick={handleExportXLS}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors"
-                >
-                  <FileDown className="h-3.5 w-3.5" />
-                  Export XLS
+                <button onClick={handleExportXLS}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors">
+                  <FileDown className="h-3.5 w-3.5" /> Export XLS
                 </button>
-                <button
-                  onClick={handleExportHTML}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors"
-                >
-                  <FileCode2 className="h-3.5 w-3.5" />
-                  Export HTML
+                <button onClick={handleExportHTML}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors">
+                  <FileCode2 className="h-3.5 w-3.5" /> Export HTML
                 </button>
               </div>
             </div>
 
-            {/* Report preview */}
-            <div className="card p-0 overflow-hidden">
-              {/* Report header */}
-              <div className="bg-brand-700 text-white px-6 py-4">
+            {/* Report header */}
+            <div className="rounded-xl overflow-hidden border border-gray-200 shadow-sm">
+              <div className="bg-brand-800 text-white px-6 py-4">
                 <h2 className="text-base font-bold tracking-wide">Release Notes — {selectedVersion}</h2>
                 <p className="text-brand-200 text-xs mt-0.5">
                   {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
-                  &nbsp;·&nbsp; {issuesWithNotes.length} issues
+                  &nbsp;·&nbsp; {countAll(report)} issues
                 </p>
               </div>
 
-              {/* Grouped sections */}
-              <div className="divide-y divide-gray-100">
-                {Object.entries(groupedForGenerate).map(([groupLabel, { epicKey, items }]) => (
-                  <div key={groupLabel}>
-                    {/* Epic header */}
-                    <div className="flex items-center gap-2 bg-blue-50 px-6 py-2.5 border-b border-blue-100">
-                      <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">Epic</span>
-                      <span className="text-sm font-semibold text-blue-900">{groupLabel}</span>
-                    </div>
-                    {/* Table header */}
-                    <div className="grid grid-cols-[120px_180px_1fr] gap-0 border-b border-gray-100 bg-gray-50 px-6 py-1.5">
-                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Key</span>
-                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Story</span>
-                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Release Notes</span>
-                    </div>
-                    {/* Issue rows */}
-                    {items.map(issue => (
-                      <div key={issue.key} className="grid grid-cols-[120px_180px_1fr] gap-0 px-6 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors items-start">
-                        <a
-                          href={issue.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="font-mono text-xs text-brand-600 hover:underline font-semibold"
-                        >
-                          {issue.key}
-                        </a>
-                        <span className="text-xs text-gray-500 leading-relaxed pr-3">
-                          {storyLabel(issue)}
-                        </span>
-                        <p className="text-sm text-gray-700 leading-relaxed">
-                          {issue.release_notes}
-                        </p>
-                      </div>
-                    ))}
+              {/* Epics */}
+              {(report.epics || []).map(epic => (
+                <div key={epic.key} className="border-t border-gray-100">
+                  {/* Epic row */}
+                  <div className="flex items-center gap-3 bg-blue-900 px-5 py-3">
+                    <span className="text-xs font-bold bg-blue-500 text-white px-2 py-0.5 rounded uppercase tracking-wide">Epic</span>
+                    <a href={epic.url} target="_blank" rel="noopener noreferrer"
+                      className="font-mono text-xs text-blue-300 hover:underline font-semibold shrink-0">{epic.key}</a>
+                    <span className="text-sm font-semibold text-white flex-1">{epic.summary}</span>
+                    <StatusPill status={epic.status} />
                   </div>
-                ))}
-              </div>
+
+                  {/* Stories under this epic */}
+                  {(epic.stories || []).map(story => (
+                    <div key={story.key}>
+                      {/* Story row */}
+                      <div className="flex items-center gap-3 bg-purple-50 border-b border-purple-100 px-5 py-2.5 pl-10">
+                        <span className="text-xs font-bold bg-purple-500 text-white px-2 py-0.5 rounded uppercase tracking-wide">Story</span>
+                        <a href={story.url} target="_blank" rel="noopener noreferrer"
+                          className="font-mono text-xs text-purple-700 hover:underline font-semibold shrink-0">{story.key}</a>
+                        <span className="text-sm text-purple-900 flex-1">{story.summary}</span>
+                        <StatusPill status={story.status} />
+                      </div>
+                      {/* Bugs under story */}
+                      {(story.bugs || []).map(bug => (
+                        <BugRow key={bug.key} bug={bug} indent="pl-16" />
+                      ))}
+                    </div>
+                  ))}
+
+                  {/* Bugs directly under epic */}
+                  {(epic.bugs || []).map(bug => (
+                    <BugRow key={bug.key} bug={bug} indent="pl-12" />
+                  ))}
+                </div>
+              ))}
+
+              {/* Orphan stories */}
+              {(report.orphan_stories || []).length > 0 && (
+                <div className="border-t border-gray-100">
+                  <div className="bg-gray-100 px-5 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">No Epic</div>
+                  {report.orphan_stories.map(story => (
+                    <div key={story.key}>
+                      <div className="flex items-center gap-3 bg-purple-50 border-b border-purple-100 px-5 py-2.5">
+                        <span className="text-xs font-bold bg-purple-500 text-white px-2 py-0.5 rounded uppercase">Story</span>
+                        <a href={story.url} target="_blank" rel="noopener noreferrer"
+                          className="font-mono text-xs text-purple-700 hover:underline font-semibold">{story.key}</a>
+                        <span className="text-sm text-purple-900 flex-1">{story.summary}</span>
+                        <StatusPill status={story.status} />
+                      </div>
+                      {(story.bugs || []).map(bug => <BugRow key={bug.key} bug={bug} indent="pl-10" />)}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Orphan bugs */}
+              {(report.orphan_bugs || []).length > 0 && (
+                <div className="border-t border-gray-100">
+                  <div className="bg-gray-100 px-5 py-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">Standalone Bugs</div>
+                  {report.orphan_bugs.map(bug => <BugRow key={bug.key} bug={bug} indent="pl-5" />)}
+                </div>
+              )}
             </div>
           </div>
         )}
 
-        {/* Generate mode — no notes yet */}
-        {mode === 'generate' && !issuesQuery.isLoading && params && issuesWithNotes.length === 0 && !issuesQuery.isError && (
+        {/* Generate mode — no version selected */}
+        {mode === 'generate' && !selectedVersion && (
           <div className="flex flex-col items-center justify-center py-24 text-gray-400">
             <Newspaper className="h-12 w-12 mb-3 opacity-30" />
-            <p className="text-sm">No issues with release notes found for {selectedVersion}.</p>
-            <p className="text-xs mt-1">Fill in release notes in the "By Fix Version" tab first.</p>
+            <p className="text-sm">Select a fix version to generate the report.</p>
           </div>
         )}
 
         {/* ── TABLE VIEW (By Version / By Epic) ─────────────────────────── */}
-        {mode !== 'generate' && !issuesQuery.isLoading && issues.length > 0 && (
+        {mode !== 'generate' && !issuesQuery.isLoading && issues.length > 0 && tableParams && (
           <>
             {/* Summary bar */}
             <div className="flex items-center gap-4 text-sm">
@@ -646,7 +743,7 @@ export default function ReleaseNotesPage() {
         )}
 
         {/* Empty results */}
-        {mode !== 'generate' && !issuesQuery.isLoading && params && issues.length === 0 && !issuesQuery.isError && (
+        {mode !== 'generate' && !issuesQuery.isLoading && tableParams && issues.length === 0 && !issuesQuery.isError && (
           <div className="flex flex-col items-center justify-center py-24 text-gray-400">
             <FileText className="h-12 w-12 mb-3 opacity-30" />
             <p className="text-sm">No bugs with labels FromHaim or Prod_Zoho found for this selection.</p>
@@ -654,7 +751,7 @@ export default function ReleaseNotesPage() {
         )}
 
         {/* No selection state */}
-        {!params && !issuesQuery.isLoading && (
+        {!tableParams && !issuesQuery.isLoading && mode !== 'generate' && (
           <div className="flex flex-col items-center justify-center py-24 text-gray-400">
             <FileText className="h-12 w-12 mb-3 opacity-30" />
             <p className="text-sm">

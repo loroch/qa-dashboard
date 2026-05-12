@@ -150,6 +150,86 @@ class ReleaseNotesService:
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
 
+    async def get_report_data(self, version: str, force_refresh: bool = False) -> dict:
+        import hashlib
+        cache_key = f"release_notes:report:{hashlib.md5(version.encode()).hexdigest()[:8]}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                f'project = TMT0 AND fixVersion = "{version}" '
+                f'AND issuetype in (Epic, Story, Bug) ORDER BY issuetype DESC, created DESC'
+            )
+            issues_raw = await self.jira.search_issues(
+                jql,
+                fields=[
+                    "summary", "status", "issuetype", "priority", "assignee",
+                    "fixVersions", "parent", "labels", RELEASE_NOTES_FIELD,
+                ],
+                max_total=1000,
+            )
+
+            epics   = {}   # key → epic dict
+            stories = {}   # key → story dict
+            bugs    = []   # list of bug dicts
+
+            for issue in issues_raw:
+                f      = issue.get("fields", {})
+                key    = issue["key"]
+                itype  = (f.get("issuetype") or {}).get("name", "Bug")
+                status = (f.get("status") or {}).get("name", "")
+                parent_raw = f.get("parent") or {}
+                parent_key = parent_raw.get("key", "")
+
+                base = {
+                    "key":     key,
+                    "url":     self._issue_url(key),
+                    "summary": f.get("summary", ""),
+                    "status":  status,
+                    "type":    itype,
+                    "priority": (f.get("priority") or {}).get("name", ""),
+                    "assignee": ((f.get("assignee") or {}).get("displayName") or ""),
+                    "labels":   f.get("labels") or [],
+                    "parent_key": parent_key,
+                }
+
+                if itype == "Epic":
+                    epics[key] = {**base, "stories": [], "bugs": []}
+                elif itype == "Story":
+                    stories[key] = {**base, "bugs": []}
+                else:
+                    rn = _extract_text(f.get(RELEASE_NOTES_FIELD))
+                    bugs.append({**base, "release_notes": rn})
+
+            # Wire bugs → stories → epics
+            orphan_bugs = []
+            for bug in bugs:
+                pk = bug["parent_key"]
+                if pk in stories:
+                    stories[pk]["bugs"].append(bug)
+                elif pk in epics:
+                    epics[pk]["bugs"].append(bug)
+                else:
+                    orphan_bugs.append(bug)
+
+            orphan_stories = []
+            for sk, story in stories.items():
+                pk = story["parent_key"]
+                if pk in epics:
+                    epics[pk]["stories"].append(story)
+                else:
+                    orphan_stories.append(story)
+
+            return {
+                "version": version,
+                "epics":   list(epics.values()),
+                "orphan_stories": orphan_stories,
+                "orphan_bugs":    orphan_bugs,
+            }
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
+
     async def update_release_notes(self, issue_key: str, text: str) -> dict:
         await self.jira.put(
             f"/issue/{issue_key}",
