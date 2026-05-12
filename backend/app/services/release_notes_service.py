@@ -107,19 +107,24 @@ class ReleaseNotesService:
             results = []
             for issue in issues_raw:
                 f = issue.get("fields", {})
-                desc_text = _extract_text(f.get("description"))
-                rn_text   = _extract_text(f.get(RELEASE_NOTES_FIELD))
+                desc_text  = _extract_text(f.get("description"))
+                rn_text    = _extract_text(f.get(RELEASE_NOTES_FIELD))
+                parent_raw = f.get("parent") or {}
+                parent_f   = parent_raw.get("fields") or {}
                 results.append({
-                    "key":           issue["key"],
-                    "url":           self._issue_url(issue["key"]),
-                    "summary":       f.get("summary", ""),
-                    "status":        (f.get("status") or {}).get("name", ""),
-                    "priority":      (f.get("priority") or {}).get("name", ""),
-                    "assignee":      ((f.get("assignee") or {}).get("displayName") or ""),
-                    "fix_versions":  [v["name"] for v in (f.get("fixVersions") or [])],
-                    "labels":        f.get("labels") or [],
-                    "description":   desc_text,
-                    "release_notes": rn_text,
+                    "key":            issue["key"],
+                    "url":            self._issue_url(issue["key"]),
+                    "summary":        f.get("summary", ""),
+                    "status":         (f.get("status") or {}).get("name", ""),
+                    "priority":       (f.get("priority") or {}).get("name", ""),
+                    "assignee":       ((f.get("assignee") or {}).get("displayName") or ""),
+                    "fix_versions":   [v["name"] for v in (f.get("fixVersions") or [])],
+                    "labels":         f.get("labels") or [],
+                    "description":    desc_text,
+                    "release_notes":  rn_text,
+                    "parent_key":     parent_raw.get("key", ""),
+                    "parent_summary": parent_f.get("summary", ""),
+                    "parent_type":    (parent_f.get("issuetype") or {}).get("name", ""),
                 })
             return results
 

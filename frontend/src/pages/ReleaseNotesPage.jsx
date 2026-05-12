@@ -2,14 +2,17 @@ import { useState, useMemo, useCallback } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { Header } from '../components/layout/Header'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
-import { FileText, Tag, Layers, Pencil, Check, X, ClipboardCopy } from 'lucide-react'
+import {
+  FileText, Tag, Layers, Pencil, Check, X, ClipboardCopy,
+  FileDown, FileCode2, Newspaper,
+} from 'lucide-react'
 import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api', timeout: 60000 })
 
-const getVersions   = () => api.get('/coverage/versions').then(r => r.data)
-const getEpics      = () => api.get('/dashboard/epics').then(r => r.data)
-const getIssues     = (params, sig) => api.get('/release-notes', { params, signal: sig }).then(r => r.data)
+const getVersions    = () => api.get('/coverage/versions').then(r => r.data)
+const getEpics       = () => api.get('/dashboard/epics').then(r => r.data)
+const getIssues      = (params, sig) => api.get('/release-notes', { params, signal: sig }).then(r => r.data)
 const putReleaseNote = (key, text) => api.put(`/release-notes/${key}`, { text }).then(r => r.data)
 
 const PRIORITY_COLOR = {
@@ -60,7 +63,8 @@ function ReleaseNotesCell({ issueKey, value, description, onSaved }) {
       onSaved(issueKey, draft)
       setEditing(false)
     } catch (e) {
-      setError(e?.response?.data?.detail || 'Save failed')
+      const detail = e?.response?.data?.detail
+      setError(detail || `Save failed (${e?.response?.status ?? 'network error'})`)
     } finally {
       setSaving(false)
     }
@@ -124,6 +128,102 @@ function ReleaseNotesCell({ issueKey, value, description, onSaved }) {
   )
 }
 
+// ── Export helpers ─────────────────────────────────────────────────────────────
+function groupByParent(issues) {
+  const groups = {}
+  for (const issue of issues) {
+    const label = issue.parent_key
+      ? `${issue.parent_key} — ${issue.parent_summary || issue.parent_key}`
+      : 'No Parent / Standalone'
+    if (!groups[label]) groups[label] = { type: issue.parent_type || '', items: [] }
+    groups[label].items.push(issue)
+  }
+  return groups
+}
+
+function downloadBlob(content, mimeType, filename) {
+  const blob = new Blob([content], { type: mimeType })
+  const url  = URL.createObjectURL(blob)
+  const a    = document.createElement('a')
+  a.href     = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function buildXLS(groups, version) {
+  const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  let rows = `
+    <tr style="background:#1e3a8a">
+      <td colspan="3" style="color:#fff;font-size:15px;font-weight:bold;padding:8px 12px">
+        Release Notes — ${esc(version)}
+      </td>
+    </tr>
+    <tr style="background:#dbeafe">
+      <td style="font-weight:bold;width:180px">Epic / Story</td>
+      <td style="font-weight:bold;width:110px">Issue Key</td>
+      <td style="font-weight:bold">Release Notes</td>
+    </tr>`
+
+  for (const [groupLabel, { items }] of Object.entries(groups)) {
+    rows += `<tr style="background:#f1f5f9">
+      <td colspan="3" style="font-weight:bold;padding:5px 10px">${esc(groupLabel)}</td>
+    </tr>`
+    for (const issue of items) {
+      rows += `<tr>
+        <td></td>
+        <td style="font-family:monospace;color:#1e40af">${esc(issue.key)}</td>
+        <td>${esc(issue.release_notes)}</td>
+      </tr>`
+    }
+  }
+
+  return `<html><head><meta charset="utf-8"></head><body>
+    <table border="1" cellpadding="6" cellspacing="0" style="border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px">
+      ${rows}
+    </table></body></html>`
+}
+
+function buildHTML(groups, version) {
+  const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  let sections = ''
+  for (const [groupLabel, { items }] of Object.entries(groups)) {
+    const itemsHtml = items.map(issue =>
+      `<li><span class="key">${esc(issue.key)}</span><span class="note">${esc(issue.release_notes)}</span></li>`
+    ).join('')
+    sections += `<section><h2>${esc(groupLabel)}</h2><ul>${itemsHtml}</ul></section>`
+  }
+
+  const total = Object.values(groups).reduce((s, g) => s + g.items.length, 0)
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Release Notes — ${esc(version)}</title>
+  <style>
+    body{font-family:Arial,sans-serif;max-width:960px;margin:40px auto;color:#1f2937;line-height:1.6}
+    header{border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:28px}
+    h1{margin:0;color:#1e3a8a;font-size:24px}
+    .meta{color:#6b7280;font-size:13px;margin-top:4px}
+    section{margin-bottom:28px}
+    h2{background:#eff6ff;border-left:4px solid #1e40af;padding:8px 14px;margin:0 0 8px;font-size:14px;color:#1e3a8a}
+    ul{list-style:none;margin:0;padding:0}
+    li{display:flex;gap:14px;padding:6px 14px;border-bottom:1px solid #f3f4f6;font-size:13px}
+    li:last-child{border-bottom:none}
+    .key{font-family:monospace;color:#1e40af;min-width:100px;font-weight:600;white-space:nowrap}
+    .note{color:#374151}
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Release Notes — ${esc(version)}</h1>
+    <p class="meta">Generated ${new Date().toLocaleDateString('en-US', { year:'numeric', month:'long', day:'numeric' })} &nbsp;·&nbsp; ${total} issues</p>
+  </header>
+  ${sections}
+</body>
+</html>`
+}
+
 // ── Main page ─────────────────────────────────────────────────────────────────
 export default function ReleaseNotesPage() {
   const [mode,            setMode]            = useState('version')
@@ -132,7 +232,6 @@ export default function ReleaseNotesPage() {
   const [epicSearch,      setEpicSearch]      = useState('')
   const [isRefreshing,    setIsRefreshing]    = useState(false)
   const [lastRefresh,     setLastRefresh]     = useState(null)
-  // Local overrides after inline saves (key → new text)
   const [localNotes,      setLocalNotes]      = useState({})
 
   const queryClient = useQueryClient()
@@ -149,11 +248,14 @@ export default function ReleaseNotesPage() {
     staleTime: 30 * 60 * 1000,
   })
 
+  // Generate mode uses the version selector too
+  const effectiveMode = mode === 'generate' ? 'version' : mode
+
   const params = useMemo(() => {
-    if (mode === 'version' && selectedVersion) return { version: selectedVersion }
-    if (mode === 'epic'    && selectedEpic)    return { epic_key: selectedEpic }
+    if (effectiveMode === 'version' && selectedVersion) return { version: selectedVersion }
+    if (effectiveMode === 'epic'    && selectedEpic)    return { epic_key: selectedEpic }
     return null
-  }, [mode, selectedVersion, selectedEpic])
+  }, [effectiveMode, selectedVersion, selectedEpic])
 
   const issuesQuery = useQuery({
     queryKey: ['release-notes-issues', params],
@@ -171,6 +273,17 @@ export default function ReleaseNotesPage() {
         : issue.release_notes,
     }))
   }, [issuesQuery.data, localNotes])
+
+  // Issues with release notes — used by generate mode
+  const issuesWithNotes = useMemo(
+    () => issues.filter(i => i.release_notes?.trim()),
+    [issues]
+  )
+
+  const groupedForGenerate = useMemo(
+    () => groupByParent(issuesWithNotes),
+    [issuesWithNotes]
+  )
 
   const handleSaved = useCallback((key, text) => {
     setLocalNotes(prev => ({ ...prev, [key]: text }))
@@ -205,6 +318,30 @@ export default function ReleaseNotesPage() {
   const filledCount = issues.filter(i => i.release_notes).length
   const emptyCount  = issues.length - filledCount
 
+  function handleExportXLS() {
+    const html = buildXLS(groupedForGenerate, selectedVersion)
+    downloadBlob(html, 'application/vnd.ms-excel', `release-notes-${selectedVersion}.xls`)
+  }
+
+  function handleExportHTML() {
+    const html = buildHTML(groupedForGenerate, selectedVersion)
+    downloadBlob(html, 'text/html', `release-notes-${selectedVersion}.html`)
+  }
+
+  const tabBtn = (id, Icon, label) => (
+    <button
+      onClick={() => setMode(id)}
+      className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
+        mode === id
+          ? 'bg-brand-600 text-white border-brand-600'
+          : 'bg-white text-gray-600 border-gray-300 hover:border-brand-400'
+      }`}
+    >
+      <Icon className="h-4 w-4" />
+      {label}
+    </button>
+  )
+
   return (
     <div className="flex-1 flex flex-col">
       <Header
@@ -218,32 +355,14 @@ export default function ReleaseNotesPage() {
 
         {/* Selector card */}
         <div className="card space-y-4">
-          <div className="flex gap-2">
-            <button
-              onClick={() => setMode('version')}
-              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                mode === 'version'
-                  ? 'bg-brand-600 text-white border-brand-600'
-                  : 'bg-white text-gray-600 border-gray-300 hover:border-brand-400'
-              }`}
-            >
-              <Tag className="h-4 w-4" />
-              By Fix Version
-            </button>
-            <button
-              onClick={() => setMode('epic')}
-              className={`inline-flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium border transition-colors ${
-                mode === 'epic'
-                  ? 'bg-brand-600 text-white border-brand-600'
-                  : 'bg-white text-gray-600 border-gray-300 hover:border-brand-400'
-              }`}
-            >
-              <Layers className="h-4 w-4" />
-              By Epic
-            </button>
+          <div className="flex gap-2 flex-wrap">
+            {tabBtn('version',  Tag,       'By Fix Version')}
+            {tabBtn('epic',     Layers,    'By Epic')}
+            {tabBtn('generate', Newspaper, 'Generate Report')}
           </div>
 
-          {mode === 'version' && (
+          {/* Version selector — shared between 'version' and 'generate' */}
+          {(mode === 'version' || mode === 'generate') && (
             <div className="flex items-center gap-3">
               <label className="text-sm font-medium text-gray-700 shrink-0">Fix Version</label>
               {versionsLoading ? (
@@ -306,8 +425,98 @@ export default function ReleaseNotesPage() {
           <ErrorState message={issuesQuery.error?.message} onRetry={issuesQuery.refetch} />
         )}
 
-        {/* Results */}
-        {!issuesQuery.isLoading && issues.length > 0 && (
+        {/* ── GENERATE REPORT VIEW ───────────────────────────────────────── */}
+        {mode === 'generate' && !issuesQuery.isLoading && issuesWithNotes.length > 0 && (
+          <div className="space-y-4">
+            {/* Toolbar */}
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-3 text-sm">
+                <Newspaper className="h-4 w-4 text-brand-500" />
+                <strong className="text-gray-800">{selectedVersion}</strong>
+                <span className="text-gray-400">|</span>
+                <span className="text-gray-500">{issuesWithNotes.length} issues with notes</span>
+                {emptyCount > 0 && (
+                  <span className="text-xs text-orange-600 bg-orange-50 border border-orange-200 rounded-full px-2 py-0.5">
+                    {emptyCount} without notes (excluded)
+                  </span>
+                )}
+              </div>
+              <div className="flex gap-2">
+                <button
+                  onClick={handleExportXLS}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-green-600 text-white rounded-lg text-xs font-medium hover:bg-green-700 transition-colors"
+                >
+                  <FileDown className="h-3.5 w-3.5" />
+                  Export XLS
+                </button>
+                <button
+                  onClick={handleExportHTML}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 text-white rounded-lg text-xs font-medium hover:bg-blue-700 transition-colors"
+                >
+                  <FileCode2 className="h-3.5 w-3.5" />
+                  Export HTML
+                </button>
+              </div>
+            </div>
+
+            {/* Report preview */}
+            <div className="card p-0 overflow-hidden">
+              {/* Report header */}
+              <div className="bg-brand-700 text-white px-6 py-4">
+                <h2 className="text-base font-bold tracking-wide">Release Notes — {selectedVersion}</h2>
+                <p className="text-brand-200 text-xs mt-0.5">
+                  {new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}
+                  &nbsp;·&nbsp; {issuesWithNotes.length} issues
+                </p>
+              </div>
+
+              {/* Grouped sections */}
+              <div className="divide-y divide-gray-100">
+                {Object.entries(groupedForGenerate).map(([groupLabel, { type, items }]) => (
+                  <div key={groupLabel}>
+                    {/* Group header */}
+                    <div className="flex items-center gap-2 bg-gray-50 px-6 py-2.5 border-b border-gray-200">
+                      <span className="text-xs font-semibold text-brand-700 uppercase tracking-wide">
+                        {type || 'Group'}
+                      </span>
+                      <span className="text-sm font-medium text-gray-700">{groupLabel}</span>
+                    </div>
+                    {/* Issues */}
+                    <div className="divide-y divide-gray-50">
+                      {items.map(issue => (
+                        <div key={issue.key} className="flex gap-4 px-6 py-3 hover:bg-gray-50 transition-colors">
+                          <a
+                            href={issue.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="font-mono text-xs text-brand-600 hover:underline font-semibold shrink-0 pt-0.5 w-24"
+                          >
+                            {issue.key}
+                          </a>
+                          <p className="text-sm text-gray-700 leading-relaxed flex-1">
+                            {issue.release_notes}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Generate mode — no notes yet */}
+        {mode === 'generate' && !issuesQuery.isLoading && params && issuesWithNotes.length === 0 && !issuesQuery.isError && (
+          <div className="flex flex-col items-center justify-center py-24 text-gray-400">
+            <Newspaper className="h-12 w-12 mb-3 opacity-30" />
+            <p className="text-sm">No issues with release notes found for {selectedVersion}.</p>
+            <p className="text-xs mt-1">Fill in release notes in the "By Fix Version" tab first.</p>
+          </div>
+        )}
+
+        {/* ── TABLE VIEW (By Version / By Epic) ─────────────────────────── */}
+        {mode !== 'generate' && !issuesQuery.isLoading && issues.length > 0 && (
           <>
             {/* Summary bar */}
             <div className="flex items-center gap-4 text-sm">
@@ -406,7 +615,7 @@ export default function ReleaseNotesPage() {
         )}
 
         {/* Empty results */}
-        {!issuesQuery.isLoading && params && issues.length === 0 && !issuesQuery.isError && (
+        {mode !== 'generate' && !issuesQuery.isLoading && params && issues.length === 0 && !issuesQuery.isError && (
           <div className="flex flex-col items-center justify-center py-24 text-gray-400">
             <FileText className="h-12 w-12 mb-3 opacity-30" />
             <p className="text-sm">No bugs with labels FromHaim or Prod_Zoho found for this selection.</p>
@@ -418,7 +627,9 @@ export default function ReleaseNotesPage() {
           <div className="flex flex-col items-center justify-center py-24 text-gray-400">
             <FileText className="h-12 w-12 mb-3 opacity-30" />
             <p className="text-sm">
-              {mode === 'version' ? 'Select a fix version to see release notes.' : 'Select an epic to see release notes.'}
+              {mode === 'epic'
+                ? 'Select an epic to see release notes.'
+                : 'Select a fix version to see release notes.'}
             </p>
           </div>
         )}
