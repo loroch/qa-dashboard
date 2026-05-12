@@ -200,7 +200,8 @@ class ReleaseNotesService:
                     stories[key] = {**base, "bugs": []}
                 else:
                     rn = _extract_text(f.get(RELEASE_NOTES_FIELD))
-                    bugs.append({**base, "release_notes": rn})
+                    if rn.strip():
+                        bugs.append({**base, "release_notes": rn})
 
             # Collect parent keys that are missing from our sets
             # (stories/epics that don't have fixVersion set won't appear in the JQL)
