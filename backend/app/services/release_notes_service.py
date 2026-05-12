@@ -100,31 +100,51 @@ class ReleaseNotesService:
                     "summary", "status", "priority", "assignee",
                     "fixVersions", "parent", "labels",
                     "description", RELEASE_NOTES_FIELD,
+                    "customfield_10014",  # Epic Link key
                 ],
                 max_total=500,
             )
 
             results = []
             for issue in issues_raw:
-                f = issue.get("fields", {})
-                desc_text  = _extract_text(f.get("description"))
-                rn_text    = _extract_text(f.get(RELEASE_NOTES_FIELD))
-                parent_raw = f.get("parent") or {}
-                parent_f   = parent_raw.get("fields") or {}
+                f           = issue.get("fields", {})
+                desc_text   = _extract_text(f.get("description"))
+                rn_text     = _extract_text(f.get(RELEASE_NOTES_FIELD))
+                parent_raw  = f.get("parent") or {}
+                parent_f    = parent_raw.get("fields") or {}
+                parent_key  = parent_raw.get("key", "")
+                parent_sum  = parent_f.get("summary", "")
+                parent_type = (parent_f.get("issuetype") or {}).get("name", "")
+                epic_link   = f.get("customfield_10014") or ""  # raw epic key string
+
+                if parent_type == "Epic":
+                    epic_key, epic_summary = parent_key, parent_sum
+                    story_key, story_summary = "", ""
+                elif parent_type == "Story":
+                    story_key, story_summary = parent_key, parent_sum
+                    epic_key, epic_summary = epic_link, ""
+                else:
+                    epic_key, epic_summary = epic_link, ""
+                    story_key, story_summary = "", ""
+
                 results.append({
-                    "key":            issue["key"],
-                    "url":            self._issue_url(issue["key"]),
-                    "summary":        f.get("summary", ""),
-                    "status":         (f.get("status") or {}).get("name", ""),
-                    "priority":       (f.get("priority") or {}).get("name", ""),
-                    "assignee":       ((f.get("assignee") or {}).get("displayName") or ""),
-                    "fix_versions":   [v["name"] for v in (f.get("fixVersions") or [])],
-                    "labels":         f.get("labels") or [],
-                    "description":    desc_text,
-                    "release_notes":  rn_text,
-                    "parent_key":     parent_raw.get("key", ""),
-                    "parent_summary": parent_f.get("summary", ""),
-                    "parent_type":    (parent_f.get("issuetype") or {}).get("name", ""),
+                    "key":           issue["key"],
+                    "url":           self._issue_url(issue["key"]),
+                    "summary":       f.get("summary", ""),
+                    "status":        (f.get("status") or {}).get("name", ""),
+                    "priority":      (f.get("priority") or {}).get("name", ""),
+                    "assignee":      ((f.get("assignee") or {}).get("displayName") or ""),
+                    "fix_versions":  [v["name"] for v in (f.get("fixVersions") or [])],
+                    "labels":        f.get("labels") or [],
+                    "description":   desc_text,
+                    "release_notes": rn_text,
+                    "parent_key":    parent_key,
+                    "parent_summary": parent_sum,
+                    "parent_type":   parent_type,
+                    "epic_key":      epic_key,
+                    "epic_summary":  epic_summary,
+                    "story_key":     story_key,
+                    "story_summary": story_summary,
                 })
             return results
 

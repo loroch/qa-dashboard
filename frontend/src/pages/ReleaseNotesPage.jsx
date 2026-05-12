@@ -129,13 +129,22 @@ function ReleaseNotesCell({ issueKey, value, description, onSaved }) {
 }
 
 // ── Export helpers ─────────────────────────────────────────────────────────────
-function groupByParent(issues) {
+function epicLabel(issue) {
+  if (issue.epic_key && issue.epic_summary) return `${issue.epic_key} — ${issue.epic_summary}`
+  if (issue.epic_key) return issue.epic_key
+  return 'No Epic'
+}
+function storyLabel(issue) {
+  if (issue.story_key && issue.story_summary) return `${issue.story_key} — ${issue.story_summary}`
+  if (issue.story_key) return issue.story_key
+  return '—'
+}
+
+function groupByEpic(issues) {
   const groups = {}
   for (const issue of issues) {
-    const label = issue.parent_key
-      ? `${issue.parent_key} — ${issue.parent_summary || issue.parent_key}`
-      : 'No Parent / Standalone'
-    if (!groups[label]) groups[label] = { type: issue.parent_type || '', items: [] }
+    const label = epicLabel(issue)
+    if (!groups[label]) groups[label] = { epicKey: issue.epic_key, items: [] }
     groups[label].items.push(issue)
   }
   return groups
@@ -155,24 +164,26 @@ function buildXLS(groups, version) {
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   let rows = `
     <tr style="background:#1e3a8a">
-      <td colspan="3" style="color:#fff;font-size:15px;font-weight:bold;padding:8px 12px">
+      <td colspan="4" style="color:#fff;font-size:15px;font-weight:bold;padding:8px 12px">
         Release Notes — ${esc(version)}
       </td>
     </tr>
     <tr style="background:#dbeafe">
-      <td style="font-weight:bold;width:180px">Epic / Story</td>
       <td style="font-weight:bold;width:110px">Issue Key</td>
+      <td style="font-weight:bold;width:200px">Epic</td>
+      <td style="font-weight:bold;width:180px">Story</td>
       <td style="font-weight:bold">Release Notes</td>
     </tr>`
 
   for (const [groupLabel, { items }] of Object.entries(groups)) {
-    rows += `<tr style="background:#f1f5f9">
-      <td colspan="3" style="font-weight:bold;padding:5px 10px">${esc(groupLabel)}</td>
+    rows += `<tr style="background:#eff6ff">
+      <td colspan="4" style="font-weight:bold;color:#1e3a8a;padding:5px 10px">Epic: ${esc(groupLabel)}</td>
     </tr>`
     for (const issue of items) {
       rows += `<tr>
-        <td></td>
         <td style="font-family:monospace;color:#1e40af">${esc(issue.key)}</td>
+        <td style="color:#6b7280;font-size:12px">${esc(groupLabel)}</td>
+        <td style="color:#6b7280;font-size:12px">${esc(storyLabel(issue))}</td>
         <td>${esc(issue.release_notes)}</td>
       </tr>`
     }
@@ -188,10 +199,20 @@ function buildHTML(groups, version) {
   const esc = s => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   let sections = ''
   for (const [groupLabel, { items }] of Object.entries(groups)) {
-    const itemsHtml = items.map(issue =>
-      `<li><span class="key">${esc(issue.key)}</span><span class="note">${esc(issue.release_notes)}</span></li>`
-    ).join('')
-    sections += `<section><h2>${esc(groupLabel)}</h2><ul>${itemsHtml}</ul></section>`
+    const rowsHtml = items.map(issue => `
+      <tr>
+        <td class="key"><a href="${esc(issue.url)}" target="_blank">${esc(issue.key)}</a></td>
+        <td class="story">${esc(storyLabel(issue))}</td>
+        <td class="note">${esc(issue.release_notes)}</td>
+      </tr>`).join('')
+    sections += `
+      <section>
+        <h2>Epic: ${esc(groupLabel)}</h2>
+        <table>
+          <thead><tr><th>Key</th><th>Story</th><th>Release Notes</th></tr></thead>
+          <tbody>${rowsHtml}</tbody>
+        </table>
+      </section>`
   }
 
   const total = Object.values(groups).reduce((s, g) => s + g.items.length, 0)
@@ -201,16 +222,21 @@ function buildHTML(groups, version) {
   <meta charset="utf-8">
   <title>Release Notes — ${esc(version)}</title>
   <style>
-    body{font-family:Arial,sans-serif;max-width:960px;margin:40px auto;color:#1f2937;line-height:1.6}
+    body{font-family:Arial,sans-serif;max-width:1100px;margin:40px auto;color:#1f2937;line-height:1.6}
     header{border-bottom:3px solid #1e40af;padding-bottom:12px;margin-bottom:28px}
     h1{margin:0;color:#1e3a8a;font-size:24px}
     .meta{color:#6b7280;font-size:13px;margin-top:4px}
-    section{margin-bottom:28px}
-    h2{background:#eff6ff;border-left:4px solid #1e40af;padding:8px 14px;margin:0 0 8px;font-size:14px;color:#1e3a8a}
-    ul{list-style:none;margin:0;padding:0}
-    li{display:flex;gap:14px;padding:6px 14px;border-bottom:1px solid #f3f4f6;font-size:13px}
-    li:last-child{border-bottom:none}
-    .key{font-family:monospace;color:#1e40af;min-width:100px;font-weight:600;white-space:nowrap}
+    section{margin-bottom:32px}
+    h2{background:#eff6ff;border-left:4px solid #1e40af;padding:8px 14px;margin:0 0 0;font-size:13px;color:#1e3a8a;font-weight:700}
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    thead tr{background:#f8fafc;border-bottom:2px solid #e2e8f0}
+    th{text-align:left;padding:7px 12px;color:#475569;font-weight:600;font-size:12px}
+    td{padding:7px 12px;border-bottom:1px solid #f1f5f9;vertical-align:top}
+    tr:last-child td{border-bottom:none}
+    .key{white-space:nowrap;width:110px}
+    .key a{font-family:monospace;color:#1e40af;font-weight:600;text-decoration:none}
+    .key a:hover{text-decoration:underline}
+    .story{color:#64748b;width:200px;font-size:12px}
     .note{color:#374151}
   </style>
 </head>
@@ -281,7 +307,7 @@ export default function ReleaseNotesPage() {
   )
 
   const groupedForGenerate = useMemo(
-    () => groupByParent(issuesWithNotes),
+    () => groupByEpic(issuesWithNotes),
     [issuesWithNotes]
   )
 
@@ -472,33 +498,38 @@ export default function ReleaseNotesPage() {
 
               {/* Grouped sections */}
               <div className="divide-y divide-gray-100">
-                {Object.entries(groupedForGenerate).map(([groupLabel, { type, items }]) => (
+                {Object.entries(groupedForGenerate).map(([groupLabel, { epicKey, items }]) => (
                   <div key={groupLabel}>
-                    {/* Group header */}
-                    <div className="flex items-center gap-2 bg-gray-50 px-6 py-2.5 border-b border-gray-200">
-                      <span className="text-xs font-semibold text-brand-700 uppercase tracking-wide">
-                        {type || 'Group'}
-                      </span>
-                      <span className="text-sm font-medium text-gray-700">{groupLabel}</span>
+                    {/* Epic header */}
+                    <div className="flex items-center gap-2 bg-blue-50 px-6 py-2.5 border-b border-blue-100">
+                      <span className="text-xs font-bold text-blue-700 uppercase tracking-wide">Epic</span>
+                      <span className="text-sm font-semibold text-blue-900">{groupLabel}</span>
                     </div>
-                    {/* Issues */}
-                    <div className="divide-y divide-gray-50">
-                      {items.map(issue => (
-                        <div key={issue.key} className="flex gap-4 px-6 py-3 hover:bg-gray-50 transition-colors">
-                          <a
-                            href={issue.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="font-mono text-xs text-brand-600 hover:underline font-semibold shrink-0 pt-0.5 w-24"
-                          >
-                            {issue.key}
-                          </a>
-                          <p className="text-sm text-gray-700 leading-relaxed flex-1">
-                            {issue.release_notes}
-                          </p>
-                        </div>
-                      ))}
+                    {/* Table header */}
+                    <div className="grid grid-cols-[120px_180px_1fr] gap-0 border-b border-gray-100 bg-gray-50 px-6 py-1.5">
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Key</span>
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Story</span>
+                      <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Release Notes</span>
                     </div>
+                    {/* Issue rows */}
+                    {items.map(issue => (
+                      <div key={issue.key} className="grid grid-cols-[120px_180px_1fr] gap-0 px-6 py-3 border-b border-gray-50 hover:bg-gray-50 transition-colors items-start">
+                        <a
+                          href={issue.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="font-mono text-xs text-brand-600 hover:underline font-semibold"
+                        >
+                          {issue.key}
+                        </a>
+                        <span className="text-xs text-gray-500 leading-relaxed pr-3">
+                          {storyLabel(issue)}
+                        </span>
+                        <p className="text-sm text-gray-700 leading-relaxed">
+                          {issue.release_notes}
+                        </p>
+                      </div>
+                    ))}
                   </div>
                 ))}
               </div>
