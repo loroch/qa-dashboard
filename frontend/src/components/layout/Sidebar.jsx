@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, CheckSquare, Users, AlertTriangle,
-  Bug, Clock, TrendingUp, History, Ticket, BarChart2, FlaskConical, Wand2, Zap, Layers, ClipboardList, FileText
+  Bug, Clock, TrendingUp, History, Ticket, BarChart2, FlaskConical, Wand2, Zap, Layers, ClipboardList, FileText, GitBranch
 } from 'lucide-react'
 
 const nav = [
@@ -19,6 +19,7 @@ const nav = [
   { to: '/test-generator', label: 'Test Generator',   icon: Wand2 },
   { to: '/test-plans',     label: 'Test Plans',       icon: ClipboardList },
   { to: '/release-notes',  label: 'Release Notes',    icon: FileText },
+  { to: '/investigation',  label: 'Investigation',    icon: GitBranch },
   { to: '/anomaly',        label: 'Anomalies',        icon: Zap },
   { to: '/changelog',      label: 'Changelog',        icon: History },
 ]

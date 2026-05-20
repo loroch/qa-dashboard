@@ -16,6 +16,7 @@ import AnomalyPage from './pages/AnomalyPage'
 import BugsByVersionPage from './pages/BugsByVersionPage'
 import TestPlansPage from './pages/TestPlansPage'
 import ReleaseNotesPage from './pages/ReleaseNotesPage'
+import InvestigationPage from './pages/InvestigationPage'
 
 export default function App() {
   return (
@@ -40,6 +41,7 @@ export default function App() {
             <Route path="/bugs-by-version"   element={<BugsByVersionPage />} />
             <Route path="/test-plans"        element={<TestPlansPage />} />
             <Route path="/release-notes"     element={<ReleaseNotesPage />} />
+            <Route path="/investigation"     element={<InvestigationPage />} />
           </Routes>
         </main>
       </div>
