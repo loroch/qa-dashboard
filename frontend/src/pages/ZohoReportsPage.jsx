@@ -1,10 +1,10 @@
-import { useState, useMemo, useEffect, useCallback } from 'react'
+import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { Header } from '../components/layout/Header'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import { AgingBadge } from '../components/common/Badge'
-import { ExternalLink, Link, BarChart2, ChevronUp, ChevronDown, X, Calendar, Unlink, Bug, Loader2, CheckCircle, AlertCircle, Paperclip } from 'lucide-react'
+import { ExternalLink, Link, BarChart2, ChevronUp, ChevronDown, X, Calendar, Unlink, Bug, Loader2, CheckCircle, AlertCircle, Paperclip, Sparkles } from 'lucide-react'
 import { format, parseISO, subMonths } from 'date-fns'
 import axios from 'axios'
 
@@ -83,8 +83,12 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
     attachment_ids: [],
   })
   const [submitting, setSubmitting] = useState(false)
+  const [aiGenerating, setAiGenerating] = useState(false)
   const [result, setResult] = useState(null)   // { key, url } on success
   const [error, setError]   = useState(null)
+  const [epicSearch, setEpicSearch] = useState('')
+  const [epicOpen, setEpicOpen]     = useState(false)
+  const epicRef = useRef(null)
 
   // Fetch meta (epics, fix versions, sprints, priorities)
   const { data: meta, isLoading: metaLoading } = useQuery({
@@ -100,13 +104,21 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
     staleTime: 5 * 60 * 1000,
   })
 
+  // Strip HTML tags from Zoho descriptions (Zoho returns rich HTML)
+  const stripHtml = (raw) => {
+    if (!raw) return ''
+    const tmp = document.createElement('div')
+    tmp.innerHTML = raw
+    return (tmp.textContent || tmp.innerText || '').replace(/\n{3,}/g, '\n\n').trim()
+  }
+
   // Pre-fill from detail once loaded
   useEffect(() => {
     if (detail) {
       setForm(f => ({
         ...f,
         summary:       f.summary     || detail.subject || '',
-        description:   f.description || detail.description || '',
+        description:   f.description || stripHtml(detail.description) || '',
         severity:      detail.suggested_severity || f.severity,
         priority_name: detail.suggested_priority || f.priority_name,
         // Pre-select ALL attachments
@@ -158,6 +170,42 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
       setError(e.response?.data?.detail || e.message || 'Unknown error')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const filteredEpics = useMemo(() => {
+    const q = epicSearch.toLowerCase()
+    return (meta?.epics || []).filter(e =>
+      e.name.toLowerCase().includes(q) || e.key.toLowerCase().includes(q)
+    )
+  }, [meta?.epics, epicSearch])
+
+  useEffect(() => {
+    const handler = (e) => { if (epicRef.current && !epicRef.current.contains(e.target)) setEpicOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const selectEpic = (key, label) => { set('epic_key', key); setEpicSearch(label); setEpicOpen(false) }
+
+  const generateWithAI = async () => {
+    setAiGenerating(true)
+    setError(null)
+    try {
+      const res = await api.post('/zoho/ai-generate-bug-fields', {
+        summary: form.summary,
+        description: form.description,
+      })
+      setForm(f => ({
+        ...f,
+        steps_to_reproduce: res.data.steps_to_reproduce || f.steps_to_reproduce,
+        actual_result:      res.data.actual_result      || f.actual_result,
+        expected_result:    res.data.expected_result    || f.expected_result,
+      }))
+    } catch (e) {
+      setError(e.response?.data?.detail || e.message || 'AI generation failed')
+    } finally {
+      setAiGenerating(false)
     }
   }
 
@@ -237,6 +285,22 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
                 />
               </div>
 
+              {/* AI Generate */}
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Bug Details</span>
+                <button
+                  type="button"
+                  onClick={generateWithAI}
+                  disabled={aiGenerating || !form.summary}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-violet-50 text-violet-700 hover:bg-violet-100 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+                >
+                  {aiGenerating
+                    ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    : <Sparkles className="h-3.5 w-3.5" />}
+                  {aiGenerating ? 'Generating…' : 'AI Generate'}
+                </button>
+              </div>
+
               {/* Steps to reproduce */}
               <div>
                 <label className="block text-xs font-semibold text-gray-600 mb-1">Steps to Reproduce</label>
@@ -305,19 +369,40 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
 
               {/* Dropdowns: Epic, Fix Version, Found In Version, Priority, Sprint */}
               <div className="grid grid-cols-2 gap-3">
-                {/* Epic */}
-                <div>
+                {/* Epic — searchable combobox */}
+                <div ref={epicRef} className="relative">
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Epic (Parent)</label>
-                  <select
-                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white focus:outline-none focus:border-brand-400"
-                    value={form.epic_key}
-                    onChange={e => set('epic_key', e.target.value)}
-                  >
-                    <option value="">— No epic —</option>
-                    {(meta?.epics || []).map(e => (
-                      <option key={e.key} value={e.key}>{e.name} ({e.key})</option>
-                    ))}
-                  </select>
+                  <input
+                    type="text"
+                    className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-brand-400"
+                    placeholder="Search epic…"
+                    value={epicSearch}
+                    onChange={e => { setEpicSearch(e.target.value); setEpicOpen(true) }}
+                    onFocus={() => setEpicOpen(true)}
+                  />
+                  {epicOpen && (
+                    <div className="absolute z-50 w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-xl max-h-52 overflow-y-auto">
+                      <div
+                        className="px-3 py-2 text-sm text-gray-400 hover:bg-gray-50 cursor-pointer"
+                        onMouseDown={() => selectEpic('', '')}
+                      >
+                        — No epic —
+                      </div>
+                      {filteredEpics.length === 0 && (
+                        <div className="px-3 py-2 text-sm text-gray-400 italic">No epics found</div>
+                      )}
+                      {filteredEpics.map(e => (
+                        <div
+                          key={e.key}
+                          onMouseDown={() => selectEpic(e.key, e.name)}
+                          className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 ${form.epic_key === e.key ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'}`}
+                        >
+                          <span>{e.name}</span>
+                          <span className="ml-1.5 text-xs text-gray-400">{e.key}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {/* Fix Version */}

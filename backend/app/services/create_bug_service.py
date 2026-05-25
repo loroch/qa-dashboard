@@ -14,10 +14,15 @@ After creation:
   - Extract numeric part of Jira key (e.g. TMT0-41143 → 41143)
   - Write back to Zoho ticket's cf_bug_id field via PATCH
 """
+import html
+import json
 import logging
 import os
+import re
 import tempfile
 from typing import Optional
+
+import anthropic
 
 from app.jira.client import get_jira_client
 from app.zoho.client import get_zoho_client
@@ -26,6 +31,17 @@ from app.config import get_settings
 logger = logging.getLogger(__name__)
 
 TMT0_BOARD_ID = None  # auto-discovered on first call
+
+
+def _strip_html(text: str) -> str:
+    if not text:
+        return ""
+    text = html.unescape(text)
+    text = re.sub(r'<br\s*/?>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'</(div|p|li|tr|td|th|h[1-6])>', '\n', text, flags=re.IGNORECASE)
+    text = re.sub(r'<[^>]+>', '', text)
+    text = re.sub(r'\n{3,}', '\n\n', text)
+    return text.strip()
 
 SEVERITY_OPTIONS = ["Critical", "Highest", "High", "Medium", "Low"]
 
@@ -141,7 +157,7 @@ class CreateBugService:
 
     async def get_zoho_ticket_detail(self, ticket_id: str) -> dict:
         raw = await self.zoho.get(f"/api/v1/tickets/{ticket_id}", include_org=True)
-        description = raw.get("description") or raw.get("subject") or ""
+        description = _strip_html(raw.get("description") or raw.get("subject") or "")
 
         attachments = []
         try:
@@ -404,6 +420,37 @@ class CreateBugService:
                         logger.debug(f"Deleted temp file {tmp_path}")
                     except Exception:
                         pass
+
+
+    # ------------------------------------------------------------------
+    # AI field generation
+    # ------------------------------------------------------------------
+
+    async def ai_generate_bug_fields(self, summary: str, description: str) -> dict:
+        settings = get_settings()
+        if not settings.anthropic_api_key:
+            raise ValueError("Anthropic API key not configured")
+
+        prompt = (
+            "You are a QA engineer writing a Jira bug report. "
+            "Based on the bug information below, generate concise content for three fields.\n\n"
+            f"Summary: {summary}\n\n"
+            f"Description:\n{description or '(none)'}\n\n"
+            "Return ONLY valid JSON with exactly these keys:\n"
+            '{"steps_to_reproduce": "numbered steps", '
+            '"actual_result": "what actually happens", '
+            '"expected_result": "what should happen"}'
+        )
+
+        client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+        message = await client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=800,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        text = message.content[0].text.strip()
+        match = re.search(r'\{.*\}', text, re.DOTALL)
+        return json.loads(match.group() if match else text)
 
 
 # Singleton

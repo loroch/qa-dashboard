@@ -335,6 +335,26 @@ async def create_jira_bug(body: CreateBugRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+class AiGenerateBugFieldsRequest(BaseModel):
+    summary: str
+    description: str = ""
+
+
+@router.post("/ai-generate-bug-fields")
+async def ai_generate_bug_fields(body: AiGenerateBugFieldsRequest):
+    """Use Claude AI to draft steps_to_reproduce, actual_result, expected_result."""
+    try:
+        svc = get_create_bug_service()
+        result = await svc.ai_generate_bug_fields(
+            summary=body.summary,
+            description=body.description,
+        )
+        return result
+    except Exception as e:
+        logger.error(f"AI generate bug fields error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/tickets/export/csv")
 async def export_tickets_csv():
     """Export all Zoho tickets as CSV."""
