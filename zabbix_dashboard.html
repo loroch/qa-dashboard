@@ -1,0 +1,1699 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>K1 Tamaulipas — Infrastructure</title>
+<script src="/chart.umd.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+:root {
+  --bg:        #080c18;
+  --bg2:       #0f1525;
+  --card:      rgba(255,255,255,0.045);
+  --card-h:    rgba(255,255,255,0.075);
+  --border:    rgba(255,255,255,0.09);
+  --t1:        #f1f5f9;
+  --t2:        #94a3b8;
+  --t3:        #475569;
+  --accent:    #3b82f6;
+  --green:     #22c55e;
+  --red:       #ef4444;
+  --amber:     #f59e0b;
+  --purple:    #a78bfa;
+  --orange:    #f97316;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  background: radial-gradient(ellipse at top left, #1a0a00 0%, var(--bg) 55%);
+  min-height: 100vh;
+  color: var(--t1);
+}
+
+/* ── HEADER ──────────────────────────────────────────────── */
+.header {
+  background: rgba(255,255,255,0.025);
+  border-bottom: 1px solid var(--border);
+  padding: 14px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  backdrop-filter: blur(20px);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+}
+.logo-wrap { display: flex; align-items: center; gap: 14px; }
+.logo-icon {
+  width: 38px; height: 38px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 900; font-size: 16px; letter-spacing: -1px;
+  box-shadow: 0 4px 15px rgba(37,99,235,0.35);
+}
+.logo-text h1 { font-size: 18px; font-weight: 700; letter-spacing: -0.5px; }
+.logo-text p  { font-size: 11px; color: var(--t2); margin-top: 1px; }
+
+.header-right { display: flex; align-items: center; gap: 16px; }
+.conn-status { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--t2); }
+.dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--t3); flex-shrink: 0;
+}
+.dot.ok  { background: var(--green); animation: pulse 2.5s ease-in-out infinite; }
+.dot.err { background: var(--red); }
+@keyframes pulse {
+  0%,100% { box-shadow: 0 0 0 0 rgba(34,197,94,0.6); }
+  50%      { box-shadow: 0 0 0 5px rgba(34,197,94,0); }
+}
+
+.refresh-btn {
+  background: rgba(59,130,246,0.12);
+  border: 1px solid rgba(59,130,246,0.25);
+  color: var(--accent);
+  padding: 6px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  transition: background .2s;
+}
+.refresh-btn:hover { background: rgba(59,130,246,0.22); }
+.refresh-btn:disabled { opacity: .5; cursor: default; }
+
+.countdown-txt { font-size: 11px; color: var(--t3); }
+
+/* ── CORS WARNING ─────────────────────────────────────────── */
+#cors-warn {
+  display: none;
+  background: rgba(245,158,11,0.1);
+  border: 1px solid rgba(245,158,11,0.25);
+  border-radius: 10px;
+  padding: 14px 20px;
+  margin-bottom: 20px;
+  font-size: 13px;
+  color: #fcd34d;
+  line-height: 1.6;
+}
+#cors-warn code {
+  background: rgba(0,0,0,0.3);
+  padding: 2px 7px;
+  border-radius: 5px;
+  font-size: 12px;
+  font-family: monospace;
+}
+
+/* ── LAYOUT ──────────────────────────────────────────────── */
+.wrap { max-width: 1600px; margin: 0 auto; padding: 26px 32px; }
+
+/* ── CARDS ───────────────────────────────────────────────── */
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 14px;
+  margin-bottom: 22px;
+}
+@media (max-width: 1100px) { .kpi-grid { grid-template-columns: repeat(3,1fr); } }
+@media (max-width: 700px)  { .kpi-grid { grid-template-columns: repeat(2,1fr); } }
+
+.kpi {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px 20px;
+  backdrop-filter: blur(10px);
+  transition: transform .2s, background .2s;
+  position: relative;
+  overflow: hidden;
+}
+.kpi::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 2px;
+  border-radius: 14px 14px 0 0;
+}
+.kpi.blue::before   { background: linear-gradient(90deg, var(--accent), #7c3aed); }
+.kpi.amber::before  { background: linear-gradient(90deg, var(--amber), var(--orange)); }
+.kpi.red::before    { background: linear-gradient(90deg, var(--red), #dc2626); }
+.kpi.green::before  { background: linear-gradient(90deg, var(--green), #16a34a); }
+.kpi.purple::before { background: linear-gradient(90deg, var(--purple), #7c3aed); }
+
+.kpi:hover { transform: translateY(-2px); background: var(--card-h); }
+.kpi-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 1px; color: var(--t2); margin-bottom: 10px; }
+.kpi-value { font-size: 38px; font-weight: 800; line-height: 1; margin-bottom: 5px; }
+.kpi-sub   { font-size: 11px; color: var(--t3); }
+
+.blue-v   { color: var(--accent); }
+.amber-v  { color: var(--amber); }
+.red-v    { color: var(--red); }
+.green-v  { color: var(--green); }
+.purple-v { color: var(--purple); }
+
+/* ── CHARTS ──────────────────────────────────────────────── */
+.charts-row {
+  display: grid;
+  grid-template-columns: 260px 1fr;
+  gap: 14px;
+  margin-bottom: 14px;
+}
+@media (max-width: 900px) { .charts-row { grid-template-columns: 1fr; } }
+
+.chart-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 18px;
+  backdrop-filter: blur(10px);
+}
+.chart-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--t2);
+  margin-bottom: 10px;
+}
+
+#sev-legend { margin-top: 14px; }
+.leg-row { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
+.leg-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; }
+.leg-label { font-size: 11px; color: var(--t2); flex: 1; }
+.leg-count { font-size: 12px; font-weight: 700; }
+
+/* ── TABS ────────────────────────────────────────────────── */
+.tabs-wrap { display: flex; align-items: center; gap: 4px; margin-bottom: 16px; }
+.tab-bar {
+  display: flex;
+  background: rgba(255,255,255,0.04);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 3px;
+  gap: 3px;
+}
+.tab {
+  padding: 6px 18px;
+  border-radius: 7px;
+  border: none;
+  background: transparent;
+  color: var(--t2);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all .2s;
+  letter-spacing: 0.3px;
+}
+.tab.active { background: var(--accent); color: #fff; box-shadow: 0 2px 8px rgba(59,130,246,0.4); }
+
+.count-pill {
+  background: rgba(255,255,255,0.08);
+  border-radius: 20px;
+  padding: 3px 11px;
+  font-size: 11px;
+  font-weight: 700;
+  margin-left: auto;
+}
+
+/* ── TABLE ───────────────────────────────────────────────── */
+.tbl-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+}
+.tbl-scroll { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; }
+thead th {
+  text-align: left;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+  color: var(--t3);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+tbody td {
+  padding: 11px 16px;
+  font-size: 13px;
+  border-bottom: 1px solid rgba(255,255,255,0.04);
+}
+tbody tr:last-child td { border-bottom: none; }
+tbody tr:hover td { background: rgba(255,255,255,0.025); }
+
+/* ── BADGES ──────────────────────────────────────────────── */
+.badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 20px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+}
+.b-dis  { background:rgba(239,68,68,.22);  color:#fca5a5; border:1px solid rgba(239,68,68,.3); }
+.b-high { background:rgba(239,68,68,.14);  color:#fca5a5; border:1px solid rgba(239,68,68,.2); }
+.b-avg  { background:rgba(249,115,22,.15); color:#fdba74; border:1px solid rgba(249,115,22,.2); }
+.b-warn { background:rgba(245,158,11,.13); color:#fcd34d; border:1px solid rgba(245,158,11,.2); }
+.b-info { background:rgba(59,130,246,.13); color:#93c5fd; border:1px solid rgba(59,130,246,.2); }
+.b-nc   { background:rgba(107,114,128,.13);color:#9ca3af; border:1px solid rgba(107,114,128,.2); }
+.b-ok   { background:rgba(34,197,94,.13);  color:#86efac; border:1px solid rgba(34,197,94,.2); }
+.b-dis-host { background:rgba(107,114,128,.13);color:#9ca3af; border:1px solid rgba(107,114,128,.2); }
+
+/* ── SENSOR SITE GRID ────────────────────────────────────── */
+.site-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(270px, 1fr));
+  gap: 12px;
+}
+.site-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 18px;
+  backdrop-filter: blur(10px);
+  transition: transform .2s, border-color .2s;
+}
+.site-card:hover { transform: translateY(-2px); }
+.site-card.has-failed { border-color: rgba(239,68,68,0.25); }
+
+.site-top { display: flex; align-items: flex-start; justify-content: space-between; margin-bottom: 14px; }
+.site-name-txt { font-size: 14px; font-weight: 700; letter-spacing: 0.3px; }
+.site-name-sub { font-size: 10px; color: var(--t3); margin-top: 2px; }
+.reach-icon { font-size: 16px; line-height: 1; }
+
+.status-bar-wrap {
+  display: flex;
+  gap: 3px;
+  height: 6px;
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 14px;
+}
+.status-seg { border-radius: 3px; transition: width .5s ease; }
+
+.stats-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.stat-box { background: rgba(255,255,255,0.03); border-radius: 9px; padding: 9px 11px; }
+.stat-box-label { font-size: 9px; color: var(--t3); text-transform: uppercase; letter-spacing: 0.7px; margin-bottom: 3px; }
+.stat-box-val { font-size: 22px; font-weight: 800; }
+
+/* ── EMPTY / ERROR STATES ────────────────────────────────── */
+.empty { text-align: center; padding: 48px 20px; color: var(--t3); }
+.empty .icon { font-size: 40px; margin-bottom: 10px; }
+.empty p { font-size: 14px; }
+
+.err-box {
+  background: rgba(239,68,68,0.08);
+  border: 1px solid rgba(239,68,68,0.2);
+  border-radius: 12px;
+  padding: 20px;
+  color: #fca5a5;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.err-box code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 12px; font-family: monospace; }
+
+/* ── PLATFORM CARDS ──────────────────────────────────────── */
+.plat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr));
+  gap: 10px;
+}
+.plat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 14px 16px;
+  backdrop-filter: blur(10px);
+  transition: transform .15s, border-color .15s;
+}
+.plat-card:hover { transform: translateY(-2px); }
+.plat-card.has-alert { border-color: rgba(239,68,68,0.25); }
+.plat-hostname {
+  font-size: 13px; font-weight: 700; letter-spacing: 0.2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.plat-sub {
+  font-size: 10px; color: var(--t3); margin-top: 2px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.plat-metrics { margin-top: 10px; display: flex; flex-direction: column; gap: 5px; }
+.plat-metric {
+  display: flex; align-items: center; gap: 7px;
+}
+.plat-metric-label {
+  font-size: 9px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.6px; color: var(--t3); width: 30px; flex-shrink: 0;
+}
+.plat-bar-wrap {
+  flex: 1; height: 5px; border-radius: 3px;
+  background: rgba(255,255,255,0.07); overflow: hidden;
+}
+.plat-bar-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
+.plat-metric-val {
+  font-size: 11px; font-weight: 700; width: 34px;
+  text-align: right; flex-shrink: 0;
+}
+.plat-divider {
+  height: 1px; background: rgba(255,255,255,0.05);
+  margin: 10px 0;
+}
+.plat-proc-row {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 4px;
+}
+.plat-proc-dot {
+  width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0;
+}
+.plat-proc-label { font-size: 11px; color: var(--t2); flex: 1; }
+.plat-proc-count {
+  font-size: 12px; font-weight: 800;
+}
+.plat-na { font-size: 10px; color: var(--t3); font-style: italic; }
+
+/* ── TOP ISSUES ──────────────────────────────────────────── */
+.top-issues-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  padding: 14px 18px;
+  backdrop-filter: blur(10px);
+}
+.top-issues-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.top-issues-title {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--t2);
+  flex: 1;
+}
+.top-issues-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3px 16px;
+}
+@media (max-width: 900px) { .top-issues-grid { grid-template-columns: 1fr; } }
+.ti-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 6px;
+  border-radius: 7px;
+  transition: background .15s;
+}
+.ti-row:hover { background: rgba(255,255,255,0.035); }
+.ti-rank {
+  font-size: 10px;
+  font-weight: 800;
+  color: var(--t3);
+  width: 16px;
+  flex-shrink: 0;
+  text-align: right;
+}
+.ti-name {
+  font-size: 12px;
+  color: var(--t1);
+  flex: 1;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.ti-sites {
+  font-size: 10px;
+  color: var(--t3);
+  white-space: nowrap;
+}
+.ti-count {
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--amber);
+  min-width: 22px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+/* ── C4I UNITS ───────────────────────────────────────────── */
+.c4i-unit-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 0;
+  border-bottom: 1px solid rgba(255,255,255,0.05);
+}
+.c4i-unit-row:last-of-type { border-bottom: none; }
+.c4i-unit-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--t2);
+  width: 78px;
+  flex-shrink: 0;
+}
+.c4i-bar-wrap {
+  flex: 1;
+  height: 5px;
+  border-radius: 3px;
+  background: rgba(255,255,255,0.06);
+  overflow: hidden;
+}
+.c4i-bar-fill {
+  height: 100%;
+  border-radius: 3px;
+  transition: width .5s ease;
+}
+.c4i-counts {
+  font-size: 11px;
+  color: var(--t2);
+  white-space: nowrap;
+  display: flex;
+  gap: 10px;
+  min-width: 110px;
+  justify-content: flex-end;
+}
+.c4i-detect-block {
+  margin-top: 12px;
+  background: rgba(255,255,255,0.025);
+  border-radius: 9px;
+  padding: 9px 12px;
+}
+.c4i-detect-title {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.7px;
+  color: var(--t3);
+  margin-bottom: 8px;
+}
+.c4i-detect-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 12px;
+}
+.c4i-detect-row {
+  font-size: 11px;
+  color: var(--t2);
+}
+.c4i-detect-row strong { color: var(--t1); }
+
+/* ── SKELETON ────────────────────────────────────────────── */
+.skel {
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite;
+  border-radius: 10px;
+}
+@keyframes shimmer {
+  0%   { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div class="logo-wrap">
+    <div class="logo-icon" style="background:linear-gradient(135deg,#ea580c,#7c2d12);font-size:13px;letter-spacing:-0.5px">K1</div>
+    <div class="logo-text">
+      <h1>K1 Tamaulipas &mdash; Infrastructure</h1>
+      <p id="conn-line">Connecting to Zabbix…</p>
+    </div>
+  </div>
+  <div class="header-right">
+    <div class="conn-status"><span class="dot" id="dot"></span><span id="conn-txt">—</span></div>
+    <span class="countdown-txt" id="cd-txt"></span>
+    <button class="refresh-btn" id="ref-btn" onclick="loadAll()">↻ Refresh</button>
+  </div>
+</div>
+
+<!-- MAIN -->
+<div class="wrap">
+
+  <!-- CORS warning (shown on fetch failure) -->
+  <div id="cors-warn">
+    <strong>⚠ CORS / Network error</strong> — browsers block direct API calls from <code>file://</code> pages.<br>
+    Serve this file locally: <code>python -m http.server 8080</code> then open <code>http://localhost:8080/zabbix_dashboard.html</code><br>
+    Or ask your sysadmin to add <code>add_header Access-Control-Allow-Origin *;</code> to the Zabbix nginx config.
+  </div>
+
+  <!-- KPI CARDS -->
+  <div class="kpi-grid" id="kpi-grid">
+    <div class="kpi blue"><div class="kpi-label">Total Hosts</div><div class="skel" style="height:38px;width:70px;margin-bottom:5px"></div><div class="skel" style="height:12px;width:90px"></div></div>
+    <div class="kpi amber"><div class="kpi-label">Active Problems</div><div class="skel" style="height:38px;width:70px;margin-bottom:5px"></div><div class="skel" style="height:12px;width:90px"></div></div>
+    <div class="kpi red"><div class="kpi-label">High / Disaster</div><div class="skel" style="height:38px;width:70px;margin-bottom:5px"></div><div class="skel" style="height:12px;width:90px"></div></div>
+    <div class="kpi green"><div class="kpi-label">Sensor Sites</div><div class="skel" style="height:38px;width:70px;margin-bottom:5px"></div><div class="skel" style="height:12px;width:90px"></div></div>
+    <div class="kpi purple"><div class="kpi-label">Failed Sensors 24h</div><div class="skel" style="height:38px;width:70px;margin-bottom:5px"></div><div class="skel" style="height:12px;width:90px"></div></div>
+  </div>
+
+  <!-- TOP ISSUES -->
+  <div id="top-issues-wrap" style="margin-bottom:14px">
+    <div class="skel" style="height:160px;border-radius:14px"></div>
+  </div>
+
+  <!-- CHARTS -->
+  <div class="charts-row">
+    <div class="chart-card">
+      <div class="chart-title">Problems by Severity</div>
+      <canvas id="sev-chart" height="160"></canvas>
+      <div id="sev-legend"></div>
+    </div>
+    <div class="chart-card">
+      <div class="chart-title">Active Problems by Site</div>
+      <canvas id="site-chart" height="90"></canvas>
+    </div>
+  </div>
+
+  <!-- TABS -->
+  <div class="tabs-wrap">
+    <div class="tab-bar">
+      <button class="tab active" onclick="showTab('problems')">Active Problems</button>
+      <button class="tab" onclick="showTab('sites')">Sites</button>
+      <button class="tab" onclick="showTab('hosts')">Hosts</button>
+      <button class="tab" onclick="showTab('sensors')">Sensor Health</button>
+      <button class="tab" onclick="showTab('c4i')">C4I Units</button>
+      <button class="tab" onclick="showTab('platform')">Platform</button>
+    </div>
+    <span class="count-pill" id="tab-count">…</span>
+  </div>
+
+  <!-- TAB: PROBLEMS -->
+  <div id="tab-problems">
+    <div class="tbl-card">
+      <div class="tbl-scroll" id="prob-body">
+        <div class="skel" style="height:200px;border-radius:14px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: SITES -->
+  <div id="tab-sites" style="display:none">
+    <div id="sites-body">
+      <div class="skel" style="height:200px;border-radius:14px"></div>
+    </div>
+  </div>
+
+  <!-- TAB: SENSORS -->
+  <div id="tab-sensors" style="display:none">
+    <div id="sensor-body">
+      <div class="skel" style="height:200px;border-radius:14px"></div>
+    </div>
+  </div>
+
+  <!-- TAB: HOSTS -->
+  <div id="tab-hosts" style="display:none">
+    <div class="tbl-card">
+      <div class="tbl-scroll" id="hosts-body">
+        <div class="skel" style="height:200px;border-radius:14px"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- TAB: PLATFORM -->
+  <div id="tab-platform" style="display:none">
+    <div id="platform-body">
+      <div class="skel" style="height:300px;border-radius:14px"></div>
+    </div>
+  </div>
+
+  <!-- TAB: C4I UNITS -->
+  <div id="tab-c4i" style="display:none">
+    <div id="c4i-body">
+      <div class="skel" style="height:200px;border-radius:14px"></div>
+    </div>
+  </div>
+
+</div><!-- /wrap -->
+
+<script>
+// ═══════════════════════════════════════════════════════
+//  CONFIG
+// ═══════════════════════════════════════════════════════
+const ZBX_URL     = '/zbx-api';
+const ZBX_TOK     = '';
+const ZBX_HOST    = '172.15.6.33';
+const REFRESH_SEC = 60;
+
+// ── Site name mapping from host prefix ────────────────
+const SITE_NAMES = {
+  REY: 'Reynosa',
+  VIC: 'Cd. Victoria',
+  TAM: 'Tampico',
+  MAN: 'Mante',
+  LAR: 'Laredo',
+  MAT: 'Matamoros',
+};
+function siteOf(hostName) {
+  if (!hostName) return 'Unknown';
+  const code = hostName.split('-')[0].toUpperCase();
+  return SITE_NAMES[code] || code;
+}
+
+// C4I item key → display city name
+const CITY_DISPLAY = {
+  laredo:    'Laredo',
+  mante:     'Mante',
+  matamoros: 'Matamoros',
+  reynosa:   'Reynosa',
+  tampico:   'Tampico',
+  victoria:  'Cd. Victoria',
+};
+
+// ═══════════════════════════════════════════════════════
+//  STATE
+// ═══════════════════════════════════════════════════════
+let sevChart    = null;
+let siteChart   = null;
+let cdTimer     = null;
+let cdSec       = REFRESH_SEC;
+let activeTab   = 'problems';
+let _triggerMap = {};   // triggerid → { hostName, siteName }
+let _c4iData    = {};   // city → { camera, ptz, lpr, detect }
+
+// ═══════════════════════════════════════════════════════
+//  API HELPER
+// ═══════════════════════════════════════════════════════
+async function zbx(method, params) {
+  const ctrl = new AbortController();
+  const tid  = setTimeout(() => ctrl.abort(), 15000);
+  try {
+    const r = await fetch(ZBX_URL, {
+      method: 'POST',
+      signal: ctrl.signal,
+      headers: { 'Content-Type': 'application/json', ...(ZBX_TOK ? { 'Authorization': `Bearer ${ZBX_TOK}` } : {}) },
+      body: JSON.stringify({ jsonrpc: '2.0', method, params, id: 1 })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error.data || d.error.message);
+    return d.result;
+  } finally {
+    clearTimeout(tid);
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  SEVERITY METADATA
+// ═══════════════════════════════════════════════════════
+const SEV = [
+  { name: 'Not Classified', cls: 'b-nc',   color: '#64748b' },
+  { name: 'Information',    cls: 'b-info',  color: '#3b82f6' },
+  { name: 'Warning',        cls: 'b-warn',  color: '#f59e0b' },
+  { name: 'Average',        cls: 'b-avg',   color: '#f97316' },
+  { name: 'High',           cls: 'b-high',  color: '#ef4444' },
+  { name: 'Disaster',       cls: 'b-dis',   color: '#dc2626' },
+];
+
+function sevBadge(s) {
+  const x = SEV[s] || SEV[0];
+  return `<span class="badge ${x.cls}">${x.name}</span>`;
+}
+
+function timeAgo(ts) {
+  const d = Math.floor(Date.now() / 1000) - +ts;
+  if (d < 60)    return d + 's ago';
+  if (d < 3600)  return Math.floor(d / 60) + 'm ago';
+  if (d < 86400) return Math.floor(d / 3600) + 'h ago';
+  return Math.floor(d / 86400) + 'd ago';
+}
+
+// ═══════════════════════════════════════════════════════
+//  SENSOR ITEM PARSER
+// ═══════════════════════════════════════════════════════
+const STATUS_COLORS = {
+  WorkingProperly: { bar: '#22c55e', txt: 'var(--green)' },
+  Failed:          { bar: '#ef4444', txt: 'var(--red)'   },
+  Warning:         { bar: '#f59e0b', txt: 'var(--amber)'  },
+  'Not Recording': { bar: '#a78bfa', txt: 'var(--purple)' },
+  Offline:         { bar: '#475569', txt: 'var(--t3)'     },
+};
+
+function parseSensorItems(items) {
+  const sites = {};
+
+  const ensure = s => {
+    if (!sites[s]) sites[s] = { reachable: null, g24: {}, g30: {}, total24: 0, total30: 0, failed24: 0 };
+  };
+
+  for (const it of items) {
+    const k = it.key_;
+    const v = parseFloat(it.lastvalue) || 0;
+
+    // sensor.health[SITE,Type,Status,period]
+    let m = k.match(/^sensor\.health\[([^,\]]+),([^,\]]+),([^,\]]+),(24h|30d)\]$/);
+    if (m) {
+      const [, site, , status, period] = m;
+      ensure(site);
+      const g = period === '24h' ? 'g24' : 'g30';
+      sites[site][g][status] = (sites[site][g][status] || 0) + v;
+      continue;
+    }
+
+    // sensor.health.total[SITE,period]
+    m = k.match(/^sensor\.health\.total\[([^,\]]+),(24h|30d)\]$/);
+    if (m) {
+      const [, site, period] = m;
+      ensure(site);
+      if (period === '24h') sites[site].total24 = v;
+      else                  sites[site].total30 = v;
+      continue;
+    }
+
+    // sensor.health.failed[SITE,period]
+    m = k.match(/^sensor\.health\.failed\[([^,\]]+),(24h|30d)\]$/);
+    if (m) {
+      const [, site, period] = m;
+      ensure(site);
+      if (period === '24h') sites[site].failed24 = v;
+      continue;
+    }
+
+    // sensor.health.reachable[SITE]
+    m = k.match(/^sensor\.health\.reachable\[([^\]]+)\]$/);
+    if (m) {
+      ensure(m[1]);
+      sites[m[1]].reachable = v;
+    }
+  }
+  return sites;
+}
+
+// ═══════════════════════════════════════════════════════
+//  C4I ITEM PARSER
+// ═══════════════════════════════════════════════════════
+function parseC4IItems(items) {
+  const sites = {};
+
+  const ensure = city => {
+    if (!sites[city]) sites[city] = {
+      camera: { w24:0, f24:0, a24:0, w30:0, f30:0, a30:0 },
+      ptz:    { w24:0, f24:0, a24:0, w30:0, f30:0, a30:0 },
+      lpr:    { w24:0, f24:0, a24:0, w30:0, f30:0, a30:0 },
+      detect: { face:0, lpr:0, vid:0, cad:0 },
+    };
+  };
+
+  for (const it of items) {
+    const k = it.key_;
+    const v = parseFloat(it.lastvalue) || 0;
+
+    // {city}.camera.{status}.{period}  or  {city}.PtzCamera.{status}.{period}
+    let m = k.match(/^(\w+)\.(camera|PtzCamera|LPR)\.(working|failed|warning)\.(24h|30d)$/i);
+    if (m) {
+      const city  = m[1].toLowerCase();
+      const raw   = m[2].toLowerCase();
+      const type  = raw === 'camera' ? 'camera' : raw === 'ptzcamera' ? 'ptz' : 'lpr';
+      const stat  = m[3].toLowerCase()[0];    // 'w', 'f', or 'a'
+      const per   = m[4] === '24h' ? '24' : '30';
+      const key   = stat === 'w' ? `w${per}` : stat === 'f' ? `f${per}` : `a${per}`;
+      ensure(city);
+      sites[city][type][key] = v;
+      continue;
+    }
+
+    // es.detection.count[SITE,type]
+    m = k.match(/^es\.detection\.count\[([^,\]]+),(facedetection|lprdetection|videtectionfull|genericdetection_cad)\]$/i);
+    if (m) {
+      const city = m[1].toLowerCase();
+      ensure(city);
+      const typeMap = { facedetection:'face', lprdetection:'lpr', videtectionfull:'vid', genericdetection_cad:'cad' };
+      sites[city].detect[typeMap[m[2].toLowerCase()]] = v;
+    }
+  }
+  return sites;
+}
+
+// ═══════════════════════════════════════════════════════
+//  MAIN LOAD
+// ═══════════════════════════════════════════════════════
+async function loadAll() {
+  setConnecting();
+  document.getElementById('ref-btn').disabled = true;
+
+  try {
+    const C4I_OUT  = ['itemid','name','key_','lastvalue','lastclock'];
+    const PLAT_OUT = ['itemid','name','key_','lastvalue','lastclock','hostid'];
+    const [
+      hosts, problems, sensorItems, triggers,
+      c4iCam, c4iLpr, c4iEs,
+      platCpu, platMem, platDisk, platProc, platC4iKeys,
+    ] = await Promise.all([
+      zbx('host.get', {
+        output: ['hostid', 'host', 'name', 'status'],
+        selectInterfaces: ['ip'],
+      }),
+      zbx('problem.get', {
+        output: 'extend',
+        severities: [0,1,2,3,4,5],
+        recent: false,
+        selectAcknowledges: 'count',
+        sortfield: 'eventid',
+        sortorder: 'DESC',
+        limit: 500,
+      }),
+      zbx('item.get', {
+        output: ['itemid','name','key_','lastvalue','lastclock'],
+        search: { key_: 'sensor.health' },
+        searchWildcardsEnabled: true,
+        limit: 2000,
+      }),
+      zbx('trigger.get', {
+        output: ['triggerid'],
+        selectHosts: ['hostid','name'],
+        filter: { value: 1 },
+        monitored: 1,
+        only_true: 1,
+        limit: 500,
+      }),
+      zbx('item.get', { output: C4I_OUT, search: { key_: 'camera' }, limit: 1000 }),
+      zbx('item.get', { output: C4I_OUT, search: { key_: '.LPR.' },  limit: 1000 }),
+      zbx('item.get', { output: C4I_OUT, search: { key_: 'es.detection.count' }, limit: 1000 }),
+      // ── Platform layer ───────────────────────────────────────
+      zbx('item.get', { output: PLAT_OUT, search: { key_: 'system.cpu.util' }, limit: 500 }),
+      zbx('item.get', { output: PLAT_OUT, search: { key_: 'vm.memory' },       limit: 500 }),
+      zbx('item.get', { output: PLAT_OUT, search: { key_: 'vfs.fs.size' },     limit: 3000 }),
+      zbx('item.get', { output: PLAT_OUT, search: { key_: 'proc.num' },        limit: 2000 }),
+      zbx('item.get', { output: PLAT_OUT, search: { key_: 'c4i' },             limit: 500 }),
+    ]);
+
+    document.getElementById('cors-warn').style.display = 'none';
+    setConnected(hosts.length);
+
+    _hostMap = Object.fromEntries(hosts.map(h => [h.hostid, h.name]));
+
+    // triggerid → { hostName, siteName } for problem enrichment
+    _triggerMap = {};
+    for (const t of triggers) {
+      const h = t.hosts && t.hosts[0];
+      if (h) _triggerMap[t.triggerid] = { hostName: h.name, siteName: siteOf(h.name) };
+    }
+
+    const siteData   = parseSensorItems(sensorItems);
+    const c4iData    = parseC4IItems([...c4iCam, ...c4iLpr, ...c4iEs]);
+    const platData   = parsePlatformItems(platCpu, platMem, platDisk, platProc, platC4iKeys);
+
+    renderKPI(hosts, problems);
+    renderTopIssues(problems);
+    renderSevChart(problems);
+    renderSiteProblemsChart(problems);
+    renderProblems(problems);
+    renderSites(hosts, problems);
+    renderSensors(siteData);
+    renderC4I(c4iData);
+    renderPlatform(hosts, platData);
+    renderHosts(hosts);
+    updateTabCount();
+    startCountdown();
+
+  } catch (err) {
+    setError(err.message);
+    if (err.message.includes('fetch') || err.name === 'TypeError') {
+      document.getElementById('cors-warn').style.display = 'block';
+    }
+  } finally {
+    document.getElementById('ref-btn').disabled = false;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+//  CONNECTION STATUS
+// ═══════════════════════════════════════════════════════
+function setConnecting() {
+  document.getElementById('dot').className = 'dot';
+  document.getElementById('conn-txt').textContent = 'Loading…';
+  document.getElementById('conn-line').textContent = `Connecting to ${ZBX_HOST}…`;
+}
+function setConnected(hostCount) {
+  document.getElementById('dot').className = 'dot ok';
+  document.getElementById('conn-txt').textContent = `${hostCount} hosts · ${new Date().toLocaleTimeString()}`;
+  document.getElementById('conn-line').textContent = ZBX_HOST;
+}
+function setError(msg) {
+  document.getElementById('dot').className = 'dot err';
+  document.getElementById('conn-txt').textContent = 'Connection error';
+  document.getElementById('conn-line').textContent = msg.slice(0, 80);
+  clearInterval(cdTimer);
+  document.getElementById('cd-txt').textContent = '';
+}
+
+// ═══════════════════════════════════════════════════════
+//  TOP 10 ISSUES (most repeated across all sites)
+// ═══════════════════════════════════════════════════════
+function renderTopIssues(problems) {
+  if (!problems.length) {
+    document.getElementById('top-issues-wrap').innerHTML =
+      '<div class="top-issues-card"><div class="top-issues-title" style="text-align:center;padding:20px 0">✅ No active problems across all sites</div></div>';
+    return;
+  }
+
+  // Group by problem name → count occurrences + collect sites + max severity
+  const groups = {};
+  for (const p of problems) {
+    const name = p.name;
+    const info = _triggerMap[p.objectid];
+    const site = info ? info.siteName : null;
+    if (!groups[name]) groups[name] = { count: 0, sites: new Set(), maxSev: 0 };
+    groups[name].count++;
+    if (site) groups[name].sites.add(site);
+    if (+p.severity > groups[name].maxSev) groups[name].maxSev = +p.severity;
+  }
+
+  // Sort by count desc, then by severity desc, take top 10
+  const top10 = Object.entries(groups)
+    .sort((a, b) => b[1].count - a[1].count || b[1].maxSev - a[1].maxSev)
+    .slice(0, 10);
+
+  const rows = top10.map(([name, g], i) => {
+    const sev   = SEV[g.maxSev] || SEV[0];
+    const sites = [...g.sites].sort().join(', ') || '—';
+    const isRepeat = g.count > 1;
+    return `
+      <div class="ti-row">
+        <span class="ti-rank">${i + 1}</span>
+        <span class="badge ${sev.cls}" style="flex-shrink:0">${sev.name}</span>
+        <span class="ti-name" title="${name}">${name}</span>
+        <span class="ti-sites" title="${sites}">${sites}</span>
+        <span class="ti-count" style="color:${isRepeat ? 'var(--red)' : 'var(--t3)'}"
+          title="${isRepeat ? 'Repeating across multiple hosts' : 'Single occurrence'}">×${g.count}</span>
+      </div>`;
+  }).join('');
+
+  // Split into two columns
+  const half  = Math.ceil(top10.length / 2);
+  const left  = top10.slice(0, half);
+  const right = top10.slice(half);
+
+  const renderCol = (items, offset) => items.map(([name, g], i) => {
+    const sev   = SEV[g.maxSev] || SEV[0];
+    const sites = [...g.sites].sort().join(', ') || '—';
+    const isRepeat = g.count > 1;
+    return `
+      <div class="ti-row">
+        <span class="ti-rank">${offset + i + 1}</span>
+        <span class="badge ${sev.cls}" style="flex-shrink:0">${sev.name}</span>
+        <span class="ti-name" title="${name}">${name}</span>
+        <span class="ti-sites" title="${sites}">${sites}</span>
+        <span class="ti-count" title="${isRepeat ? 'Repeats on multiple hosts' : '1 occurrence'}"
+          style="color:${isRepeat ? 'var(--red)' : 'var(--t3)'}">×${g.count}</span>
+      </div>`;
+  }).join('');
+
+  document.getElementById('top-issues-wrap').innerHTML = `
+    <div class="top-issues-card">
+      <div class="top-issues-header">
+        <span class="top-issues-title">Top Issues — All Sites</span>
+        <span style="font-size:11px;color:var(--t3)">${problems.length} total · ${Object.keys(groups).length} unique</span>
+      </div>
+      <div class="top-issues-grid">
+        <div>${renderCol(left, 0)}</div>
+        <div>${renderCol(right, half)}</div>
+      </div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  KPI CARDS
+// ═══════════════════════════════════════════════════════
+function renderKPI(hosts, problems) {
+  const totalHosts   = hosts.length;
+  const enabledHosts = hosts.filter(h => h.status === '0').length;
+  const totalProbs   = problems.length;
+  const highProbs    = problems.filter(p => +p.severity >= 4).length;
+  const avgProbs     = problems.filter(p => +p.severity === 3).length;
+
+  // Count unique affected sites from triggerMap
+  const affectedSites = new Set(
+    problems.map(p => _triggerMap[p.objectid]?.siteName).filter(Boolean)
+  );
+  const totalSites = new Set(hosts.map(h => siteOf(h.name))).size;
+
+  document.getElementById('kpi-grid').innerHTML = `
+    <div class="kpi blue">
+      <div class="kpi-label">Total Hosts</div>
+      <div class="kpi-value blue-v">${totalHosts}</div>
+      <div class="kpi-sub">${enabledHosts} enabled · ${totalHosts - enabledHosts} disabled</div>
+    </div>
+    <div class="kpi ${totalProbs > 0 ? 'amber' : 'green'}">
+      <div class="kpi-label">Active Problems</div>
+      <div class="kpi-value ${totalProbs > 0 ? 'amber-v' : 'green-v'}">${totalProbs}</div>
+      <div class="kpi-sub">${avgProbs} average · ${highProbs} high+</div>
+    </div>
+    <div class="kpi ${highProbs > 0 ? 'red' : 'green'}">
+      <div class="kpi-label">High / Disaster</div>
+      <div class="kpi-value ${highProbs > 0 ? 'red-v' : 'green-v'}">${highProbs}</div>
+      <div class="kpi-sub">critical alerts</div>
+    </div>
+    <div class="kpi ${affectedSites.size > 0 ? 'amber' : 'green'}">
+      <div class="kpi-label">Sites Affected</div>
+      <div class="kpi-value ${affectedSites.size > 0 ? 'amber-v' : 'green-v'}">${affectedSites.size}</div>
+      <div class="kpi-sub">of ${totalSites} monitored sites</div>
+    </div>
+    <div class="kpi ${totalProbs > 0 ? 'purple' : 'green'}">
+      <div class="kpi-label">Unacknowledged</div>
+      <div class="kpi-value ${totalProbs > 0 ? 'purple-v' : 'green-v'}">${problems.filter(p => p.acknowledged === '0').length}</div>
+      <div class="kpi-sub">need attention</div>
+    </div>
+  `;
+}
+
+// ═══════════════════════════════════════════════════════
+//  SEVERITY DOUGHNUT CHART
+// ═══════════════════════════════════════════════════════
+function renderSevChart(problems) {
+  const counts = [0,0,0,0,0,0];
+  for (const p of problems) counts[+p.severity]++;
+
+  const active = SEV.map((s, i) => ({ ...s, count: counts[i] })).filter(s => s.count > 0);
+
+  document.getElementById('sev-legend').innerHTML = active.map(s => `
+    <div class="leg-row">
+      <span class="leg-dot" style="background:${s.color}"></span>
+      <span class="leg-label">${s.name}</span>
+      <strong class="leg-count">${s.count}</strong>
+    </div>
+  `).join('') || '<div style="color:var(--t3);font-size:12px;text-align:center;margin-top:10px">No active problems ✓</div>';
+
+  if (sevChart) sevChart.destroy();
+  const ctx = document.getElementById('sev-chart').getContext('2d');
+
+  if (!active.length) {
+    sevChart = new Chart(ctx, {
+      type: 'doughnut',
+      data: { labels: ['OK'], datasets: [{ data: [1], backgroundColor: ['#22c55e'], borderWidth: 0 }] },
+      options: { plugins: { legend: { display: false } }, cutout: '70%' }
+    });
+    return;
+  }
+
+  sevChart = new Chart(ctx, {
+    type: 'doughnut',
+    data: {
+      labels: active.map(s => s.name),
+      datasets: [{
+        data: active.map(s => s.count),
+        backgroundColor: active.map(s => s.color),
+        borderColor: 'rgba(0,0,0,0.3)',
+        borderWidth: 2,
+        hoverOffset: 6,
+      }]
+    },
+    options: {
+      responsive: true,
+      cutout: '68%',
+      plugins: {
+        legend: { display: false },
+        tooltip: { callbacks: { label: c => ` ${c.label}: ${c.raw}` } }
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  PROBLEMS BY SITE BAR CHART
+// ═══════════════════════════════════════════════════════
+function renderSiteProblemsChart(problems) {
+  const counts = {}, maxSev = {};
+  for (const p of problems) {
+    const info = _triggerMap[p.objectid];
+    const site = info ? info.siteName : 'Other';
+    counts[site] = (counts[site] || 0) + 1;
+    maxSev[site] = Math.max(maxSev[site] || 0, +p.severity);
+  }
+
+  const sites  = Object.keys(counts).sort((a,b) => counts[b] - counts[a]);
+  const colors = sites.map(s => {
+    const sv = maxSev[s] || 0;
+    if (sv >= 4) return 'rgba(239,68,68,0.8)';
+    if (sv >= 3) return 'rgba(249,115,22,0.8)';
+    return 'rgba(245,158,11,0.8)';
+  });
+
+  if (siteChart) siteChart.destroy();
+  const ctx = document.getElementById('site-chart').getContext('2d');
+
+  if (!sites.length) {
+    sevChart && sevChart; // noop
+    return;
+  }
+
+  siteChart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels: sites,
+      datasets: [{ label: 'Problems', data: sites.map(s => counts[s]), backgroundColor: colors, borderRadius: 6 }]
+    },
+    options: {
+      responsive: true,
+      plugins: { legend: { display: false } },
+      scales: {
+        x: { ticks: { color: '#64748b', font: { size: 11 } }, grid: { color: 'rgba(255,255,255,0.04)' } },
+        y: { ticks: { color: '#64748b', stepSize: 1 },         grid: { color: 'rgba(255,255,255,0.04)' } },
+      }
+    }
+  });
+}
+
+// ═══════════════════════════════════════════════════════
+//  SITES TAB
+// ═══════════════════════════════════════════════════════
+function renderSites(hosts, problems) {
+  // Group hosts by site
+  const siteHosts = {};
+  for (const h of hosts) {
+    const s = siteOf(h.name);
+    if (!siteHosts[s]) siteHosts[s] = [];
+    siteHosts[s].push(h);
+  }
+
+  // Count problems per site
+  const siteProbs = {}, siteSev = {};
+  for (const p of problems) {
+    const info = _triggerMap[p.objectid];
+    if (!info) continue;
+    const s = info.siteName;
+    siteProbs[s] = (siteProbs[s] || 0) + 1;
+    siteSev[s]   = Math.max(siteSev[s] || 0, +p.severity);
+  }
+
+  const allSites = [...new Set([...Object.keys(siteHosts), ...Object.keys(siteProbs)])].sort();
+
+  const cards = allSites.map(site => {
+    const hs   = siteHosts[site] || [];
+    const pc   = siteProbs[site] || 0;
+    const sv   = siteSev[site]   || 0;
+    const { label, col } = pc === 0
+      ? { label: 'Healthy',  col: 'var(--green)' }
+      : sv >= 4
+        ? { label: 'Critical', col: 'var(--red)'   }
+        : sv >= 3
+          ? { label: 'Average',  col: 'var(--orange)' }
+          : { label: 'Warning',  col: 'var(--amber)'  };
+
+    // Most critical problems for this site
+    const siteProblems = problems
+      .filter(p => _triggerMap[p.objectid]?.siteName === site)
+      .sort((a,b) => +b.severity - +a.severity)
+      .slice(0, 3);
+
+    const probRows = siteProblems.map(p =>
+      `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid rgba(255,255,255,0.04)">
+        ${sevBadge(+p.severity)}
+        <span style="font-size:12px;color:var(--t2);flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${p.name}</span>
+      </div>`
+    ).join('');
+
+    return `
+    <div class="site-card ${pc > 0 ? 'has-failed' : ''}">
+      <div class="site-top">
+        <div>
+          <div class="site-name-txt">${site}</div>
+          <div class="site-name-sub">${hs.length} host${hs.length !== 1 ? 's' : ''}</div>
+        </div>
+        <span style="font-size:12px;font-weight:700;color:${col};background:${col}22;padding:3px 10px;border-radius:20px;border:1px solid ${col}44">${label}</span>
+      </div>
+      <div class="stats-grid" style="margin-bottom:${pc > 0 ? '12px' : '0'}">
+        <div class="stat-box">
+          <div class="stat-box-label">Hosts</div>
+          <div class="stat-box-val blue-v">${hs.length}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-box-label">Problems</div>
+          <div class="stat-box-val" style="color:${pc > 0 ? col : 'var(--t3)'}">${pc}</div>
+        </div>
+      </div>
+      ${probRows}
+    </div>`;
+  }).join('');
+
+  document.getElementById('sites-body').innerHTML = `<div class="site-grid">${cards}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  PROBLEMS TABLE
+// ═══════════════════════════════════════════════════════
+let _problems = [];
+let _hostMap  = {};   // hostid → name, built from the hosts array
+
+function renderProblems(problems) {
+  _problems = problems;
+
+  if (!problems.length) {
+    document.getElementById('prob-body').innerHTML =
+      '<div class="empty"><div class="icon">✅</div><p>No active problems — all systems healthy</p></div>';
+    return;
+  }
+
+  // Sort by severity desc (highest first) since Zabbix 7 only supports sortfield=eventid
+  const sorted = [...problems].sort((a, b) => +b.severity - +a.severity);
+
+  const rows = sorted.slice(0, 200).map(p => {
+    const info = _triggerMap[p.objectid];
+    const host = info ? `<span style="color:var(--t2)">${info.hostName}</span>` : '—';
+    const site = info ? `<span style="color:var(--t3);font-size:11px">${info.siteName}</span>` : '';
+    const ack  = +p.acknowledges > 0
+      ? `<span style="color:var(--green);font-size:12px">✓</span>`
+      : '<span style="color:var(--t3);font-size:11px">—</span>';
+    return `<tr>
+      <td>${sevBadge(+p.severity)}</td>
+      <td style="font-weight:600">${p.name}</td>
+      <td>${host}<br>${site}</td>
+      <td style="color:var(--t3);font-size:12px;white-space:nowrap">${timeAgo(p.clock)}</td>
+      <td>${ack}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('prob-body').innerHTML = `
+    <table>
+      <thead><tr><th>Severity</th><th>Problem</th><th>Host / Site</th><th>Age</th><th>Ack</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  SENSOR HEALTH SITE CARDS
+// ═══════════════════════════════════════════════════════
+let _siteData = {};
+
+function renderSensors(siteData) {
+  _siteData = siteData;
+  const sites = Object.keys(siteData).sort();
+
+  if (!sites.length) {
+    document.getElementById('sensor-body').innerHTML =
+      `<div class="err-box">No <code>sensor.health</code> items found in Zabbix.<br>
+       Run your sensor scripts with <code>--send</code> at least once.</div>`;
+    return;
+  }
+
+  const cards = sites.map(site => {
+    const d = siteData[site];
+    const ok  = d.g24['WorkingProperly'] || 0;
+    const fail= d.g24['Failed']          || 0;
+    const warn= d.g24['Warning']         || 0;
+    const nr  = d.g24['Not Recording']   || 0;
+    const off = d.g24['Offline']         || 0;
+    const total = ok + fail + warn + nr + off || 1;
+
+    const barSegs = [
+      { v: ok,   c: '#22c55e' },
+      { v: fail, c: '#ef4444' },
+      { v: warn, c: '#f59e0b' },
+      { v: nr,   c: '#a78bfa' },
+      { v: off,  c: '#475569' },
+    ].filter(x => x.v > 0).map(x =>
+      `<div class="status-seg" style="background:${x.c};flex:${x.v / total}"></div>`
+    ).join('') || `<div class="status-seg" style="background:var(--t3);flex:1"></div>`;
+
+    const reach = d.reachable;
+    const reachIcon = reach === null ? '⚪' : reach ? '🟢' : '🔴';
+
+    return `
+    <div class="site-card ${fail > 0 ? 'has-failed' : ''}">
+      <div class="site-top">
+        <div>
+          <div class="site-name-txt">${site.replace(/_/g,' ')}</div>
+          <div class="site-name-sub">24h window</div>
+        </div>
+        <span class="reach-icon" title="${reach === null ? 'unknown' : reach ? 'Reachable' : 'Unreachable'}">${reachIcon}</span>
+      </div>
+      <div class="status-bar-wrap">${barSegs}</div>
+      <div class="stats-grid">
+        <div class="stat-box">
+          <div class="stat-box-label">Working</div>
+          <div class="stat-box-val green-v">${ok}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-box-label">Failed</div>
+          <div class="stat-box-val ${fail > 0 ? 'red-v' : ''}" style="${fail === 0 ? 'color:var(--t3)' : ''}">${fail}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-box-label">Warning</div>
+          <div class="stat-box-val ${warn > 0 ? 'amber-v' : ''}" style="${warn === 0 ? 'color:var(--t3)' : ''}">${warn}</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-box-label">Not Recording</div>
+          <div class="stat-box-val ${nr > 0 ? 'purple-v' : ''}" style="${nr === 0 ? 'color:var(--t3)' : ''}">${nr}</div>
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+
+  document.getElementById('sensor-body').innerHTML = `<div class="site-grid">${cards}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  C4I UNITS SITE CARDS
+// ═══════════════════════════════════════════════════════
+function renderC4I(c4iData) {
+  _c4iData = c4iData;
+  const cities = Object.keys(c4iData).sort();
+
+  if (!cities.length) {
+    document.getElementById('c4i-body').innerHTML =
+      `<div class="err-box">No C4I items found in Zabbix.<br>
+       Expected keys like <code>reynosa.camera.working.24h</code> or <code>es.detection.count[REYNOSA,facedetection]</code>.</div>`;
+    return;
+  }
+
+  const fmtN = n => {
+    if (n >= 1e6) return (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return Math.round(n / 1e3) + 'K';
+    return n;
+  };
+
+  const unitRow = (label, d) => {
+    const w = d.w24, f = d.f24, a = d.a24;
+    const total = w + f + a || 1;
+    const pctW = (w / total * 100).toFixed(1);
+    const barColor = f > 0 ? '#ef4444' : a > 0 ? '#f59e0b' : '#22c55e';
+    return `
+      <div class="c4i-unit-row">
+        <span class="c4i-unit-label">${label}</span>
+        <div class="c4i-bar-wrap">
+          <div class="c4i-bar-fill" style="width:${pctW}%;background:${barColor}"></div>
+        </div>
+        <div class="c4i-counts">
+          <span style="color:var(--green)">${w} ✓</span>
+          <span style="color:${f > 0 ? 'var(--red)' : 'var(--t3)'}">${f} ✗</span>
+          ${a > 0 ? `<span style="color:var(--amber)">${a} ⚠</span>` : ''}
+        </div>
+      </div>`;
+  };
+
+  const cards = cities.map(city => {
+    const d    = c4iData[city];
+    const name = CITY_DISPLAY[city] || city.charAt(0).toUpperCase() + city.slice(1);
+
+    const totalUnits = d.camera.w24 + d.camera.f24 + d.camera.a24
+                     + d.ptz.w24    + d.ptz.f24    + d.ptz.a24
+                     + d.lpr.w24    + d.lpr.f24    + d.lpr.a24;
+    const hasFailed  = d.camera.f24 > 0 || d.ptz.f24 > 0 || d.lpr.f24 > 0;
+    const hasWarn    = d.camera.a24 > 0 || d.ptz.a24 > 0 || d.lpr.a24 > 0;
+
+    const statusLabel = hasFailed ? { t:'Critical', c:'var(--red)' }
+                      : hasWarn   ? { t:'Warning',  c:'var(--amber)' }
+                      :             { t:'Healthy',  c:'var(--green)' };
+
+    const detectTotal = d.detect.face + d.detect.lpr + d.detect.vid + d.detect.cad;
+    const detectHtml  = detectTotal > 0 ? `
+      <div class="c4i-detect-block">
+        <div class="c4i-detect-title">ES Detections (30d)</div>
+        <div class="c4i-detect-grid">
+          <div class="c4i-detect-row">Face <strong>${fmtN(d.detect.face)}</strong></div>
+          <div class="c4i-detect-row">LPR <strong>${fmtN(d.detect.lpr)}</strong></div>
+          <div class="c4i-detect-row">Video <strong>${fmtN(d.detect.vid)}</strong></div>
+          <div class="c4i-detect-row">CAD <strong>${fmtN(d.detect.cad)}</strong></div>
+        </div>
+      </div>` : '';
+
+    return `
+    <div class="site-card ${hasFailed ? 'has-failed' : ''}">
+      <div class="site-top">
+        <div>
+          <div class="site-name-txt">${name}</div>
+          <div class="site-name-sub">${totalUnits} units · 24h window</div>
+        </div>
+        <span style="font-size:12px;font-weight:700;
+          color:${statusLabel.c};
+          background:${statusLabel.c}22;
+          padding:3px 10px;border-radius:20px;
+          border:1px solid ${statusLabel.c}44">${statusLabel.t}</span>
+      </div>
+      <div style="font-size:9px;text-transform:uppercase;letter-spacing:0.7px;color:var(--t3);
+        display:flex;justify-content:space-between;margin-bottom:2px;padding:0 2px">
+        <span>Unit type</span><span>Working / Failed / Warn</span>
+      </div>
+      ${unitRow('Camera',     d.camera)}
+      ${unitRow('PTZ Camera', d.ptz)}
+      ${unitRow('LPR',        d.lpr)}
+      ${detectHtml}
+    </div>`;
+  }).join('');
+
+  document.getElementById('c4i-body').innerHTML = `<div class="site-grid">${cards}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  PLATFORM ITEM PARSER
+// ═══════════════════════════════════════════════════════
+function parsePlatformItems(cpuItems, memItems, diskItems, procItems, c4iItems) {
+  const data = {};   // hostid → { cpu, mem, disks[], c4iProcs[], otherProcs[] }
+
+  const ensure = id => {
+    if (!data[id]) data[id] = { cpu: null, mem: null, disks: [], c4iProcs: [], otherProcs: [] };
+  };
+
+  // ── CPU ──────────────────────────────────────────────────
+  for (const it of cpuItems) {
+    ensure(it.hostid);
+    const v = parseFloat(it.lastvalue);
+    if (isNaN(v)) continue;
+    const k = it.key_;
+    // system.cpu.util[,idle] → used = 100-idle
+    const used = k.toLowerCase().includes('idle') ? Math.max(0, 100 - v) : v;
+    // Keep highest seen value (covers multi-core aggregated items)
+    if (data[it.hostid].cpu === null || used > data[it.hostid].cpu)
+      data[it.hostid].cpu = +used.toFixed(1);
+  }
+
+  // ── Memory ───────────────────────────────────────────────
+  for (const it of memItems) {
+    ensure(it.hostid);
+    const v = parseFloat(it.lastvalue);
+    if (isNaN(v)) continue;
+    const k = it.key_;
+    if (k.includes('utilization') || k.includes('pused')) {
+      if (data[it.hostid].mem === null) data[it.hostid].mem = +v.toFixed(1);
+    }
+  }
+
+  // ── Disk ─────────────────────────────────────────────────
+  for (const it of diskItems) {
+    ensure(it.hostid);
+    const v = parseFloat(it.lastvalue);
+    if (isNaN(v)) continue;
+    const k = it.key_;
+    const m = k.match(/^vfs\.fs\.size\[([^,\]]+),pused\]$/);
+    if (m) data[it.hostid].disks.push({ path: m[1], pct: +v.toFixed(1) });
+  }
+
+  // ── Processes (proc.num) ──────────────────────────────────
+  for (const it of procItems) {
+    ensure(it.hostid);
+    const count = parseFloat(it.lastvalue) || 0;
+    const kl = it.key_.toLowerCase();
+    const nl = (it.name || '').toLowerCase();
+    if (kl.includes('c4i') || nl.includes('c4i')) {
+      data[it.hostid].c4iProcs.push({ name: it.name, key: it.key_, count });
+    } else {
+      data[it.hostid].otherProcs.push({ name: it.name, key: it.key_, count });
+    }
+  }
+
+  // ── C4I-specific items (key_ contains 'c4i') ─────────────
+  for (const it of c4iItems) {
+    ensure(it.hostid);
+    const count = parseFloat(it.lastvalue) || 0;
+    const kl = it.key_.toLowerCase();
+    const nl = (it.name || '').toLowerCase();
+    // Only pull in proc-related c4i items not already captured
+    if ((kl.includes('proc') || kl.includes('service') || kl.includes('process')) &&
+        !data[it.hostid].c4iProcs.find(p => p.key === it.key_)) {
+      data[it.hostid].c4iProcs.push({ name: it.name, key: it.key_, count });
+    }
+  }
+
+  return data;
+}
+
+// ── Colour for a percentage ───────────────────────────────
+function pctColor(pct) {
+  if (pct === null) return 'var(--t3)';
+  if (pct >= 90) return 'var(--red)';
+  if (pct >= 70) return 'var(--amber)';
+  return 'var(--green)';
+}
+
+// ═══════════════════════════════════════════════════════
+//  PLATFORM RENDER
+// ═══════════════════════════════════════════════════════
+let _platData = {};
+
+function renderPlatform(hosts, platData) {
+  _platData = platData;
+
+  const metricBar = (label, pct) => {
+    const col = pctColor(pct);
+    const w   = pct !== null ? pct : 0;
+    const txt = pct !== null ? `${pct}%` : 'N/A';
+    return `
+      <div class="plat-metric">
+        <span class="plat-metric-label">${label}</span>
+        <div class="plat-bar-wrap">
+          <div class="plat-bar-fill" style="width:${Math.min(w,100)}%;background:${col}"></div>
+        </div>
+        <span class="plat-metric-val" style="color:${col}">${txt}</span>
+      </div>`;
+  };
+
+  const sorted = [...hosts].sort((a,b) => {
+    if (a.status !== b.status) return +a.status - +b.status;
+    return a.name.localeCompare(b.name);
+  });
+
+  const cards = sorted.map(h => {
+    const p   = platData[h.hostid] || {};
+    const ip  = h.interfaces?.[0]?.ip || '—';
+    const enabled = h.status === '0';
+
+    // Best disk: primary partition first (C:, /), else highest used
+    const disks   = p.disks || [];
+    const primary = disks.find(d => d.path === 'C:' || d.path === '/') ||
+                    disks.sort((a,b) => b.pct - a.pct)[0] || null;
+    const diskLabel = primary ? primary.path : 'Disk';
+    const diskPct   = primary ? primary.pct  : null;
+
+    // C4I processes
+    const c4iProcs     = p.c4iProcs || [];
+    const totalC4i     = c4iProcs.reduce((s, x) => s + x.count, 0);
+    const c4iRunning   = totalC4i > 0;
+    const hasC4i       = c4iProcs.length > 0;
+
+    const hasAlert = (p.cpu  !== null && p.cpu  >= 90) ||
+                     (p.mem  !== null && p.mem  >= 90) ||
+                     (diskPct !== null && diskPct >= 90);
+
+    // C4I process breakdown rows
+    const procRows = c4iProcs.length > 0
+      ? c4iProcs.map(x => `
+          <div class="plat-proc-row">
+            <div class="plat-proc-dot" style="background:${x.count > 0 ? 'var(--green)' : 'var(--red)'}"></div>
+            <span class="plat-proc-label">${x.name || x.key}</span>
+            <span class="plat-proc-count" style="color:${x.count > 0 ? 'var(--green)' : 'var(--red)'}">${x.count}</span>
+          </div>`).join('')
+      : `<span class="plat-na">No C4I process items found</span>`;
+
+    const c4iHeaderColor = !hasC4i ? 'var(--t3)'
+                         : c4iRunning ? 'var(--green)' : 'var(--red)';
+    const c4iStatus = !hasC4i ? '—' : c4iRunning ? `${totalC4i} running` : 'Stopped';
+
+    return `
+    <div class="plat-card ${hasAlert ? 'has-alert' : ''}">
+      <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:8px;margin-bottom:8px">
+        <div style="min-width:0">
+          <div class="plat-hostname" title="${h.name}">${h.name}</div>
+          <div class="plat-sub">${siteOf(h.name)} · ${ip}</div>
+        </div>
+        ${enabled
+          ? '<span class="badge b-ok" style="flex-shrink:0">ON</span>'
+          : '<span class="badge b-dis-host" style="flex-shrink:0">OFF</span>'}
+      </div>
+      <div class="plat-metrics">
+        ${metricBar('CPU', p.cpu ?? null)}
+        ${metricBar('RAM', p.mem ?? null)}
+        ${metricBar(diskLabel, diskPct)}
+      </div>
+      <div class="plat-divider"></div>
+      <div style="display:flex;align-items:center;gap:6px;margin-bottom:${c4iProcs.length > 1 ? '6px' : '0'}">
+        <div class="plat-proc-dot" style="background:${c4iHeaderColor}"></div>
+        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--t3);flex:1">C4I Processes</span>
+        <span style="font-size:12px;font-weight:800;color:${c4iHeaderColor}">${c4iStatus}</span>
+      </div>
+      ${c4iProcs.length > 1 ? `<div style="padding-left:4px">${procRows}</div>` : ''}
+    </div>`;
+  }).join('');
+
+  document.getElementById('platform-body').innerHTML = `<div class="plat-grid">${cards}</div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  HOSTS TABLE
+// ═══════════════════════════════════════════════════════
+let _hosts = [];
+
+function renderHosts(hosts) {
+  _hosts = hosts;
+  const sorted = [...hosts].sort((a, b) => {
+    if (a.status !== b.status) return +a.status - +b.status;
+    return a.name.localeCompare(b.name);
+  });
+
+  const rows = sorted.map(h => {
+    const ip = (h.interfaces && h.interfaces[0]) ? h.interfaces[0].ip : '—';
+    const enabled = h.status === '0';
+    return `<tr>
+      <td style="font-weight:600">${h.name}</td>
+      <td style="font-family:monospace;font-size:12px;color:var(--t2)">${ip}</td>
+      <td>${enabled
+        ? '<span class="badge b-ok">Enabled</span>'
+        : '<span class="badge b-dis-host">Disabled</span>'}</td>
+    </tr>`;
+  }).join('');
+
+  document.getElementById('hosts-body').innerHTML = `
+    <table>
+      <thead><tr><th>Host Name</th><th>IP Address</th><th>Status</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  TABS
+// ═══════════════════════════════════════════════════════
+const TABS = ['problems','sites','hosts','sensors','c4i','platform'];
+
+function showTab(name) {
+  activeTab = name;
+  TABS.forEach(t => {
+    document.getElementById(`tab-${t}`).style.display = t === name ? '' : 'none';
+  });
+  document.querySelectorAll('.tab').forEach((btn, i) => {
+    btn.classList.toggle('active', TABS[i] === name);
+  });
+  updateTabCount();
+}
+
+function updateTabCount() {
+  const map = {
+    problems: () => `${_problems.length} problems`,
+    sites:    () => `${new Set(_hosts.map(h => siteOf(h.name))).size} sites`,
+    sensors:  () => `${Object.keys(_siteData).length} sensor sites`,
+    hosts:    () => `${_hosts.length} hosts`,
+    c4i:      () => `${Object.keys(_c4iData).length} cities`,
+    platform: () => `${_hosts.length} hosts`,
+  };
+  const fn = map[activeTab];
+  document.getElementById('tab-count').textContent = fn ? fn() : '';
+}
+
+// ═══════════════════════════════════════════════════════
+//  COUNTDOWN + AUTO-REFRESH
+// ═══════════════════════════════════════════════════════
+function startCountdown() {
+  clearInterval(cdTimer);
+  cdSec = REFRESH_SEC;
+  document.getElementById('cd-txt').textContent = `Auto-refresh in ${cdSec}s`;
+  cdTimer = setInterval(() => {
+    cdSec--;
+    document.getElementById('cd-txt').textContent = `Auto-refresh in ${cdSec}s`;
+    if (cdSec <= 0) loadAll();
+  }, 1000);
+}
+
+// ═══════════════════════════════════════════════════════
+//  INIT
+// ═══════════════════════════════════════════════════════
+loadAll();
+</script>
+</body>
+</html>
