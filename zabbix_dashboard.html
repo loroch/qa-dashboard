@@ -321,6 +321,85 @@ tbody tr:hover td { background: rgba(255,255,255,0.025); }
 }
 .err-box code { background: rgba(0,0,0,0.3); padding: 2px 6px; border-radius: 4px; font-size: 12px; font-family: monospace; }
 
+/* ── DB SERVICES BAR ─────────────────────────────────────── */
+.db-services-bar {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 16px;
+  backdrop-filter: blur(10px);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.db-bar-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.9px;
+  color: var(--t3);
+  margin-right: 4px;
+  flex-shrink: 0;
+}
+.db-host-chip {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 11px;
+  font-weight: 700;
+  border: 1px solid;
+  transition: transform .15s;
+  cursor: default;
+}
+.db-host-chip:hover { transform: translateY(-1px); }
+.db-host-chip.ok  { background:rgba(34,197,94,.1);  border-color:rgba(34,197,94,.25); color:#86efac; }
+.db-host-chip.err { background:rgba(239,68,68,.12); border-color:rgba(239,68,68,.3);  color:#fca5a5; }
+.db-host-chip.unk { background:rgba(100,116,139,.1);border-color:rgba(100,116,139,.25);color:#94a3b8; }
+.db-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+
+/* ── MEDIA TRAFFIC ───────────────────────────────────────── */
+.media-range-bar {
+  display: flex; align-items: center; gap: 6px; margin-bottom: 14px;
+}
+.media-range-btn {
+  padding: 4px 14px; border-radius: 7px; border: 1px solid var(--border);
+  background: transparent; color: var(--t2); font-size: 11px; font-weight: 600;
+  cursor: pointer; transition: all .15s;
+}
+.media-range-btn.active {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.media-channel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 10px;
+  margin-bottom: 16px;
+}
+.media-channel-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  backdrop-filter: blur(10px);
+  text-align: center;
+}
+.media-ch-icon  { font-size: 28px; line-height: 1; margin-bottom: 6px; }
+.media-ch-name  { font-size: 12px; font-weight: 700; margin-bottom: 10px; color: var(--t1); }
+.media-ch-count { font-size: 34px; font-weight: 800; line-height: 1; margin-bottom: 4px; }
+.media-ch-sub   { font-size: 10px; color: var(--t3); }
+.media-ch-bar   { height: 4px; border-radius: 3px; background: rgba(255,255,255,0.07); margin-top: 10px; overflow: hidden; }
+.media-ch-bar-fill { height: 100%; border-radius: 3px; }
+.media-recent-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  overflow: hidden;
+  backdrop-filter: blur(10px);
+}
+
 /* ── PLATFORM CARDS ──────────────────────────────────────── */
 .plat-grid {
   display: grid;
@@ -584,12 +663,14 @@ tbody tr:hover td { background: rgba(255,255,255,0.025); }
       <button class="tab" onclick="showTab('sensors')">Sensor Health</button>
       <button class="tab" onclick="showTab('c4i')">C4I Units</button>
       <button class="tab" onclick="showTab('platform')">Platform</button>
+      <button class="tab" onclick="showTab('media')">Media Traffic</button>
     </div>
     <span class="count-pill" id="tab-count">…</span>
   </div>
 
   <!-- TAB: PROBLEMS -->
   <div id="tab-problems">
+    <div id="db-services-wrap" style="margin-bottom:12px"></div>
     <div class="tbl-card">
       <div class="tbl-scroll" id="prob-body">
         <div class="skel" style="height:200px;border-radius:14px"></div>
@@ -617,6 +698,13 @@ tbody tr:hover td { background: rgba(255,255,255,0.025); }
       <div class="tbl-scroll" id="hosts-body">
         <div class="skel" style="height:200px;border-radius:14px"></div>
       </div>
+    </div>
+  </div>
+
+  <!-- TAB: MEDIA TRAFFIC -->
+  <div id="tab-media" style="display:none">
+    <div id="media-body">
+      <div class="skel" style="height:300px;border-radius:14px"></div>
     </div>
   </div>
 
@@ -680,6 +768,8 @@ let cdSec       = REFRESH_SEC;
 let activeTab   = 'problems';
 let _triggerMap = {};   // triggerid → { hostName, siteName }
 let _c4iData    = {};   // city → { camera, ptz, lpr, detect }
+let _mediaData  = {};   // parsed media groups
+let _mediaWin   = 604800; // seconds — default 7 days
 
 // ═══════════════════════════════════════════════════════
 //  API HELPER
@@ -847,6 +937,8 @@ async function loadAll() {
       hosts, problems, sensorItems, triggers,
       c4iCam, c4iLpr, c4iEs,
       platCpu, platMem, platDisk, platProc, platC4iKeys,
+      serviceItems,
+      mediaTypes, alerts,
     ] = await Promise.all([
       zbx('host.get', {
         output: ['hostid', 'host', 'name', 'status'],
@@ -884,6 +976,21 @@ async function loadAll() {
       zbx('item.get', { output: PLAT_OUT, search: { key_: 'vfs.fs.size' },     limit: 3000 }),
       zbx('item.get', { output: PLAT_OUT, search: { key_: 'proc.num' },        limit: 2000 }),
       zbx('item.get', { output: PLAT_OUT, search: { key_: 'c4i' },             limit: 500 }),
+      // ── Service checks (SQL, C4I agent, etc.) ────────────────
+      zbx('item.get', {
+        output: ['itemid','name','key_','lastvalue','lastclock','hostid'],
+        search: { key_: 'service.info' },
+        limit: 2000,
+      }),
+      // ── Media / Alerts ───────────────────────────────────────
+      zbx('mediatype.get', { output: ['mediatypeid','name','type'] }),
+      zbx('alert.get', {
+        output: ['alertid','mediatypeid','sendto','subject','status','clock','error'],
+        time_from: Math.floor(Date.now() / 1000) - _mediaWin,
+        sortfield: 'clock',
+        sortorder: 'DESC',
+        limit: 1000,
+      }),
     ]);
 
     document.getElementById('cors-warn').style.display = 'none';
@@ -901,16 +1008,20 @@ async function loadAll() {
     const siteData   = parseSensorItems(sensorItems);
     const c4iData    = parseC4IItems([...c4iCam, ...c4iLpr, ...c4iEs]);
     const platData   = parsePlatformItems(platCpu, platMem, platDisk, platProc, platC4iKeys);
+    const mediaData  = parseMediaAlerts(mediaTypes, alerts);
+    const dbServices = parseServiceItems(serviceItems, _hostMap);
 
     renderKPI(hosts, problems);
     renderTopIssues(problems);
     renderSevChart(problems);
     renderSiteProblemsChart(problems);
+    renderDBServices(dbServices);
     renderProblems(problems);
     renderSites(hosts, problems);
     renderSensors(siteData);
     renderC4I(c4iData);
     renderPlatform(hosts, platData);
+    renderMedia(mediaData);
     renderHosts(hosts);
     updateTabCount();
     startCountdown();
@@ -1648,9 +1759,211 @@ function renderHosts(hosts) {
 }
 
 // ═══════════════════════════════════════════════════════
+//  DATABASE SERVICES (service.info items on *SQLDB hosts)
+// ═══════════════════════════════════════════════════════
+function parseServiceItems(items, hostMap) {
+  const hosts = {};   // hostid → { hostName, site, sqlState, sqlName, agentState }
+
+  for (const it of items) {
+    const hostName = hostMap[it.hostid] || '';
+    if (!hostName.toUpperCase().includes('SQLDB')) continue;
+
+    if (!hosts[it.hostid]) {
+      hosts[it.hostid] = {
+        hostName,
+        site:       siteOf(hostName),
+        sqlState:   null,
+        sqlName:    null,
+        agentState: null,
+      };
+    }
+
+    const v   = parseFloat(it.lastvalue);
+    const nl  = (it.name  || '').toLowerCase();
+    const kl  = (it.key_  || '').toLowerCase();
+
+    // SQL Server service: name contains "sql" but not "agent"
+    if ((nl.includes('sql') || kl.includes('sql')) && !nl.includes('agent')) {
+      hosts[it.hostid].sqlState = v;
+      hosts[it.hostid].sqlName  = it.name;
+    }
+    // C4I / Zabbix agent fallback
+    else if (nl.includes('agent') || kl.includes('agent')) {
+      hosts[it.hostid].agentState = v;
+    }
+  }
+  return hosts;
+}
+
+function renderDBServices(dbServices) {
+  const el = document.getElementById('db-services-wrap');
+  const entries = Object.values(dbServices).sort((a, b) => a.hostName.localeCompare(b.hostName));
+
+  if (!entries.length) {
+    el.innerHTML = '';
+    return;
+  }
+
+  // service.info state: 0 = Running, anything else = not running, null = unknown
+  const chipState = e => {
+    if (e.sqlState === null) return 'unk';
+    return e.sqlState === 0 ? 'ok' : 'err';
+  };
+  const chipDot   = s => {
+    const c = s === 'ok' ? 'var(--green)' : s === 'err' ? 'var(--red)' : 'var(--t3)';
+    return `<div class="db-dot" style="background:${c}"></div>`;
+  };
+  const chipLabel = e => {
+    if (e.sqlState === null) return 'Unknown';
+    return e.sqlState === 0 ? 'Running' : 'STOPPED';
+  };
+
+  const anyDown = entries.some(e => e.sqlState !== null && e.sqlState !== 0);
+
+  const chips = entries.map(e => {
+    const s = chipState(e);
+    return `<div class="db-host-chip ${s}" title="${e.sqlName || 'SQL Server'} · ${e.site}">
+      ${chipDot(s)}
+      ${e.hostName}
+      <span style="opacity:.7;font-weight:400">· ${chipLabel(e)}</span>
+    </div>`;
+  }).join('');
+
+  el.innerHTML = `
+    <div class="db-services-bar" style="${anyDown ? 'border-color:rgba(239,68,68,0.35)' : ''}">
+      <span class="db-bar-label">🗄 DB Services</span>
+      ${chips}
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════
+//  MEDIA TRAFFIC
+// ═══════════════════════════════════════════════════════
+const MT_ICON = { 0:'📧', 1:'📱', 2:'💬', 3:'📱', 4:'⚙️', 11:'🔗' };
+
+function parseMediaAlerts(mediaTypes, alerts) {
+  const mtMap = {};
+  for (const mt of mediaTypes) mtMap[mt.mediatypeid] = { name: mt.name, type: +mt.type };
+
+  const groups = {};   // mediatypeid → { name, icon, sent, failed, pending, recent[] }
+  for (const a of alerts) {
+    const mt  = mtMap[a.mediatypeid] || { name: 'Unknown', type: -1 };
+    const id  = a.mediatypeid || 'unknown';
+    if (!groups[id]) groups[id] = {
+      name: mt.name, icon: MT_ICON[mt.type] || '📢',
+      sent: 0, failed: 0, pending: 0, recent: [],
+    };
+    const s = +a.status;
+    if (s === 1) groups[id].sent++;
+    else if (s === 2) groups[id].failed++;
+    else groups[id].pending++;
+    if (groups[id].recent.length < 50) groups[id].recent.push(a);
+  }
+
+  // Most recent alerts across all channels (for the unified table)
+  const recent = [...alerts].slice(0, 200).map(a => ({
+    ...a,
+    mtName: (mtMap[a.mediatypeid] || {}).name || 'Unknown',
+    mtIcon: MT_ICON[(mtMap[a.mediatypeid] || {}).type] || '📢',
+  }));
+
+  return { groups, recent, total: alerts.length, mtMap };
+}
+
+function setMediaWindow(sec) {
+  _mediaWin = sec;
+  document.querySelectorAll('.media-range-btn').forEach(b => {
+    b.classList.toggle('active', +b.dataset.sec === sec);
+  });
+  loadAll();
+}
+
+function renderMedia(mediaData) {
+  _mediaData = mediaData;
+  const { groups, recent, total } = mediaData;
+  const channels = Object.values(groups).sort((a, b) => (b.sent + b.failed) - (a.sent + a.failed));
+
+  const winLabel = _mediaWin === 86400 ? '24 hours' : _mediaWin === 604800 ? '7 days' : '30 days';
+
+  if (!channels.length) {
+    document.getElementById('media-body').innerHTML =
+      `<div class="err-box">No alert notifications found in the last ${winLabel}.<br>
+       Media actions may not be configured in Zabbix actions.</div>`;
+    return;
+  }
+
+  // ── Channel summary cards ─────────────────────────────────
+  const channelCards = channels.map(ch => {
+    const total  = ch.sent + ch.failed + ch.pending;
+    const pct    = total > 0 ? Math.round(ch.sent / total * 100) : 0;
+    const color  = ch.failed > 0 ? 'var(--red)' : 'var(--green)';
+    const barCol = ch.failed > 0 ? '#ef4444' : '#22c55e';
+    return `
+      <div class="media-channel-card">
+        <div class="media-ch-icon">${ch.icon}</div>
+        <div class="media-ch-name">${ch.name}</div>
+        <div class="media-ch-count" style="color:${color}">${ch.sent + ch.failed + ch.pending}</div>
+        <div class="media-ch-sub">escalations · ${winLabel}</div>
+        <div class="media-ch-bar">
+          <div class="media-ch-bar-fill" style="width:${pct}%;background:${barCol}"></div>
+        </div>
+        <div style="display:flex;justify-content:space-between;margin-top:6px;font-size:10px">
+          <span style="color:var(--green)">✓ ${ch.sent} sent</span>
+          ${ch.failed  > 0 ? `<span style="color:var(--red)">✗ ${ch.failed} failed</span>` : ''}
+          ${ch.pending > 0 ? `<span style="color:var(--t3)">⏳ ${ch.pending}</span>` : ''}
+        </div>
+      </div>`;
+  }).join('');
+
+  // ── Recent escalations table ──────────────────────────────
+  const statusBadge = s => {
+    if (+s === 1) return '<span class="badge b-ok">Sent</span>';
+    if (+s === 2) return '<span class="badge b-high">Failed</span>';
+    return '<span class="badge b-nc">Pending</span>';
+  };
+
+  const rows = recent.map(a => `
+    <tr>
+      <td style="color:var(--t3);font-size:11px;white-space:nowrap">${timeAgo(a.clock)}</td>
+      <td style="font-size:12px">${a.mtIcon} ${a.mtName}</td>
+      <td style="font-size:12px;color:var(--t2);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+          title="${a.subject || ''}">${a.subject || '—'}</td>
+      <td style="font-size:11px;color:var(--t3);max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"
+          title="${a.sendto || ''}">${a.sendto || '—'}</td>
+      <td>${statusBadge(a.status)}</td>
+      ${a.error ? `<td style="font-size:10px;color:var(--red)" title="${a.error}">⚠ ${a.error.slice(0,40)}</td>` : '<td></td>'}
+    </tr>`).join('');
+
+  document.getElementById('media-body').innerHTML = `
+    <div class="media-range-bar">
+      <span style="font-size:11px;color:var(--t3);margin-right:4px">Window:</span>
+      <button class="media-range-btn ${_mediaWin===86400?'active':''}"  data-sec="86400"  onclick="setMediaWindow(86400)">24h</button>
+      <button class="media-range-btn ${_mediaWin===604800?'active':''}" data-sec="604800" onclick="setMediaWindow(604800)">7 days</button>
+      <button class="media-range-btn ${_mediaWin===2592000?'active':''}" data-sec="2592000" onclick="setMediaWindow(2592000)">30 days</button>
+      <span style="margin-left:auto;font-size:11px;color:var(--t3)">${total} total escalations</span>
+    </div>
+    <div class="media-channel-grid">${channelCards}</div>
+    <div class="media-recent-card">
+      <div style="padding:12px 16px;border-bottom:1px solid var(--border)">
+        <span style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:1px;color:var(--t2)">
+          Recent Escalations
+        </span>
+      </div>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr>
+            <th>Time</th><th>Channel</th><th>Subject / Alert</th><th>Recipient</th><th>Status</th><th>Error</th>
+          </tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// ═══════════════════════════════════════════════════════
 //  TABS
 // ═══════════════════════════════════════════════════════
-const TABS = ['problems','sites','hosts','sensors','c4i','platform'];
+const TABS = ['problems','sites','hosts','sensors','c4i','platform','media'];
 
 function showTab(name) {
   activeTab = name;
@@ -1671,6 +1984,7 @@ function updateTabCount() {
     hosts:    () => `${_hosts.length} hosts`,
     c4i:      () => `${Object.keys(_c4iData).length} cities`,
     platform: () => `${_hosts.length} hosts`,
+    media:    () => `${_mediaData.total || 0} escalations`,
   };
   const fn = map[activeTab];
   document.getElementById('tab-count').textContent = fn ? fn() : '';
