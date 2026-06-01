@@ -976,11 +976,12 @@ async function loadAll() {
       zbx('item.get', { output: PLAT_OUT, search: { key_: 'vfs.fs.size' },     limit: 3000 }),
       zbx('item.get', { output: PLAT_OUT, search: { key_: 'proc.num' },        limit: 2000 }),
       zbx('item.get', { output: PLAT_OUT, search: { key_: 'c4i' },             limit: 500 }),
-      // ── Service checks (SQL, C4I agent, etc.) ────────────────
+      // ── SQL service state on *-SQLDB hosts ───────────────────
       zbx('item.get', {
         output: ['itemid','name','key_','lastvalue','lastclock','hostid'],
-        search: { key_: 'service.info' },
-        limit: 2000,
+        searchByAny: true,
+        search: { key_: 'sql.service', name: 'SQL Server' },
+        limit: 500,
       }),
       // ── Media / Alerts ───────────────────────────────────────
       zbx('mediatype.get', { output: ['mediatypeid','name','type'] }),
@@ -1009,18 +1010,18 @@ async function loadAll() {
     const c4iData    = parseC4IItems([...c4iCam, ...c4iLpr, ...c4iEs]);
     const platData   = parsePlatformItems(platCpu, platMem, platDisk, platProc, platC4iKeys);
     const mediaData  = parseMediaAlerts(mediaTypes, alerts);
-    const dbServices = parseServiceItems(serviceItems, _hostMap);
+    _dbServices      = parseServiceItems(serviceItems, _hostMap);
 
     renderKPI(hosts, problems);
     renderTopIssues(problems);
     renderSevChart(problems);
     renderSiteProblemsChart(problems);
-    renderDBServices(dbServices);
+    renderDBServices(_dbServices);
     renderProblems(problems);
     renderSites(hosts, problems);
     renderSensors(siteData);
     renderC4I(c4iData);
-    renderPlatform(hosts, platData);
+    renderPlatform(hosts, platData, _dbServices);
     renderMedia(mediaData);
     renderHosts(hosts);
     updateTabCount();
@@ -1598,29 +1599,39 @@ function parsePlatformItems(cpuItems, memItems, diskItems, procItems, c4iItems) 
     if (m) data[it.hostid].disks.push({ path: m[1], pct: +v.toFixed(1) });
   }
 
-  // ── Processes (proc.num) ──────────────────────────────────
-  for (const it of procItems) {
-    ensure(it.hostid);
+  // ── Processes (proc.num) and service checks ───────────────
+  const addC4iItem = (hostid, it) => {
+    ensure(hostid);
     const count = parseFloat(it.lastvalue) || 0;
+    const kl    = it.key_.toLowerCase();
+    const nl    = (it.name || '').toLowerCase();
+    // service.info and "State of service" items return 0 when RUNNING
+    const isServiceCheck = kl.includes('service.info') || nl.startsWith('state of service');
+    const running        = isServiceCheck ? count === 0 : count > 0;
+    if (!data[hostid].c4iProcs.find(p => p.key === it.key_)) {
+      data[hostid].c4iProcs.push({
+        name: it.name, key: it.key_, count, running, isServiceCheck,
+      });
+    }
+  };
+
+  for (const it of procItems) {
     const kl = it.key_.toLowerCase();
     const nl = (it.name || '').toLowerCase();
     if (kl.includes('c4i') || nl.includes('c4i')) {
-      data[it.hostid].c4iProcs.push({ name: it.name, key: it.key_, count });
+      addC4iItem(it.hostid, it);
     } else {
-      data[it.hostid].otherProcs.push({ name: it.name, key: it.key_, count });
+      ensure(it.hostid);
+      data[it.hostid].otherProcs.push({ name: it.name, key: it.key_, count: parseFloat(it.lastvalue) || 0 });
     }
   }
 
   // ── C4I-specific items (key_ contains 'c4i') ─────────────
   for (const it of c4iItems) {
-    ensure(it.hostid);
-    const count = parseFloat(it.lastvalue) || 0;
     const kl = it.key_.toLowerCase();
     const nl = (it.name || '').toLowerCase();
-    // Only pull in proc-related c4i items not already captured
-    if ((kl.includes('proc') || kl.includes('service') || kl.includes('process')) &&
-        !data[it.hostid].c4iProcs.find(p => p.key === it.key_)) {
-      data[it.hostid].c4iProcs.push({ name: it.name, key: it.key_, count });
+    if (kl.includes('proc') || kl.includes('service') || kl.includes('process')) {
+      addC4iItem(it.hostid, it);
     }
   }
 
@@ -1638,9 +1649,10 @@ function pctColor(pct) {
 // ═══════════════════════════════════════════════════════
 //  PLATFORM RENDER
 // ═══════════════════════════════════════════════════════
-let _platData = {};
+let _platData    = {};
+let _dbServices  = {};
 
-function renderPlatform(hosts, platData) {
+function renderPlatform(hosts, platData, dbServices) {
   _platData = platData;
 
   const metricBar = (label, pct) => {
@@ -1674,17 +1686,24 @@ function renderPlatform(hosts, platData) {
     const diskLabel = primary ? primary.path : 'Disk';
     const diskPct   = primary ? primary.pct  : null;
 
-    // C4I processes
-    const c4iProcs     = p.c4iProcs || [];
-    const totalC4i     = c4iProcs.reduce((s, x) => s + x.count, 0);
-    const c4iRunning   = totalC4i > 0;
-    const hasC4i       = c4iProcs.length > 0;
+    // C4I processes — some hosts use proc.num (count>0 = running),
+    // others use service.info (value=0 = running). Use the .running flag.
+    const c4iProcs   = p.c4iProcs || [];
+    const hasC4i     = c4iProcs.length > 0;
+    const c4iRunning = hasC4i && c4iProcs.some(x => x.running);
+    // Total count only from proc.num items (service checks always show 0)
+    const totalC4i   = c4iProcs.filter(x => !x.isServiceCheck).reduce((s, x) => s + x.count, 0);
 
-    const hasAlert = (p.cpu  !== null && p.cpu  >= 90) ||
-                     (p.mem  !== null && p.mem  >= 90) ||
-                     (diskPct !== null && diskPct >= 90);
+    // SQL service (for *-SQLDB hosts)
+    const isSQLDB  = h.name.toUpperCase().includes('SQLDB');
+    const sqlInfo  = dbServices ? dbServices[h.hostid] : null;
 
-    // C4I process breakdown rows
+    const hasAlert = (p.cpu   !== null && p.cpu   >= 90) ||
+                     (p.mem   !== null && p.mem   >= 90) ||
+                     (diskPct !== null && diskPct >= 90) ||
+                     (isSQLDB && sqlInfo && !sqlInfo.running);
+
+    // C4I process rows
     const procRows = c4iProcs.length > 0
       ? c4iProcs.map(x => `
           <div class="plat-proc-row">
@@ -1694,9 +1713,25 @@ function renderPlatform(hosts, platData) {
           </div>`).join('')
       : `<span class="plat-na">No C4I process items found</span>`;
 
-    const c4iHeaderColor = !hasC4i ? 'var(--t3)'
-                         : c4iRunning ? 'var(--green)' : 'var(--red)';
-    const c4iStatus = !hasC4i ? '—' : c4iRunning ? `${totalC4i} running` : 'Stopped';
+    const c4iHeaderColor = !hasC4i ? 'var(--t3)' : c4iRunning ? 'var(--green)' : 'var(--red)';
+    const c4iStatus      = !hasC4i ? '—' : c4iRunning ? `${totalC4i} running` : 'Stopped';
+
+    // SQL status block (only for SQLDB hosts)
+    const sqlBlock = isSQLDB ? (() => {
+      if (!sqlInfo) return `
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="plat-proc-dot" style="background:var(--t3)"></div>
+          <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--t3);flex:1">SQL Server</span>
+          <span style="font-size:12px;font-weight:800;color:var(--t3)">No data</span>
+        </div>`;
+      const col = sqlInfo.running ? 'var(--green)' : 'var(--red)';
+      return `
+        <div style="display:flex;align-items:center;gap:6px">
+          <div class="plat-proc-dot" style="background:${col}"></div>
+          <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--t3);flex:1">SQL Server</span>
+          <span style="font-size:13px;font-weight:800;color:${col}">${sqlInfo.rawValue}</span>
+        </div>`;
+    })() : '';
 
     return `
     <div class="plat-card ${hasAlert ? 'has-alert' : ''}">
@@ -1715,12 +1750,13 @@ function renderPlatform(hosts, platData) {
         ${metricBar(diskLabel, diskPct)}
       </div>
       <div class="plat-divider"></div>
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:${c4iProcs.length > 1 ? '6px' : '0'}">
-        <div class="plat-proc-dot" style="background:${c4iHeaderColor}"></div>
-        <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--t3);flex:1">C4I Processes</span>
-        <span style="font-size:12px;font-weight:800;color:${c4iHeaderColor}">${c4iStatus}</span>
-      </div>
-      ${c4iProcs.length > 1 ? `<div style="padding-left:4px">${procRows}</div>` : ''}
+      ${isSQLDB ? sqlBlock : `
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:${c4iProcs.length > 1 ? '6px' : '0'}">
+          <div class="plat-proc-dot" style="background:${c4iHeaderColor}"></div>
+          <span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.6px;color:var(--t3);flex:1">C4I Processes</span>
+          <span style="font-size:12px;font-weight:800;color:${c4iHeaderColor}">${c4iStatus}</span>
+        </div>
+        ${c4iProcs.length > 1 ? `<div style="padding-left:4px">${procRows}</div>` : ''}`}
     </div>`;
   }).join('');
 
@@ -1762,41 +1798,30 @@ function renderHosts(hosts) {
 //  DATABASE SERVICES (service.info items on *SQLDB hosts)
 // ═══════════════════════════════════════════════════════
 function parseServiceItems(items, hostMap) {
-  const hosts = {};   // hostid → { hostName, site, sqlState, sqlName, agentState }
+  const hosts = {};   // hostid → { hostName, site, running, rawValue, itemName }
 
   for (const it of items) {
     const hostName = hostMap[it.hostid] || '';
-    if (!hostName.toUpperCase().includes('SQLDB')) continue;
+    // key is sql.service.running — all hosts that report it are SQLDB hosts
+    const raw     = (it.lastvalue || '').trim();
+    const rawLow  = raw.toLowerCase();
+    const running = rawLow === 'running' || rawLow === 'yes' ||
+                    rawLow === '1'       || rawLow === 'true' ||
+                    rawLow.includes('running');
 
-    if (!hosts[it.hostid]) {
-      hosts[it.hostid] = {
-        hostName,
-        site:       siteOf(hostName),
-        sqlState:   null,
-        sqlName:    null,
-        agentState: null,
-      };
-    }
-
-    const v   = parseFloat(it.lastvalue);
-    const nl  = (it.name  || '').toLowerCase();
-    const kl  = (it.key_  || '').toLowerCase();
-
-    // SQL Server service: name contains "sql" but not "agent"
-    if ((nl.includes('sql') || kl.includes('sql')) && !nl.includes('agent')) {
-      hosts[it.hostid].sqlState = v;
-      hosts[it.hostid].sqlName  = it.name;
-    }
-    // C4I / Zabbix agent fallback
-    else if (nl.includes('agent') || kl.includes('agent')) {
-      hosts[it.hostid].agentState = v;
-    }
+    hosts[it.hostid] = {
+      hostName,
+      site:     siteOf(hostName),
+      running,
+      rawValue: raw || '—',
+      itemName: it.name || 'SQL Server service',
+    };
   }
   return hosts;
 }
 
 function renderDBServices(dbServices) {
-  const el = document.getElementById('db-services-wrap');
+  const el      = document.getElementById('db-services-wrap');
   const entries = Object.values(dbServices).sort((a, b) => a.hostName.localeCompare(b.hostName));
 
   if (!entries.length) {
@@ -1804,35 +1829,24 @@ function renderDBServices(dbServices) {
     return;
   }
 
-  // service.info state: 0 = Running, anything else = not running, null = unknown
-  const chipState = e => {
-    if (e.sqlState === null) return 'unk';
-    return e.sqlState === 0 ? 'ok' : 'err';
-  };
-  const chipDot   = s => {
-    const c = s === 'ok' ? 'var(--green)' : s === 'err' ? 'var(--red)' : 'var(--t3)';
-    return `<div class="db-dot" style="background:${c}"></div>`;
-  };
-  const chipLabel = e => {
-    if (e.sqlState === null) return 'Unknown';
-    return e.sqlState === 0 ? 'Running' : 'STOPPED';
-  };
-
-  const anyDown = entries.some(e => e.sqlState !== null && e.sqlState !== 0);
+  const anyDown = entries.some(e => !e.running);
 
   const chips = entries.map(e => {
-    const s = chipState(e);
-    return `<div class="db-host-chip ${s}" title="${e.sqlName || 'SQL Server'} · ${e.site}">
-      ${chipDot(s)}
-      ${e.hostName}
-      <span style="opacity:.7;font-weight:400">· ${chipLabel(e)}</span>
-    </div>`;
+    const cls = e.running ? 'ok' : 'err';
+    const dot = `<div class="db-dot" style="background:${e.running ? 'var(--green)' : 'var(--red)'}"></div>`;
+    return `
+      <div class="db-host-chip ${cls}" title="${e.itemName} · ${e.site}">
+        ${dot}
+        <span>${e.hostName}</span>
+        <span style="opacity:.65;font-weight:400">· ${e.rawValue}</span>
+      </div>`;
   }).join('');
 
   el.innerHTML = `
-    <div class="db-services-bar" style="${anyDown ? 'border-color:rgba(239,68,68,0.35)' : ''}">
-      <span class="db-bar-label">🗄 DB Services</span>
+    <div class="db-services-bar" style="${anyDown ? 'border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.04)' : ''}">
+      <span class="db-bar-label">🗄 SQL Services</span>
       ${chips}
+      <span style="margin-left:auto;font-size:10px;color:var(--t3)">${entries.length} DB hosts · sql.service.running</span>
     </div>`;
 }
 
