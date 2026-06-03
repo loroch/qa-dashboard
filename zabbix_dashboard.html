@@ -1801,19 +1801,27 @@ function parseServiceItems(items, hostMap) {
   const hosts = {};   // hostid → { hostName, site, running, rawValue, itemName }
 
   for (const it of items) {
-    const hostName = hostMap[it.hostid] || '';
-    // key is sql.service.running — all hosts that report it are SQLDB hosts
-    const raw     = (it.lastvalue || '').trim();
-    const rawLow  = raw.toLowerCase();
-    const running = rawLow === 'running' || rawLow === 'yes' ||
-                    rawLow === '1'       || rawLow === 'true' ||
-                    rawLow.includes('running');
+    const hostName      = hostMap[it.hostid] || '';
+    const raw           = (it.lastvalue || '').trim();
+    const rawLow        = raw.toLowerCase();
+    const isServiceInfo = (it.key_ || '').toLowerCase().includes('service.info');
+
+    // service.info items: 0 = Running (Windows service state code)
+    // sql.service.running items: text value "Running" / "Stopped"
+    const running = isServiceInfo
+      ? (parseFloat(raw) || 0) === 0
+      : rawLow === 'running' || rawLow === 'yes' || rawLow === '1' ||
+        rawLow === 'true'    || rawLow.includes('running');
+
+    const displayVal = isServiceInfo
+      ? (running ? 'Running' : 'Stopped')
+      : (raw || '—');
 
     hosts[it.hostid] = {
       hostName,
       site:     siteOf(hostName),
       running,
-      rawValue: raw || '—',
+      rawValue: displayVal,
       itemName: it.name || 'SQL Server service',
     };
   }
@@ -1846,7 +1854,7 @@ function renderDBServices(dbServices) {
     <div class="db-services-bar" style="${anyDown ? 'border-color:rgba(239,68,68,0.4);background:rgba(239,68,68,0.04)' : ''}">
       <span class="db-bar-label">🗄 SQL Services</span>
       ${chips}
-      <span style="margin-left:auto;font-size:10px;color:var(--t3)">${entries.length} DB hosts · sql.service.running</span>
+      <span style="margin-left:auto;font-size:10px;color:var(--t3)">${entries.length} DB hosts</span>
     </div>`;
 }
 
