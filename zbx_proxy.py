@@ -24,7 +24,7 @@ class Handler(SimpleHTTPRequestHandler):
                 method = json.loads(body).get('method', '?')
             except Exception:
                 method = '?'
-            print(f'[→ Zabbix] {method}', flush=True)
+            print(f'[>> Zabbix] {method}', flush=True)
             req = urllib.request.Request(
                 ZABBIX_API,
                 data=body,
@@ -36,11 +36,11 @@ class Handler(SimpleHTTPRequestHandler):
             try:
                 with urllib.request.urlopen(req, timeout=20) as resp:
                     result = resp.read()
-                print(f'[← OK]     {method}  ({len(result):,} bytes)', flush=True)
+                print(f'[<< OK]     {method}  ({len(result):,} bytes)', flush=True)
                 self._cors(200, 'application/json')
                 self.wfile.write(result)
             except Exception as e:
-                print(f'[← ERROR]  {method}  {e}', flush=True)
+                print(f'[<< ERROR]  {method}  {e}', flush=True)
                 self._cors(502, 'application/json')
                 self.wfile.write(json.dumps(
                     {'error': {'message': str(e), 'data': str(e)}}
@@ -79,14 +79,14 @@ if __name__ == '__main__':
             with urllib.request.urlopen(req, timeout=10) as r:
                 data = json.loads(r.read())
             if 'error' in data:
-                print(f'  [{label}]  ERROR  → {data["error"]}', flush=True)
+                print(f'  [{label}]  ERROR  -- {data["error"]}', flush=True)
             else:
-                print(f'  [{label}]  OK     → {str(data.get("result",""))[:80]}', flush=True)
+                print(f'  [{label}]  OK     -- {str(data.get("result",""))[:80]}', flush=True)
         except Exception as e:
-            print(f'  [{label}]  FAIL   → {e}', flush=True)
+            print(f'  [{label}]  FAIL   -- {e}', flush=True)
 
     server = ThreadingHTTPServer(('', PORT), Handler)
-    print(f'\nDashboard  →  http://localhost:{PORT}/zabbix_dashboard.html')
+    print(f'\nDashboard  --  http://localhost:{PORT}/zabbix_dashboard.html')
     print('Waiting for browser requests...\n')
     try:
         server.serve_forever()

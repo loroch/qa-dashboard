@@ -606,7 +606,7 @@ tbody tr:hover td { background: rgba(255,255,255,0.025); }
   <div class="logo-wrap">
     <div class="logo-icon" style="background:linear-gradient(135deg,#ea580c,#7c2d12);font-size:13px;letter-spacing:-0.5px">K1</div>
     <div class="logo-text">
-      <h1>K1 Tamaulipas &mdash; Infrastructure</h1>
+      <h1 id="site-title">K1 Tamaulipas &mdash; Infrastructure</h1>
       <p id="conn-line">Connecting to Zabbix…</p>
     </div>
   </div>
@@ -728,35 +728,40 @@ tbody tr:hover td { background: rgba(255,255,255,0.025); }
 // ═══════════════════════════════════════════════════════
 //  CONFIG
 // ═══════════════════════════════════════════════════════
-const ZBX_URL     = '/zbx-api';
+//  MULTI-SITE CONFIG  (?site=tamaulipas | ?site=michoacan)
+// ═══════════════════════════════════════════════════════
+const SITES_CFG = {
+  tamaulipas: {
+    displayName: 'K1 Tamaulipas',
+    zbxHost:     '172.15.6.33',
+    siteNames:   { REY:'Reynosa', VIC:'Cd. Victoria', TAM:'Tampico', MAN:'Mante', LAR:'Laredo', MAT:'Matamoros' },
+    cityDisplay: { laredo:'Laredo', mante:'Mante', matamoros:'Matamoros', reynosa:'Reynosa', tampico:'Tampico', victoria:'Cd. Victoria' },
+  },
+  michoacan: {
+    displayName: 'K1 Michoacan',
+    zbxHost:     '10.21.144.248',
+    siteNames:   { MOR:'Morelia', PAT:'Pátzcuaro', URU:'Uruapan', LAP:'La Piedad', JIQ:'Jiquilpan', APA:'Apatzingán', ZIT:'Zitácuaro', HUE:'Huetamo', COA:'Coalcomán', ZAM:'Zamora', LAZ:'Lázaro Cárdenas' },
+    cityDisplay: { morelia:'Morelia', patzcuaro:'Pátzcuaro', uruapan:'Uruapan', lapiedad:'La Piedad', jiquilpan:'Jiquilpan', apatzingan:'Apatzingán', zitacuaro:'Zitácuaro', huetamo:'Huetamo', coalcoman:'Coalcomán', zamora:'Zamora', lazaro:'Lázaro Cárdenas' },
+  },
+};
+
+const _siteKey   = new URLSearchParams(location.search).get('site') || 'tamaulipas';
+const _siteCfg   = SITES_CFG[_siteKey] || SITES_CFG.tamaulipas;
+
+const ZBX_URL     = `/zbx-api/${_siteKey}`;
 const ZBX_TOK     = '';
-const ZBX_HOST    = '172.15.6.33';
+const ZBX_HOST    = _siteCfg.zbxHost;
 const REFRESH_SEC = 60;
 
 // ── Site name mapping from host prefix ────────────────
-const SITE_NAMES = {
-  REY: 'Reynosa',
-  VIC: 'Cd. Victoria',
-  TAM: 'Tampico',
-  MAN: 'Mante',
-  LAR: 'Laredo',
-  MAT: 'Matamoros',
-};
 function siteOf(hostName) {
   if (!hostName) return 'Unknown';
   const code = hostName.split('-')[0].toUpperCase();
-  return SITE_NAMES[code] || code;
+  return _siteCfg.siteNames[code] || code;
 }
 
 // C4I item key → display city name
-const CITY_DISPLAY = {
-  laredo:    'Laredo',
-  mante:     'Mante',
-  matamoros: 'Matamoros',
-  reynosa:   'Reynosa',
-  tampico:   'Tampico',
-  victoria:  'Cd. Victoria',
-};
+const CITY_DISPLAY = _siteCfg.cityDisplay;
 
 // ═══════════════════════════════════════════════════════
 //  STATE
@@ -2029,6 +2034,8 @@ function startCountdown() {
 // ═══════════════════════════════════════════════════════
 //  INIT
 // ═══════════════════════════════════════════════════════
+document.getElementById('site-title').textContent = `${_siteCfg.displayName} — Infrastructure`;
+document.title = `${_siteCfg.displayName} — Infrastructure`;
 loadAll();
 </script>
 </body>
