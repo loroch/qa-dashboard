@@ -17,6 +17,8 @@ import BugsByVersionPage from './pages/BugsByVersionPage'
 import TestPlansPage from './pages/TestPlansPage'
 import ReleaseNotesPage from './pages/ReleaseNotesPage'
 import InvestigationPage from './pages/InvestigationPage'
+import BugReporterPage from './pages/BugReporterPage'
+import BugTriagePage from './pages/BugTriagePage'
 
 export default function App() {
   return (
@@ -42,6 +44,8 @@ export default function App() {
             <Route path="/test-plans"        element={<TestPlansPage />} />
             <Route path="/release-notes"     element={<ReleaseNotesPage />} />
             <Route path="/investigation"     element={<InvestigationPage />} />
+            <Route path="/bug-reporter"      element={<BugReporterPage />} />
+            <Route path="/bug-triage"        element={<BugTriagePage />} />
           </Routes>
         </main>
       </div>
