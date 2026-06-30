@@ -214,11 +214,12 @@ function InlineSelect({ bugKey, field, value, options, saveState, onSave, placeh
 }
 
 /* ── ParentCell ──────────────────────────────────────────── */
-function ParentCell({ bugKey, parentKey, parentType, saveState, onSave }) {
+function ParentCell({ bugKey, parentKey, parentType, parentSummary, saveState, onSave }) {
   const [editing, setEditing] = useState(false)
   const [q, setQ]             = useState('')
   const [dq, setDq]           = useState('')
   const [open, setOpen]       = useState(false)
+  const [hovered, setHovered] = useState(false)
   const timer = useRef(null)
   const wrapRef = useRef(null)
   const state = saveState[`${bugKey}:parent`] || 'idle'
@@ -247,22 +248,35 @@ function ParentCell({ bugKey, parentKey, parentType, saveState, onSave }) {
       ? 'bg-purple-100 text-purple-700 border-purple-300'
       : 'bg-blue-100 text-blue-700 border-blue-300'
     return (
-      <button
-        onClick={() => setEditing(true)}
-        className="flex items-center gap-1 text-xs hover:bg-slate-100 rounded px-1 py-0.5 w-full text-left"
-        title="Click to change parent"
-      >
-        {parentKey ? (
-          <>
-            <span className={`shrink-0 px-1 rounded text-[10px] border ${badgeCls}`}>{parentType || 'P'}</span>
-            <span className="font-mono text-indigo-600 truncate">{parentKey}</span>
-          </>
-        ) : (
-          <span className="text-slate-400 italic">—  click to set</span>
+      <div className="relative" ref={wrapRef}>
+        <button
+          onClick={() => setEditing(true)}
+          onMouseEnter={() => parentKey && parentSummary && setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          className="flex items-center gap-1 text-xs hover:bg-slate-100 rounded px-1 py-0.5 w-full text-left"
+        >
+          {parentKey ? (
+            <>
+              <span className={`shrink-0 px-1 rounded text-[10px] border ${badgeCls}`}>{parentType || 'P'}</span>
+              <span className="font-mono text-indigo-600 truncate">{parentKey}</span>
+            </>
+          ) : (
+            <span className="text-slate-400 italic">—  click to set</span>
+          )}
+          {state === 'saved' && <span className="text-green-500 text-[10px] ml-auto">✓</span>}
+          {state === 'error' && <span className="text-red-500 text-[10px] ml-auto">!</span>}
+        </button>
+
+        {hovered && parentSummary && (
+          <div className="absolute z-50 bottom-full left-0 mb-1.5 w-72 bg-slate-800 text-white text-xs rounded-lg px-3 py-2 shadow-xl pointer-events-none">
+            <p className={`font-semibold mb-0.5 ${parentType === 'Epic' ? 'text-purple-300' : 'text-blue-300'}`}>
+              {parentType} · {parentKey}
+            </p>
+            <p className="text-slate-200 leading-snug">{parentSummary}</p>
+            <div className="absolute top-full left-4 border-4 border-transparent border-t-slate-800" />
+          </div>
         )}
-        {state === 'saved' && <span className="text-green-500 text-[10px] ml-auto">✓</span>}
-        {state === 'error' && <span className="text-red-500 text-[10px] ml-auto">!</span>}
-      </button>
+      </div>
     )
   }
 
@@ -385,6 +399,7 @@ function BugRow({ bug, meta, saveState, onSave }) {
           bugKey={bug.key}
           parentKey={bug.parent_key}
           parentType={bug.parent_type}
+          parentSummary={bug.parent_summary}
           saveState={saveState}
           onSave={onSave}
         />
