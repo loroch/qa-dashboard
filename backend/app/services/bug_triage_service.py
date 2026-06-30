@@ -64,12 +64,40 @@ def _fmt_bug(issue: dict, jira_base_url: str) -> dict:
 
 
 class BugTriageService:
+    _board_id: int | None = None
 
     def __init__(self):
         self.jira = get_jira_client()
         self.cache = get_cache()
         settings = get_settings()
         self.jira_base_url = settings.jira_base_url.rstrip("/")
+
+    async def _get_sprints(self) -> list[dict]:
+        """Fetch active + future sprints for TMT0, caching the board ID."""
+        try:
+            if BugTriageService._board_id is None:
+                board_data = await self.jira.agile_get("/board", {"projectKeyOrId": "TMT0", "maxResults": 10})
+                boards = board_data.get("values", [])
+                if not boards:
+                    logger.warning("No Agile boards found for TMT0")
+                    return []
+                BugTriageService._board_id = boards[0]["id"]
+                logger.info(f"TMT0 board ID: {BugTriageService._board_id}")
+            sprint_data = await self.jira.agile_get(
+                f"/board/{BugTriageService._board_id}/sprint",
+                {"state": "active,future", "maxResults": 50},
+            )
+            sprints = [
+                {"id": s["id"], "name": s["name"], "state": s.get("state", "")}
+                for s in sprint_data.get("values", [])
+                if s.get("state") in ("active", "future")
+            ]
+            logger.info(f"Fetched {len(sprints)} sprints for TMT0")
+            return sprints
+        except Exception as e:
+            logger.warning(f"Could not fetch sprints: {e}")
+            BugTriageService._board_id = None  # reset so next call retries
+            return []
 
     # ── Epic search ───────────────────────────────────────────────
 
@@ -161,12 +189,12 @@ class BugTriageService:
     # ── Meta (fix versions, sprints, assignees, priorities) ───────
 
     async def get_meta(self, force_refresh: bool = False) -> dict:
-        cache_key = "triage:meta"
+        cache_key = "triage:meta_base"
         if force_refresh:
             self.cache.invalidate(cache_key)
 
-        async def fetch():
-            versions, priorities, sprints, assignees = [], [], [], []
+        async def fetch_base():
+            versions, priorities, assignees = [], [], []
 
             # Fix versions
             try:
@@ -193,23 +221,6 @@ class BugTriageService:
                     {"id": "5", "name": "Lowest"},
                 ]
 
-            # Sprints (via Agile board)
-            try:
-                boards = await self.jira.agile_get("/board", {"projectKeyOrId": "TMT0", "maxResults": 5})
-                board_list = boards.get("values", [])
-                if board_list:
-                    board_id = board_list[0]["id"]
-                    sp_data = await self.jira.agile_get(
-                        f"/board/{board_id}/sprint",
-                        {"state": "active,future", "maxResults": 30},
-                    )
-                    sprints = [
-                        {"id": s["id"], "name": s["name"], "state": s.get("state", "")}
-                        for s in sp_data.get("values", [])
-                    ]
-            except Exception as e:
-                logger.warning(f"Failed to fetch sprints: {e}")
-
             # Assignees
             try:
                 raw_a = await self.jira.get(
@@ -224,14 +235,12 @@ class BugTriageService:
             except Exception as e:
                 logger.warning(f"Failed to fetch assignees: {e}")
 
-            return {
-                "versions":   versions,
-                "priorities": priorities,
-                "sprints":    sprints,
-                "assignees":  assignees,
-            }
+            return {"versions": versions, "priorities": priorities, "assignees": assignees}
 
-        return await self.cache.get_or_fetch(cache_key, fetch, ttl=600)
+        base = await self.cache.get_or_fetch(cache_key, fetch_base, ttl=600)
+        # Sprints are fetched fresh (short-lived data, changes during sprint meetings)
+        sprints = await self._get_sprints()
+        return {**base, "sprints": sprints}
 
     # ── Single-field update ───────────────────────────────────────
 
