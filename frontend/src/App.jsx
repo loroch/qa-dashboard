@@ -19,6 +19,7 @@ import ReleaseNotesPage from './pages/ReleaseNotesPage'
 import InvestigationPage from './pages/InvestigationPage'
 import BugReporterPage from './pages/BugReporterPage'
 import BugTriagePage from './pages/BugTriagePage'
+import MexicoQAPage from './pages/MexicoQAPage'
 
 export default function App() {
   return (
@@ -46,6 +47,7 @@ export default function App() {
             <Route path="/investigation"     element={<InvestigationPage />} />
             <Route path="/bug-reporter"      element={<BugReporterPage />} />
             <Route path="/bug-triage"        element={<BugTriagePage />} />
+            <Route path="/mexico-qa"         element={<MexicoQAPage />} />
           </Routes>
         </main>
       </div>
