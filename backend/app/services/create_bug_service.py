@@ -128,7 +128,7 @@ class CreateBugService:
         global TMT0_BOARD_ID
         try:
             if TMT0_BOARD_ID is None:
-                board_data = await self.jira.agile_get("/board", {"projectKeyOrId": "TMT0", "maxResults": 10})
+                board_data = await self.jira.agile_get("/board", {"projectKeyOrId": "TMT0", "type": "scrum", "maxResults": 10})
                 boards = board_data.get("values", [])
                 if boards:
                     TMT0_BOARD_ID = boards[0]["id"]

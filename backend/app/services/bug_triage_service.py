@@ -73,16 +73,19 @@ class BugTriageService:
         self.jira_base_url = settings.jira_base_url.rstrip("/")
 
     async def _get_sprints(self) -> list[dict]:
-        """Fetch active + future sprints for TMT0, caching the board ID."""
+        """Fetch active + future sprints for TMT0, caching the Scrum board ID."""
         try:
             if BugTriageService._board_id is None:
-                board_data = await self.jira.agile_get("/board", {"projectKeyOrId": "TMT0", "maxResults": 10})
+                # Filter for Scrum boards only — Kanban boards don't support sprints
+                board_data = await self.jira.agile_get(
+                    "/board", {"projectKeyOrId": "TMT0", "type": "scrum", "maxResults": 10}
+                )
                 boards = board_data.get("values", [])
                 if not boards:
-                    logger.warning("No Agile boards found for TMT0")
+                    logger.warning("No Scrum boards found for TMT0")
                     return []
                 BugTriageService._board_id = boards[0]["id"]
-                logger.info(f"TMT0 board ID: {BugTriageService._board_id}")
+                logger.info(f"TMT0 Scrum board ID: {BugTriageService._board_id}")
             sprint_data = await self.jira.agile_get(
                 f"/board/{BugTriageService._board_id}/sprint",
                 {"state": "active,future", "maxResults": 50},
