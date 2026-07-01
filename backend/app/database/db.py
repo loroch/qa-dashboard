@@ -34,6 +34,51 @@ class ChangelogEntryORM(Base):
     metadata_json = Column(Text, nullable=True)  # JSON serialized extra data
 
 
+class BugDraftORM(Base):
+    """In-progress bug reports saved locally before submitting to Jira."""
+    __tablename__ = "bug_drafts"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    product_name = Column(String(200), nullable=False, index=True)
+    epic_key = Column(String(50), nullable=True, index=True)
+    summary = Column(Text, nullable=True)
+    description = Column(Text, nullable=True)
+    steps_to_reproduce = Column(Text, nullable=True)
+    actual_result = Column(Text, nullable=True)
+    expected_result = Column(Text, nullable=True)
+    severity = Column(String(50), nullable=True)
+    priority = Column(String(50), nullable=True)
+    environments = Column(Text, nullable=True)       # JSON array
+    fix_version_id = Column(String(50), nullable=True)
+    fix_version_name = Column(String(100), nullable=True)
+    found_in_version_id = Column(String(50), nullable=True)
+    found_in_version_name = Column(String(100), nullable=True)
+    sprint_id = Column(Integer, nullable=True)
+    status = Column(String(20), default="draft", index=True)  # draft | submitted
+    jira_key = Column(String(50), nullable=True)
+    jira_url = Column(Text, nullable=True)
+    context_summary = Column(Text, nullable=True)   # AI summary of related Jira bugs
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
+class BugHistoryORM(Base):
+    """Record of every bug successfully created through the Bug Reporter tool."""
+    __tablename__ = "bug_history"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    jira_key = Column(String(50), nullable=False, index=True)
+    jira_url = Column(Text, nullable=False)
+    summary = Column(Text, nullable=False)
+    product_name = Column(String(200), nullable=True)
+    epic_key = Column(String(50), nullable=True)
+    severity = Column(String(50), nullable=True)
+    priority = Column(String(50), nullable=True)
+    fix_version_name = Column(String(100), nullable=True)
+    draft_id = Column(Integer, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 # Engine and session factory
 _engine = None
 _session_factory = None
