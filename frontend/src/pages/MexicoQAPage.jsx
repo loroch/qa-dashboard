@@ -396,6 +396,16 @@ export default function MexicoQAPage() {
     staleTime: 120_000,
   })
 
+  /* Assigned work by date */
+  const assignedQuery = useQuery({
+    queryKey: ['mxqa-assigned', days, memberParam, refreshKey],
+    queryFn: ({ signal }) =>
+      axios.get(`${API}/assigned`, { params: { days, member_ids: memberParam }, signal })
+           .then(r => r.data.grouped),
+    enabled: mode === 'assigned' && memberIds.length > 0,
+    staleTime: 120_000,
+  })
+
   const handleRefresh = () => setRefreshKey(k => k + 1)
 
   /* Derived stats for date mode */
@@ -465,11 +475,18 @@ export default function MexicoQAPage() {
             By Epic
           </button>
           <button
+            onClick={() => setMode('assigned')}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === 'assigned' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+          >
+            <Users className="h-3.5 w-3.5" />
+            Assigned Work
+          </button>
+          <button
             onClick={() => setMode('date')}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === 'date' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
           >
-            <Calendar className="h-3.5 w-3.5" />
-            Bugs by Date
+            <Bug className="h-3.5 w-3.5" />
+            Bugs Opened
           </button>
         </div>
       </div>
@@ -530,7 +547,7 @@ export default function MexicoQAPage() {
           </div>
         ) : (
           <div className="flex items-center gap-2">
-            {[7, 14, 30].map(d => (
+            {[7, 14, 30, 60].map(d => (
               <button
                 key={d}
                 onClick={() => setDays(d)}
@@ -539,7 +556,12 @@ export default function MexicoQAPage() {
                 Last {d}d
               </button>
             ))}
-            {bugsQuery.data && (
+            {mode === 'assigned' && assignedQuery.data && (
+              <span className="text-sm text-slate-500 ml-2">
+                {Object.values(assignedQuery.data).flat().length} issues found
+              </span>
+            )}
+            {mode === 'date' && bugsQuery.data && (
               <span className="text-sm text-slate-500 ml-2">
                 {bugsQuery.data.length} bug{bugsQuery.data.length !== 1 ? 's' : ''} found
               </span>
@@ -631,6 +653,138 @@ export default function MexicoQAPage() {
               <div className="flex flex-col items-center justify-center py-16 text-slate-400">
                 <Bug className="h-10 w-10 opacity-20 mb-2" />
                 <p className="text-sm">No bugs found for the team in the last {days} days.</p>
+              </div>
+            )}
+          </>
+        )}
+
+        {/* ── Assigned Work mode ── */}
+        {mode === 'assigned' && (
+          <>
+            {assignedQuery.isFetching && (
+              <div className="flex items-center gap-2 text-sm text-slate-500 py-6">
+                <Loader2 className="h-4 w-4 animate-spin text-emerald-500" /> Loading assigned work…
+              </div>
+            )}
+            {assignedQuery.error && (
+              <div className="flex items-center gap-3 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">
+                <AlertCircle className="h-4 w-4 shrink-0" />
+                {assignedQuery.error?.response?.data?.detail || 'Failed to load'}
+              </div>
+            )}
+
+            {!assignedQuery.isFetching && assignedQuery.data &&
+              Object.entries(assignedQuery.data).map(([person, issues]) => {
+                const member  = members.find(m => m.name === person)
+                const avatar  = member?.avatar
+                const counts  = issues.reduce((acc, i) => {
+                  acc[i.type] = (acc[i.type] || 0) + 1
+                  return acc
+                }, {})
+                const openIssues   = issues.filter(i => !['Done', 'Closed'].includes(i.status))
+                const closedIssues = issues.filter(i => ['Done', 'Closed'].includes(i.status))
+
+                return (
+                  <div key={person} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                    {/* Member header */}
+                    <div className="flex items-center gap-3 px-4 py-3 bg-emerald-50 border-b border-emerald-100">
+                      {avatar
+                        ? <img src={avatar} alt={person} className="h-8 w-8 rounded-full border-2 border-emerald-300" />
+                        : <div className="h-8 w-8 rounded-full bg-emerald-500 flex items-center justify-center text-white text-sm font-bold shrink-0">
+                            {person.charAt(0)}
+                          </div>
+                      }
+                      <div className="flex-1">
+                        <p className="text-sm font-bold text-slate-800">{person}</p>
+                        <p className="text-xs text-slate-500">Last {days} days · {issues.length} issues</p>
+                      </div>
+                      {/* Type breakdown pills */}
+                      <div className="flex flex-wrap gap-1.5 justify-end">
+                        {Object.entries(counts).map(([type, count]) => (
+                          <span key={type} className={`inline-flex items-center gap-0.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${TYPE_BADGE[type] || 'bg-slate-100 text-slate-600 border-slate-300'}`}>
+                            {count} {type}
+                          </span>
+                        ))}
+                      </div>
+                      {/* Open / Done counts */}
+                      <div className="flex items-center gap-2 ml-2 shrink-0">
+                        <span className="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-0.5 font-medium">
+                          {openIssues.length} open
+                        </span>
+                        <span className="text-xs bg-green-100 text-green-700 rounded-full px-2 py-0.5 font-medium">
+                          {closedIssues.length} done
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Issues table */}
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-slate-700 text-white text-[11px] font-semibold">
+                            <th className="px-3 py-2 text-left whitespace-nowrap">Key</th>
+                            <th className="px-3 py-2 text-left">Summary</th>
+                            <th className="px-2 py-2 text-left whitespace-nowrap">Type</th>
+                            <th className="px-2 py-2 text-left whitespace-nowrap">Status</th>
+                            <th className="px-2 py-2 text-left whitespace-nowrap">Priority</th>
+                            <th className="px-3 py-2 text-left whitespace-nowrap">Parent</th>
+                            <th className="px-3 py-2 text-left whitespace-nowrap">Fix Version</th>
+                            <th className="px-3 py-2 text-left whitespace-nowrap">Updated</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {issues.map(issue => {
+                            const proj    = issue.key.split('-')[0]
+                            const projCls = PROJECT_COLOR[proj] || 'bg-slate-100 text-slate-700 border-slate-300'
+                            return (
+                              <tr key={issue.key} className="border-b border-slate-100 hover:bg-slate-50 transition-colors">
+                                <td className="px-3 py-2 whitespace-nowrap">
+                                  <a href={issue.url} target="_blank" rel="noreferrer"
+                                    className="font-mono text-indigo-600 hover:underline flex items-center gap-1">
+                                    <span className={`shrink-0 px-1 rounded text-[9px] font-semibold border ${projCls}`}>{proj}</span>
+                                    {issue.key}
+                                  </a>
+                                </td>
+                                <td className="px-3 py-2 max-w-xs">
+                                  <p className="text-slate-700 line-clamp-2" title={issue.summary}>{issue.summary}</p>
+                                </td>
+                                <td className="px-2 py-2 whitespace-nowrap">
+                                  <TypeBadge type={issue.type} />
+                                </td>
+                                <td className="px-2 py-2 whitespace-nowrap">
+                                  <StatusPill status={issue.status} />
+                                </td>
+                                <td className={`px-2 py-2 whitespace-nowrap ${PRIORITY_CLS[issue.priority] || 'text-slate-500'}`}>
+                                  {issue.priority || '—'}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap">
+                                  {issue.parent_key
+                                    ? <span className="font-mono text-xs text-purple-600">{issue.parent_key}</span>
+                                    : <span className="text-slate-400">—</span>
+                                  }
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-slate-600">
+                                  {issue.fix_versions[0] || <span className="text-slate-400">—</span>}
+                                </td>
+                                <td className="px-3 py-2 whitespace-nowrap text-slate-500">
+                                  {fmtDate(issue.updated)}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                )
+              })
+            }
+
+            {!assignedQuery.isFetching && !assignedQuery.error &&
+             assignedQuery.data && Object.keys(assignedQuery.data).length === 0 && (
+              <div className="flex flex-col items-center justify-center py-16 text-slate-400">
+                <Users className="h-10 w-10 opacity-20 mb-2" />
+                <p className="text-sm">No assigned work found for the team in the last {days} days.</p>
               </div>
             )}
           </>

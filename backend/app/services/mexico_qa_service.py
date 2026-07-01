@@ -235,6 +235,42 @@ class MexicoQAService:
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=180)
 
+    # ── Assigned work by date ────────────────────────────────────────
+
+    async def get_assigned_by_date(
+        self, days: int, member_ids: list[str], force_refresh: bool = False
+    ) -> dict:
+        """
+        Return all issues currently assigned to each team member that were
+        updated (active work) within the last N days, grouped by assignee.
+        """
+        ids_slug = hashlib.md5(",".join(sorted(member_ids)).encode()).hexdigest()[:8]
+        cache_key = f"mxqa:assigned:{days}:{ids_slug}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            ids_clause = ", ".join(f'"{m}"' for m in member_ids if m)
+            if not ids_clause:
+                return {}
+            proj = ", ".join(ALL_PROJECTS)
+            jql = (
+                f'project in ({proj}) '
+                f'AND assignee in ({ids_clause}) '
+                f'AND updated >= "-{days}d" '
+                f'ORDER BY updated DESC'
+            )
+            raw = await self.jira.search_issues(jql, fields=ISSUE_FIELDS, max_total=500)
+            issues = [_fmt_issue(i, self.jira_base_url) for i in raw]
+            # Group by assignee
+            grouped: dict[str, list] = {}
+            for issue in issues:
+                name = issue["assignee"] or "Unassigned"
+                grouped.setdefault(name, []).append(issue)
+            return grouped
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=120)
+
 
 _service: MexicoQAService | None = None
 

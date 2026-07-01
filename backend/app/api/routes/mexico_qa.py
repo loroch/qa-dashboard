@@ -61,3 +61,18 @@ async def get_bugs(
         return {"bugs": bugs, "total": len(bugs)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/assigned")
+async def get_assigned(
+    days:       int  = Query(14),
+    member_ids: str  = Query(..., description="Comma-separated account IDs"),
+    refresh:    bool = Query(False),
+):
+    svc = get_mexico_qa_service()
+    try:
+        ids = [i.strip() for i in member_ids.split(",") if i.strip()]
+        grouped = await svc.get_assigned_by_date(days, ids, force_refresh=refresh)
+        return {"grouped": grouped}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
