@@ -200,7 +200,7 @@ function BugRow({ bug }) {
 }
 
 /* ── EpicCard ─────────────────────────────────────────────── */
-function EpicCard({ epic, memberIds, onRemove, refresh }) {
+function EpicCard({ epic, memberIds, onRemove, refresh, isPinned }) {
   const [expanded, setExpanded] = useState(true)
   const [tab, setTab]           = useState('tasks')   // 'tasks' | 'bugs'
 
@@ -248,12 +248,15 @@ function EpicCard({ epic, memberIds, onRemove, refresh }) {
               </span>
             </>
           )}
-          <button
-            onClick={e => { e.stopPropagation(); onRemove(epic.key) }}
-            className="text-slate-400 hover:text-red-500 transition-colors ml-1"
-          >
-            <X className="h-4 w-4" />
-          </button>
+          {!isPinned && (
+            <button
+              onClick={e => { e.stopPropagation(); onRemove(epic.key) }}
+              className="text-slate-400 hover:text-red-500 transition-colors ml-1"
+              title="Remove"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 
@@ -354,9 +357,9 @@ function EpicCard({ epic, memberIds, onRemove, refresh }) {
 /* ── MexicoQAPage ─────────────────────────────────────────── */
 export default function MexicoQAPage() {
   const [mode,          setMode]         = useState('epic')   // 'epic' | 'date'
-  const [selectedEpics, setSelectedEpics] = useState([])
-  const [days,          setDays]          = useState(14)
-  const [refreshKey,    setRefreshKey]    = useState(0)
+  const [extraEpics,    setExtraEpics]   = useState([])       // user-added via search
+  const [days,          setDays]         = useState(14)
+  const [refreshKey,    setRefreshKey]   = useState(0)
 
   /* Team members */
   const teamQuery = useQuery({
@@ -367,6 +370,21 @@ export default function MexicoQAPage() {
   const members    = teamQuery.data || []
   const memberIds  = members.map(m => m.id).filter(Boolean)
   const memberParam = memberIds.join(',')
+
+  /* Pinned epics (from Paloma's release plan) */
+  const pinnedQuery = useQuery({
+    queryKey: ['mxqa-pinned', refreshKey],
+    queryFn: () => axios.get(`${API}/pinned-epics`).then(r => r.data.epics),
+    staleTime: 300_000,
+  })
+  const pinnedEpics = pinnedQuery.data || []
+  const pinnedKeys  = pinnedEpics.map(e => e.key)
+
+  /* Combined epic list: pinned first, then extras not already in pinned */
+  const selectedEpics = useMemo(() => {
+    const extras = extraEpics.filter(e => !pinnedKeys.includes(e.key))
+    return [...pinnedEpics, ...extras]
+  }, [pinnedEpics, extraEpics, pinnedKeys])
 
   /* Bugs by date (date mode) */
   const bugsQuery = useQuery({
@@ -460,32 +478,55 @@ export default function MexicoQAPage() {
       <div className="px-6 py-4 bg-white border-b border-slate-200">
         {mode === 'epic' ? (
           <div className="space-y-3">
-            <EpicSearch
-              selected={selectedEpics}
-              onAdd={e => setSelectedEpics(prev => prev.find(x => x.key === e.key) ? prev : [...prev, e])}
-            />
-            {selectedEpics.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {selectedEpics.map(e => {
-                  const proj = e.key.split('-')[0]
-                  const cls  = PROJECT_COLOR[proj] || 'bg-slate-100 text-slate-700 border-slate-300'
-                  return (
-                    <span key={e.key} className={`inline-flex items-center gap-1 text-xs font-medium rounded-full pl-2 pr-1.5 py-0.5 border ${cls}`}>
-                      <span className="font-mono">{e.key}</span>
-                      <button onClick={() => setSelectedEpics(prev => prev.filter(x => x.key !== e.key))} className="hover:text-red-600 ml-0.5">
-                        <X className="h-3 w-3" />
-                      </button>
-                    </span>
-                  )
-                })}
-                <button
-                  onClick={() => setSelectedEpics([])}
-                  className="text-xs text-slate-400 hover:text-red-500 px-1"
-                >
-                  Clear all
+            {/* Search bar for extra epics */}
+            <div className="flex items-center gap-3">
+              <EpicSearch
+                selected={selectedEpics}
+                onAdd={e => setExtraEpics(prev => prev.find(x => x.key === e.key) ? prev : [...prev, e])}
+              />
+              {pinnedQuery.isFetching && <Loader2 className="h-4 w-4 animate-spin text-emerald-500" />}
+            </div>
+
+            {/* Epic chips */}
+            <div className="flex flex-wrap gap-1.5 items-center">
+              {/* Pinned chips (fixed — no remove) */}
+              {pinnedEpics.map(e => {
+                const proj = e.key.split('-')[0]
+                const cls  = PROJECT_COLOR[proj] || 'bg-slate-100 text-slate-700 border-slate-300'
+                return (
+                  <span key={e.key}
+                    className={`inline-flex items-center gap-1.5 text-xs font-medium rounded-full pl-2 pr-2.5 py-1 border ${cls}`}
+                    title={e.summary}
+                  >
+                    <span className="font-mono font-semibold">{e.key}</span>
+                    <span className="truncate max-w-[140px] text-current opacity-80">{e.summary}</span>
+                  </span>
+                )
+              })}
+
+              {/* Extra chips (removable) */}
+              {extraEpics.filter(e => !pinnedKeys.includes(e.key)).map(e => {
+                const proj = e.key.split('-')[0]
+                const cls  = PROJECT_COLOR[proj] || 'bg-slate-100 text-slate-700 border-slate-300'
+                return (
+                  <span key={e.key}
+                    className={`inline-flex items-center gap-1 text-xs font-medium rounded-full pl-2 pr-1.5 py-1 border border-dashed ${cls}`}
+                    title={e.summary}
+                  >
+                    <span className="font-mono">{e.key}</span>
+                    <button onClick={() => setExtraEpics(prev => prev.filter(x => x.key !== e.key))} className="hover:text-red-600 ml-0.5">
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                )
+              })}
+
+              {extraEpics.length > 0 && (
+                <button onClick={() => setExtraEpics([])} className="text-xs text-slate-400 hover:text-red-500 px-1">
+                  Clear extras
                 </button>
-              </div>
-            )}
+              )}
+            </div>
           </div>
         ) : (
           <div className="flex items-center gap-2">
@@ -519,14 +560,9 @@ export default function MexicoQAPage() {
                 Team members could not be resolved in Jira. Epic work cannot be filtered by team.
               </div>
             )}
-            {selectedEpics.length === 0 && (
-              <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-3">
-                <Layers className="h-12 w-12 opacity-20" />
-                <p className="text-lg font-semibold">Select Epics to review</p>
-                <p className="text-sm text-center max-w-sm">
-                  Search for epics in the CS, KB, or KM projects above.<br />
-                  Each card shows QA tasks, tests, and bugs from the Mexico team.
-                </p>
+            {selectedEpics.length === 0 && pinnedQuery.isFetching && (
+              <div className="flex items-center gap-2 text-sm text-slate-500 py-8">
+                <Loader2 className="h-4 w-4 animate-spin text-emerald-500" /> Loading release plan epics…
               </div>
             )}
             {selectedEpics.map(epic => (
@@ -534,7 +570,8 @@ export default function MexicoQAPage() {
                 key={epic.key}
                 epic={epic}
                 memberIds={memberIds}
-                onRemove={k => setSelectedEpics(prev => prev.filter(e => e.key !== k))}
+                isPinned={pinnedKeys.includes(epic.key)}
+                onRemove={k => setExtraEpics(prev => prev.filter(e => e.key !== k))}
                 refresh={refreshKey}
               />
             ))}

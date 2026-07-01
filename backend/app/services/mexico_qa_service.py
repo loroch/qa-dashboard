@@ -16,6 +16,15 @@ MEXICO_QA_TEAM = ["Ana Jacob", "Rubi Lopez"]
 QA_PROJECTS    = ["CS", "KB", "KM"]
 ALL_PROJECTS   = ["CS", "KB", "KM", "TMT0"]
 
+# Epics pinned from the active release plan (Paloma's Slack message)
+PINNED_EPIC_KEYS = [
+    "CS-12643",  # K1-Dispatch Stabilization Operator Module
+    "KB-559",    # K1-BI V1.0.0
+    "KM-984",    # K1-Mobile BCS App
+    "KB-749",    # K1-BI V2.0.0 / Reportes K-Dispatch fase 1
+    "CS-12605",  # K1-Dispatch V3.6.0
+]
+
 ISSUE_FIELDS = [
     "summary", "status", "priority", "assignee", "reporter",
     "issuetype", "created", "updated", "parent", "fixVersions",
@@ -107,6 +116,30 @@ class MexicoQAService:
         MexicoQAService._team = members
         logger.info(f"Mexico QA team resolved: {[m['name'] for m in members]}")
         return members
+
+    # ── Pinned epics ─────────────────────────────────────────────────
+
+    async def get_pinned_epics(self, force_refresh: bool = False) -> list[dict]:
+        """Fetch the fixed set of release-plan epics."""
+        cache_key = "mxqa:pinned_epics"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            keys_clause = ", ".join(f'"{k}"' for k in PINNED_EPIC_KEYS)
+            jql = f'key in ({keys_clause}) ORDER BY key ASC'
+            try:
+                raw = await self.jira.search_issues(
+                    jql, fields=["summary", "status", "assignee", "project"], max_total=20
+                )
+            except Exception as e:
+                logger.warning(f"Mexico QA pinned epics fetch failed: {e}")
+                return []
+            # Return in the same order as PINNED_EPIC_KEYS
+            by_key = {i["key"]: _fmt_epic(i, self.jira_base_url) for i in raw}
+            return [by_key[k] for k in PINNED_EPIC_KEYS if k in by_key]
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
 
     # ── Epic search ──────────────────────────────────────────────────
 

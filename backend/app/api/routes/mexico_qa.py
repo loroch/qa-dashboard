@@ -16,6 +16,15 @@ async def get_team(refresh: bool = Query(False)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/pinned-epics")
+async def get_pinned_epics(refresh: bool = Query(False)):
+    svc = get_mexico_qa_service()
+    try:
+        return {"epics": await svc.get_pinned_epics(force_refresh=refresh)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/search-epics")
 async def search_epics(q: str = Query(..., min_length=1)):
     svc = get_mexico_qa_service()
