@@ -4,7 +4,7 @@ import axios from 'axios'
 import {
   Search, X, Loader2, AlertCircle, RefreshCw, ChevronDown,
   ChevronRight, Bug, ClipboardList, Calendar, Users, ExternalLink,
-  Layers
+  Layers, Languages
 } from 'lucide-react'
 
 const API = '/api/mexico-qa'
@@ -134,9 +134,10 @@ function EpicSearch({ selected, onAdd }) {
 }
 
 /* ── IssueRow ─────────────────────────────────────────────── */
-function IssueRow({ issue }) {
+function IssueRow({ issue, translations }) {
   const proj = issue.key.split('-')[0]
   const projCls = PROJECT_COLOR[proj] || 'bg-slate-100 text-slate-700 border-slate-300'
+  const translated = translations?.[issue.summary]
   return (
     <tr className="border-b border-slate-100 hover:bg-slate-50 transition-colors text-xs">
       <td className="px-3 py-2 whitespace-nowrap">
@@ -146,8 +147,15 @@ function IssueRow({ issue }) {
           <ExternalLink className="h-2.5 w-2.5 opacity-50" />
         </a>
       </td>
-      <td className="px-3 py-2">
-        <p className="text-slate-700 line-clamp-2 max-w-xs" title={issue.summary}>{issue.summary}</p>
+      <td className="px-3 py-2 max-w-xs">
+        {translated ? (
+          <div>
+            <p className="text-slate-800 line-clamp-2" title={translated}>{translated}</p>
+            <p className="text-slate-400 text-[10px] italic line-clamp-1 mt-0.5" title={issue.summary}>{issue.summary}</p>
+          </div>
+        ) : (
+          <p className="text-slate-700 line-clamp-2" title={issue.summary}>{issue.summary}</p>
+        )}
       </td>
       <td className="px-2 py-2 whitespace-nowrap">
         <TypeBadge type={issue.type} />
@@ -169,9 +177,10 @@ function IssueRow({ issue }) {
 }
 
 /* ── BugRow (date mode) ───────────────────────────────────── */
-function BugRow({ bug }) {
+function BugRow({ bug, translations }) {
   const proj = bug.key.split('-')[0]
   const projCls = PROJECT_COLOR[proj] || 'bg-slate-100 text-slate-700 border-slate-300'
+  const translated = translations?.[bug.summary]
   return (
     <tr className="border-b border-slate-100 hover:bg-slate-50 transition-colors text-xs">
       <td className="px-3 py-2 whitespace-nowrap">
@@ -182,7 +191,14 @@ function BugRow({ bug }) {
           className="font-mono text-indigo-600 hover:underline">{bug.key}</a>
       </td>
       <td className="px-3 py-2 max-w-xs">
-        <p className="text-slate-700 line-clamp-2" title={bug.summary}>{bug.summary}</p>
+        {translated ? (
+          <div>
+            <p className="text-slate-800 line-clamp-2" title={translated}>{translated}</p>
+            <p className="text-slate-400 text-[10px] italic line-clamp-1 mt-0.5" title={bug.summary}>{bug.summary}</p>
+          </div>
+        ) : (
+          <p className="text-slate-700 line-clamp-2" title={bug.summary}>{bug.summary}</p>
+        )}
       </td>
       <td className="px-2 py-2 whitespace-nowrap">
         <StatusPill status={bug.status} />
@@ -200,7 +216,7 @@ function BugRow({ bug }) {
 }
 
 /* ── EpicCard ─────────────────────────────────────────────── */
-function EpicCard({ epic, memberIds, onRemove, refresh, isPinned }) {
+function EpicCard({ epic, memberIds, onRemove, refresh, isPinned, translations, onTextsReady }) {
   const [expanded, setExpanded] = useState(true)
   const [tab, setTab]           = useState('tasks')   // 'tasks' | 'bugs'
 
@@ -318,7 +334,7 @@ function EpicCard({ epic, memberIds, onRemove, refresh, isPinned }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {tasks.map(t => <IssueRow key={t.key} issue={t} />)}
+                        {tasks.map(t => <IssueRow key={t.key} issue={t} translations={translations} />)}
                       </tbody>
                     </table>
                   )
@@ -341,7 +357,7 @@ function EpicCard({ epic, memberIds, onRemove, refresh, isPinned }) {
                         </tr>
                       </thead>
                       <tbody>
-                        {bugs.map(b => <IssueRow key={b.key} issue={b} />)}
+                        {bugs.map(b => <IssueRow key={b.key} issue={b} translations={translations} />)}
                       </tbody>
                     </table>
                   )
@@ -354,12 +370,22 @@ function EpicCard({ epic, memberIds, onRemove, refresh, isPinned }) {
   )
 }
 
+/* ── Translation context ─────────────────────────────────── */
+function useSummary(text, translations) {
+  if (!translations || !text) return { display: text, isTranslated: false }
+  const t = translations[text]
+  return t ? { display: t, isTranslated: true } : { display: text, isTranslated: false }
+}
+
 /* ── MexicoQAPage ─────────────────────────────────────────── */
 export default function MexicoQAPage() {
-  const [mode,          setMode]         = useState('epic')   // 'epic' | 'date'
+  const [mode,          setMode]         = useState('epic')   // 'epic' | 'date' | 'assigned'
   const [extraEpics,    setExtraEpics]   = useState([])       // user-added via search
   const [days,          setDays]         = useState(14)
   const [refreshKey,    setRefreshKey]   = useState(0)
+  const [translateOn,   setTranslateOn]  = useState(false)
+  const [translations,  setTranslations] = useState({})       // {original: english}
+  const [translating,   setTranslating]  = useState(false)
 
   /* Team members */
   const teamQuery = useQuery({
@@ -408,6 +434,37 @@ export default function MexicoQAPage() {
 
   const handleRefresh = () => setRefreshKey(k => k + 1)
 
+  /* Collect all visible summaries that haven't been translated yet */
+  const handleTranslate = useCallback(async () => {
+    if (translating) return
+    const allTexts = []
+    if (mode === 'assigned' && assignedQuery.data) {
+      Object.values(assignedQuery.data).flat().forEach(i => allTexts.push(i.summary))
+    }
+    if (mode === 'date' && bugsQuery.data) {
+      bugsQuery.data.forEach(b => allTexts.push(b.summary))
+    }
+    if (mode === 'epic') {
+      // We'll let individual EpicCards call translate as their data loads
+    }
+    const untranslated = [...new Set(allTexts)].filter(t => t && !translations[t])
+    if (untranslated.length === 0) return
+    setTranslating(true)
+    try {
+      const res = await axios.post(`${API}/translate`, { texts: untranslated })
+      setTranslations(prev => ({ ...prev, ...res.data.translations }))
+    } catch (e) {
+      console.error('Translation failed:', e)
+    } finally {
+      setTranslating(false)
+    }
+  }, [mode, assignedQuery.data, bugsQuery.data, translations, translating])
+
+  /* Auto-translate when toggle turned on or data changes */
+  useEffect(() => {
+    if (translateOn) handleTranslate()
+  }, [translateOn, assignedQuery.data, bugsQuery.data])
+
   /* Derived stats for date mode */
   const bugsByReporter = useMemo(() => {
     const bugs = bugsQuery.data || []
@@ -434,13 +491,30 @@ export default function MexicoQAPage() {
               Track QA tasks, tests, and bugs for the Mexico team across CS · KB · KM projects.
             </p>
           </div>
-          <button
-            onClick={handleRefresh}
-            className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 border border-slate-300 rounded-lg px-3 py-1.5 bg-white hover:bg-slate-50 transition-colors"
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setTranslateOn(v => !v)}
+              className={`flex items-center gap-1.5 text-xs border rounded-lg px-3 py-1.5 transition-colors font-medium ${
+                translateOn
+                  ? 'bg-blue-600 text-white border-blue-600'
+                  : 'text-slate-500 hover:text-slate-700 border-slate-300 bg-white hover:bg-slate-50'
+              }`}
+              title="Toggle Spanish → English translation for all summaries"
+            >
+              {translating
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                : <Languages className="h-3.5 w-3.5" />
+              }
+              {translateOn ? 'ES→EN On' : 'Translate'}
+            </button>
+            <button
+              onClick={handleRefresh}
+              className="flex items-center gap-1.5 text-xs text-slate-500 hover:text-slate-700 border border-slate-300 rounded-lg px-3 py-1.5 bg-white hover:bg-slate-50 transition-colors"
+            >
+              <RefreshCw className="h-3.5 w-3.5" />
+              Refresh
+            </button>
+          </div>
         </div>
 
         {/* Team member pills */}
@@ -595,6 +669,7 @@ export default function MexicoQAPage() {
                 isPinned={pinnedKeys.includes(epic.key)}
                 onRemove={k => setExtraEpics(prev => prev.filter(e => e.key !== k))}
                 refresh={refreshKey}
+                translations={translateOn ? translations : null}
               />
             ))}
           </>
@@ -642,7 +717,7 @@ export default function MexicoQAPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {bugs.map(b => <BugRow key={b.key} bug={b} />)}
+                      {bugs.map(b => <BugRow key={b.key} bug={b} translations={translateOn ? translations : null} />)}
                     </tbody>
                   </table>
                 </div>
@@ -746,7 +821,14 @@ export default function MexicoQAPage() {
                                   </a>
                                 </td>
                                 <td className="px-3 py-2 max-w-xs">
-                                  <p className="text-slate-700 line-clamp-2" title={issue.summary}>{issue.summary}</p>
+                                  {translateOn && translations[issue.summary] ? (
+                                    <div>
+                                      <p className="text-slate-800 line-clamp-2" title={translations[issue.summary]}>{translations[issue.summary]}</p>
+                                      <p className="text-slate-400 text-[10px] italic line-clamp-1 mt-0.5" title={issue.summary}>{issue.summary}</p>
+                                    </div>
+                                  ) : (
+                                    <p className="text-slate-700 line-clamp-2" title={issue.summary}>{issue.summary}</p>
+                                  )}
                                 </td>
                                 <td className="px-2 py-2 whitespace-nowrap">
                                   <TypeBadge type={issue.type} />
