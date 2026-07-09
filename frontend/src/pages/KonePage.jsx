@@ -165,6 +165,7 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
       })
       setForm(f => ({
         ...f,
+        summary:            res.data.summary            || f.summary,
         steps_to_reproduce: res.data.steps_to_reproduce || f.steps_to_reproduce,
         actual_result:      res.data.actual_result      || f.actual_result,
         expected_result:    res.data.expected_result    || f.expected_result,

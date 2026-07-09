@@ -432,12 +432,19 @@ class CreateBugService:
             raise ValueError("Anthropic API key not configured")
 
         prompt = (
-            "You are a QA engineer writing a Jira bug report. "
-            "Based on the bug information below, generate concise content for three fields.\n\n"
-            f"Summary: {summary}\n\n"
+            "You are a senior QA engineer writing a professional Jira bug report.\n"
+            "Based on the bug information below, do four things:\n"
+            "1. Rewrite the summary to be clear, specific, and professional (max 120 chars). "
+            "Use the pattern '[Component/Feature] - [What fails] [briefly how]'. "
+            "Do NOT start with 'Bug:' or 'Issue:'.\n"
+            "2. Write numbered steps to reproduce.\n"
+            "3. Write the actual result (what currently happens).\n"
+            "4. Write the expected result (what should happen).\n\n"
+            f"Original Summary: {summary}\n\n"
             f"Description:\n{description or '(none)'}\n\n"
-            "Return ONLY valid JSON with exactly these keys:\n"
-            '{"steps_to_reproduce": "numbered steps", '
+            "Return ONLY valid JSON with exactly these keys (no markdown, no extra text):\n"
+            '{"summary": "enriched summary", '
+            '"steps_to_reproduce": "numbered steps", '
             '"actual_result": "what actually happens", '
             '"expected_result": "what should happen"}'
         )
@@ -445,7 +452,7 @@ class CreateBugService:
         client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         message = await client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=800,
+            max_tokens=1000,
             messages=[{"role": "user", "content": prompt}],
         )
         text = message.content[0].text.strip()
