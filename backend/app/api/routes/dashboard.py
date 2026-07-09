@@ -115,6 +115,22 @@ async def get_blockers(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/member-work")
+async def get_member_work(
+    member_id: str = Query(..., description="Jira account ID"),
+    days: int = Query(30, description="Look-back window in days"),
+    refresh: bool = Query(False),
+):
+    """All TMT0 issues assigned to OR created by a specific member."""
+    try:
+        svc = get_dashboard_service()
+        issues = await svc.get_member_work(member_id, days, force_refresh=refresh)
+        return {"issues": issues, "total": len(issues)}
+    except Exception as e:
+        logger.error(f"Member-work error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/bugs-by-version")
 async def get_bugs_by_version(
     version: str = Query(..., description="Fix version name"),

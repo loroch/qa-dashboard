@@ -22,6 +22,7 @@ const nav = [
   { to: '/investigation',  label: 'Investigation',    icon: GitBranch },
   { to: '/bug-triage',     label: 'Bug Priority Mtg', icon: Target },
   { to: '/mexico-qa',      label: 'Mexico QA Team',   icon: Globe },
+  { to: '/kone',           label: 'K-1 KONE',         icon: Ticket },
   { to: '/bug-reporter',   label: 'Bug Reporter',     icon: PenLine },
   { to: '/anomaly',        label: 'Anomalies',        icon: Zap },
   { to: '/changelog',      label: 'Changelog',        icon: History },

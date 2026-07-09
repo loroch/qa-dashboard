@@ -63,6 +63,32 @@ function FilterChip({ label, onRemove }) {
   )
 }
 
+/* Hover tooltip — fixed position, breaks out of overflow containers */
+function TooltipCell({ text, className, children }) {
+  const [pos, setPos] = useState(null)
+  return (
+    <td
+      className={className}
+      onMouseEnter={e => {
+        const r = e.currentTarget.getBoundingClientRect()
+        setPos({ top: r.bottom + 6, left: Math.min(r.left, window.innerWidth - 380) })
+      }}
+      onMouseLeave={() => setPos(null)}
+    >
+      {children}
+      {pos && text && (
+        <div
+          className="fixed z-[9999] bg-slate-800 text-white text-xs rounded-lg px-3 py-2 shadow-xl pointer-events-none leading-relaxed whitespace-normal"
+          style={{ top: pos.top, left: pos.left, maxWidth: 360 }}
+        >
+          {text}
+          <div className="absolute -top-1.5 left-4 w-3 h-3 bg-slate-800 rotate-45" />
+        </div>
+      )}
+    </td>
+  )
+}
+
 // ─────────────────────────────────────────────────────────
 // Create Bug Modal
 // ─────────────────────────────────────────────────────────
@@ -937,9 +963,9 @@ export default function ZohoReportsPage() {
                                 {row.zoho_ticket_number} <ExternalLink className="h-3 w-3" />
                               </a>
                             </td>
-                            <td className="px-3 py-2.5 max-w-[200px]">
+                            <TooltipCell text={row.zoho_subject} className="px-3 py-2.5 max-w-[220px] cursor-default">
                               <span className="line-clamp-2 text-gray-800">{row.zoho_subject}</span>
-                            </td>
+                            </TooltipCell>
                             <td className="px-3 py-2.5 whitespace-nowrap text-gray-600 text-xs">{row.zoho_project_name}</td>
                             <td className="px-3 py-2.5 whitespace-nowrap">
                               <StatusPill status={row.zoho_status} colorMap={ZOHO_STATUS_COLORS} />
@@ -956,13 +982,14 @@ export default function ZohoReportsPage() {
                             <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 text-xs">
                               {row.jira_fix_versions?.join(', ') || '—'}
                             </td>
-                            <td className="px-3 py-2.5 text-gray-500 text-xs max-w-[180px]">
+                            <TooltipCell
+                              text={row.jira_parent_key ? (row.jira_parent_summary ? `${row.jira_parent_key} — ${row.jira_parent_summary}` : row.jira_parent_key) : null}
+                              className="px-3 py-2.5 text-gray-500 text-xs max-w-[180px] cursor-default"
+                            >
                               {row.jira_parent_key
-                                ? <span title={row.jira_parent_key} className="line-clamp-2">
-                                    {row.jira_parent_summary || row.jira_parent_key}
-                                  </span>
+                                ? <span className="line-clamp-2">{row.jira_parent_summary || row.jira_parent_key}</span>
                                 : row.jira_epic || '—'}
-                            </td>
+                            </TooltipCell>
                             <td className="px-3 py-2.5 whitespace-nowrap">
                               <AgingBadge level={row.zoho_aging_level} days={row.zoho_days_open} />
                             </td>

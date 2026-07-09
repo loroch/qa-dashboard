@@ -94,6 +94,14 @@ jira:
       name: "Rosa Areli Cuatecontzi Monroy"
       role: "QA Engineer"
 
+    - id: "712020:4686dd67-c7a0-417a-8a3d-e47380e9e3c4"
+      name: "Ana Lilia Jacobo Soto"
+      role: "Mexico QA"
+
+    - id: "712020:63d6bf67-62cb-4475-9d55-b8eda03bf7d5"
+      name: "Rubi Lopez"
+      role: "Mexico QA"
+
   # [ASSUMPTION] Empty = monitor all accessible projects. Add keys to filter.
   projects: []  # e.g. ["PROJ", "APP", "MOBILE"]
 

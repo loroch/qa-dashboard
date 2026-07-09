@@ -26,11 +26,32 @@ PINNED_EPIC_KEYS = [
 ]
 
 ISSUE_FIELDS = [
-    "summary", "status", "priority", "assignee", "reporter",
-    "issuetype", "created", "updated", "parent", "fixVersions",
+    "summary", "description", "status", "priority", "assignee", "reporter",
+    "issuetype", "created", "updated", "parent", "fixVersions", "versions",
     "customfield_10020",   # Sprint
     "customfield_10014",   # Epic Link (classic projects)
 ]
+
+
+def _adf_to_text(adf, max_chars: int = 600) -> str:
+    """Extract plain text from Atlassian Document Format (ADF)."""
+    if not adf:
+        return ""
+    if isinstance(adf, str):
+        return adf[:max_chars]
+    parts: list[str] = []
+
+    def _walk(node):
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "text":
+            parts.append(node.get("text", ""))
+        for child in node.get("content") or []:
+            _walk(child)
+
+    _walk(adf)
+    text = " ".join(p.strip() for p in parts if p.strip())
+    return text[:max_chars]
 
 
 def _fmt_issue(issue: dict, base_url: str) -> dict:
@@ -45,23 +66,25 @@ def _fmt_issue(issue: dict, base_url: str) -> dict:
     parent_f   = parent_raw.get("fields") or {}
 
     return {
-        "key":          issue["key"],
-        "url":          f"{base_url}/browse/{issue['key']}",
-        "summary":      f.get("summary", ""),
-        "status":       (f.get("status") or {}).get("name", ""),
-        "priority":     (f.get("priority") or {}).get("name", ""),
-        "type":         (f.get("issuetype") or {}).get("name", ""),
-        "assignee":     (f.get("assignee") or {}).get("displayName", ""),
-        "assignee_id":  (f.get("assignee") or {}).get("accountId", ""),
-        "reporter":     (f.get("reporter") or {}).get("displayName", ""),
-        "reporter_id":  (f.get("reporter") or {}).get("accountId", ""),
-        "fix_versions": [v["name"] for v in (f.get("fixVersions") or [])],
-        "sprint":       sprint_name,
-        "parent_key":   parent_raw.get("key", ""),
-        "parent_summary": parent_f.get("summary", ""),
-        "parent_type":  (parent_f.get("issuetype") or {}).get("name", ""),
-        "created":      f.get("created", ""),
-        "updated":      f.get("updated", ""),
+        "key":              issue["key"],
+        "url":              f"{base_url}/browse/{issue['key']}",
+        "summary":          f.get("summary", ""),
+        "description":      _adf_to_text(f.get("description")),
+        "status":           (f.get("status") or {}).get("name", ""),
+        "priority":         (f.get("priority") or {}).get("name", ""),
+        "type":             (f.get("issuetype") or {}).get("name", ""),
+        "assignee":         (f.get("assignee") or {}).get("displayName", ""),
+        "assignee_id":      (f.get("assignee") or {}).get("accountId", ""),
+        "reporter":         (f.get("reporter") or {}).get("displayName", ""),
+        "reporter_id":      (f.get("reporter") or {}).get("accountId", ""),
+        "fix_versions":     [v["name"] for v in (f.get("fixVersions") or [])],
+        "found_in_versions":[v["name"] for v in (f.get("versions") or [])],
+        "sprint":           sprint_name,
+        "parent_key":       parent_raw.get("key", ""),
+        "parent_summary":   parent_f.get("summary", ""),
+        "parent_type":      (parent_f.get("issuetype") or {}).get("name", ""),
+        "created":          f.get("created", ""),
+        "updated":          f.get("updated", ""),
     }
 
 

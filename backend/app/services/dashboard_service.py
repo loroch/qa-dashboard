@@ -78,11 +78,14 @@ class DashboardService:
     # ------------------------------------------------------------------
 
     def _group_by_member(self, issues: list[dict]) -> list[dict]:
+        mapping = get_field_mapping()
+        member_meta = {m["id"]: m for m in mapping["jira"]["team_members"]}
         groups: dict[str, dict] = {}
         for member_id, member_name in self.team_members.items():
             groups[member_id] = {
                 "member_id": member_id,
                 "member_name": member_name,
+                "member_role": member_meta.get(member_id, {}).get("role", "QA Engineer"),
                 "ready_for_testing_count": 0,
                 "total_assigned": 0,
                 "avg_days_in_status": 0.0,
@@ -330,6 +333,33 @@ class DashboardService:
             }
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
+
+    async def get_member_work(self, member_id: str, days: int = 30, force_refresh: bool = False) -> list[dict]:
+        """All issues assigned to OR created by a specific member in the last N days."""
+        import hashlib
+        cache_key = f"dashboard:member_work:{hashlib.md5(member_id.encode()).hexdigest()[:8]}:{days}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                f'project = TMT0 AND '
+                f'(assignee = "{member_id}" OR creator = "{member_id}") '
+                f'AND updated >= "-{days}d" '
+                f'ORDER BY updated DESC'
+            )
+            issues = await self.jira.search_issues(
+                jql,
+                fields=[
+                    "summary", "status", "priority", "reporter", "assignee",
+                    "created", "updated", "fixVersions", "parent",
+                    "issuetype", "customfield_10020",
+                ],
+                max_total=300,
+            )
+            return self.mapper.map_issues(issues)
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=180)
 
     async def get_epics(self, force_refresh: bool = False) -> list[dict]:
         cache_key = "dashboard:epics"

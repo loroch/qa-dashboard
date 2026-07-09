@@ -53,6 +53,11 @@ class Settings(BaseSettings):
     # Claude / Anthropic
     anthropic_api_key: str = Field("", description="Anthropic API key for test case generation")
 
+    # K-1 KONE Jira (separate instance)
+    kone_jira_base_url: str = Field("https://kabatone-ops-it.atlassian.net")
+    kone_jira_email: str = Field("loroc@kabatone.com")
+    kone_jira_token: str = Field("")
+
     # Zoho Desk
     zoho_client_id: str = Field("", description="Zoho OAuth client ID")
     zoho_client_secret: str = Field("", description="Zoho OAuth client secret")

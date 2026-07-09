@@ -176,47 +176,124 @@ function IssueRow({ issue, translations }) {
   )
 }
 
-/* ── BugRow (date mode) ───────────────────────────────────── */
+/* ── TextTooltip — fixed-position hover tooltip ───────────── */
+function TextTooltip({ text, className, children }) {
+  const [pos, setPos] = useState(null)
+  return (
+    <td
+      className={className}
+      onMouseEnter={e => {
+        if (!text) return
+        const r = e.currentTarget.getBoundingClientRect()
+        setPos({ top: r.bottom + 6, left: Math.min(r.left, window.innerWidth - 380) })
+      }}
+      onMouseLeave={() => setPos(null)}
+    >
+      {children}
+      {pos && text && (
+        <div
+          className="fixed z-[9999] bg-slate-800 text-white text-xs rounded-lg px-3 py-2 shadow-xl pointer-events-none leading-relaxed whitespace-pre-wrap"
+          style={{ top: pos.top, left: pos.left, maxWidth: 360 }}
+        >
+          {text}
+          <div className="absolute -top-1.5 left-4 w-3 h-3 bg-slate-800 rotate-45" />
+        </div>
+      )}
+    </td>
+  )
+}
+
+/* ── BugRow (bugs-per-member mode) ───────────────────────── */
 function BugRow({ bug, translations }) {
-  const proj = bug.key.split('-')[0]
-  const projCls = PROJECT_COLOR[proj] || 'bg-slate-100 text-slate-700 border-slate-300'
+  const proj      = bug.key.split('-')[0]
+  const projCls   = PROJECT_COLOR[proj] || 'bg-slate-100 text-slate-700 border-slate-300'
   const translated = translations?.[bug.summary]
+  const summaryDisplay = translated || bug.summary
+
   return (
     <tr className="border-b border-slate-100 hover:bg-slate-50 transition-colors text-xs">
-      <td className="px-3 py-2 whitespace-nowrap">
-        <span className={`inline-flex px-1.5 py-0.5 rounded text-[10px] font-medium border ${projCls}`}>{proj}</span>
-      </td>
+      {/* Key */}
       <td className="px-3 py-2 whitespace-nowrap">
         <a href={bug.url} target="_blank" rel="noreferrer"
-          className="font-mono text-indigo-600 hover:underline">{bug.key}</a>
+          className="font-mono text-indigo-600 hover:underline flex items-center gap-1">
+          <span className={`shrink-0 px-1 rounded text-[9px] font-semibold border ${projCls}`}>{proj}</span>
+          {bug.key}
+          <ExternalLink className="h-2.5 w-2.5 opacity-40" />
+        </a>
       </td>
-      <td className="px-3 py-2 max-w-xs">
+
+      {/* Summary */}
+      <TextTooltip text={bug.summary} className="px-3 py-2 max-w-[180px] cursor-default">
         {translated ? (
           <div>
-            <p className="text-slate-800 line-clamp-2" title={translated}>{translated}</p>
-            <p className="text-slate-400 text-[10px] italic line-clamp-1 mt-0.5" title={bug.summary}>{bug.summary}</p>
+            <p className="line-clamp-2 text-slate-800 font-medium">{translated}</p>
+            <p className="text-slate-400 text-[10px] italic line-clamp-1 mt-0.5">{bug.summary}</p>
           </div>
         ) : (
-          <p className="text-slate-700 line-clamp-2" title={bug.summary}>{bug.summary}</p>
+          <p className="line-clamp-2 text-slate-700">{bug.summary}</p>
         )}
-      </td>
+      </TextTooltip>
+
+      {/* Description */}
+      <TextTooltip text={bug.description} className="px-3 py-2 max-w-[200px] cursor-default">
+        {bug.description
+          ? <p className="line-clamp-2 text-slate-500 italic">{bug.description}</p>
+          : <span className="text-slate-300">—</span>
+        }
+      </TextTooltip>
+
+      {/* Status */}
       <td className="px-2 py-2 whitespace-nowrap">
         <StatusPill status={bug.status} />
       </td>
-      <td className={`px-2 py-2 whitespace-nowrap ${PRIORITY_CLS[bug.priority] || 'text-slate-500'}`}>
+
+      {/* Priority */}
+      <td className={`px-2 py-2 whitespace-nowrap font-medium ${PRIORITY_CLS[bug.priority] || 'text-slate-500'}`}>
         {bug.priority || '—'}
       </td>
-      <td className="px-3 py-2 whitespace-nowrap text-slate-600">{bug.reporter || '—'}</td>
-      <td className="px-3 py-2 whitespace-nowrap text-slate-600">
-        {bug.fix_versions[0] || <span className="text-slate-400">—</span>}
+
+      {/* Parent */}
+      <TextTooltip
+        text={bug.parent_key ? `${bug.parent_key}${bug.parent_summary ? ' — ' + bug.parent_summary : ''}` : null}
+        className="px-3 py-2 max-w-[140px] cursor-default"
+      >
+        {bug.parent_key
+          ? <span className="font-mono text-purple-600 line-clamp-1">{bug.parent_key}</span>
+          : <span className="text-slate-300">—</span>
+        }
+      </TextTooltip>
+
+      {/* Found In Version */}
+      <td className="px-3 py-2 whitespace-nowrap text-slate-500">
+        {bug.found_in_versions?.length
+          ? <span className="text-orange-600 font-medium">{bug.found_in_versions[0]}</span>
+          : <span className="text-slate-300">—</span>
+        }
       </td>
-      <td className="px-3 py-2 whitespace-nowrap text-slate-500">{fmtDate(bug.created)}</td>
+
+      {/* Assignee */}
+      <td className="px-3 py-2 whitespace-nowrap text-slate-600">
+        {bug.assignee || <span className="text-slate-300 italic">unassigned</span>}
+      </td>
+
+      {/* Fix Version */}
+      <td className="px-3 py-2 whitespace-nowrap text-slate-600">
+        {bug.fix_versions?.length
+          ? <span className="text-emerald-700 font-medium">{bug.fix_versions[0]}</span>
+          : <span className="text-slate-300">—</span>
+        }
+      </td>
+
+      {/* Created */}
+      <td className="px-3 py-2 whitespace-nowrap text-slate-400">
+        {fmtDate(bug.created)}
+      </td>
     </tr>
   )
 }
 
 /* ── EpicCard ─────────────────────────────────────────────── */
-function EpicCard({ epic, memberIds, onRemove, refresh, isPinned, translations, onTextsReady }) {
+function EpicCard({ epic, memberIds, onRemove, refresh, isPinned, translations, onRequestTranslation }) {
   const [expanded, setExpanded] = useState(true)
   const [tab, setTab]           = useState('tasks')   // 'tasks' | 'bugs'
 
@@ -236,6 +313,16 @@ function EpicCard({ epic, memberIds, onRemove, refresh, isPinned, translations, 
 
   const tasks = data?.tasks || []
   const bugs  = data?.bugs  || []
+
+  /* When data loads (or translate turns on), send summaries up for translation */
+  useEffect(() => {
+    if (!onRequestTranslation || !data || !translations) return
+    const texts = [
+      ...(data.tasks || []).map(t => t.summary),
+      ...(data.bugs  || []).map(b => b.summary),
+    ].filter(Boolean)
+    if (texts.length) onRequestTranslation(texts)
+  }, [data, !!translations, onRequestTranslation])
 
   return (
     <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
@@ -383,9 +470,12 @@ export default function MexicoQAPage() {
   const [extraEpics,    setExtraEpics]   = useState([])       // user-added via search
   const [days,          setDays]         = useState(14)
   const [refreshKey,    setRefreshKey]   = useState(0)
-  const [translateOn,   setTranslateOn]  = useState(false)
-  const [translations,  setTranslations] = useState({})       // {original: english}
-  const [translating,   setTranslating]  = useState(false)
+  const [translateOn,     setTranslateOn]    = useState(false)
+  const [translations,    setTranslations]   = useState({})       // {original: english}
+  const [translating,     setTranslating]    = useState(false)
+  const translationsRef = useRef({})
+  const [memberTab,       setMemberTab]      = useState(null)     // selected QA member name in date mode
+  const [bugStatusFilter, setBugStatusFilter] = useState('')      // '' = all
 
   /* Team members */
   const teamQuery = useQuery({
@@ -434,20 +524,12 @@ export default function MexicoQAPage() {
 
   const handleRefresh = () => setRefreshKey(k => k + 1)
 
-  /* Collect all visible summaries that haven't been translated yet */
-  const handleTranslate = useCallback(async () => {
-    if (translating) return
-    const allTexts = []
-    if (mode === 'assigned' && assignedQuery.data) {
-      Object.values(assignedQuery.data).flat().forEach(i => allTexts.push(i.summary))
-    }
-    if (mode === 'date' && bugsQuery.data) {
-      bugsQuery.data.forEach(b => allTexts.push(b.summary))
-    }
-    if (mode === 'epic') {
-      // We'll let individual EpicCards call translate as their data loads
-    }
-    const untranslated = [...new Set(allTexts)].filter(t => t && !translations[t])
+  /* Keep ref in sync so translateTexts callback stays stable */
+  translationsRef.current = translations
+
+  /* Shared translate function — stable callback, any component can call it */
+  const translateTexts = useCallback(async (texts) => {
+    const untranslated = [...new Set(texts)].filter(t => t && t.trim() && !translationsRef.current[t])
     if (untranslated.length === 0) return
     setTranslating(true)
     try {
@@ -458,24 +540,17 @@ export default function MexicoQAPage() {
     } finally {
       setTranslating(false)
     }
-  }, [mode, assignedQuery.data, bugsQuery.data, translations, translating])
+  }, []) // stable — reads translations via ref
 
-  /* Auto-translate when toggle turned on or data changes */
+  /* Auto-translate assigned/bugs data when toggle turns on or data changes */
   useEffect(() => {
-    if (translateOn) handleTranslate()
+    if (!translateOn) return
+    const texts = []
+    if (assignedQuery.data) Object.values(assignedQuery.data).flat().forEach(i => texts.push(i.summary))
+    if (bugsQuery.data) bugsQuery.data.forEach(b => texts.push(b.summary))
+    if (texts.length) translateTexts(texts)
   }, [translateOn, assignedQuery.data, bugsQuery.data])
 
-  /* Derived stats for date mode */
-  const bugsByReporter = useMemo(() => {
-    const bugs = bugsQuery.data || []
-    const map = {}
-    bugs.forEach(b => {
-      const r = b.reporter || 'Unknown'
-      if (!map[r]) map[r] = []
-      map[r].push(b)
-    })
-    return map
-  }, [bugsQuery.data])
 
   return (
     <div className="flex flex-col min-h-screen bg-slate-50">
@@ -670,12 +745,13 @@ export default function MexicoQAPage() {
                 onRemove={k => setExtraEpics(prev => prev.filter(e => e.key !== k))}
                 refresh={refreshKey}
                 translations={translateOn ? translations : null}
+                onRequestTranslation={translateTexts}
               />
             ))}
           </>
         )}
 
-        {/* ── Date mode ── */}
+        {/* ── Date mode (bugs per QA member) ── */}
         {mode === 'date' && (
           <>
             {bugsQuery.isFetching && (
@@ -690,39 +766,116 @@ export default function MexicoQAPage() {
               </div>
             )}
 
-            {/* Per-member grouping */}
-            {!bugsQuery.isFetching && Object.entries(bugsByReporter).map(([reporter, bugs]) => (
-              <div key={reporter} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-                <div className="flex items-center gap-3 px-4 py-3 bg-slate-50 border-b border-slate-200">
-                  <div className="h-7 w-7 rounded-full bg-emerald-500 flex items-center justify-center text-white text-xs font-bold shrink-0">
-                    {reporter.charAt(0)}
+            {!bugsQuery.isFetching && !bugsQuery.error && bugsQuery.data && (() => {
+              const allBugs   = bugsQuery.data || []
+              const activeMember = memberTab || members[0]?.name || ''
+
+              /* Member tabs */
+              const memberBugCounts = Object.fromEntries(
+                members.map(m => [m.name, allBugs.filter(b => b.reporter === m.name).length])
+              )
+
+              /* Bugs for selected member */
+              const memberBugs = activeMember
+                ? allBugs.filter(b => b.reporter === activeMember)
+                : allBugs
+
+              /* Status options for filter */
+              const statusOptions = [...new Set(memberBugs.map(b => b.status).filter(Boolean))].sort()
+
+              /* Apply status filter */
+              const visibleBugs = bugStatusFilter
+                ? memberBugs.filter(b => b.status === bugStatusFilter)
+                : memberBugs
+
+              /* Sort by created desc (already from API, but ensure) */
+              const sortedBugs = [...visibleBugs].sort((a, b) =>
+                new Date(b.created) - new Date(a.created)
+              )
+
+              return (
+                <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                  {/* Member tabs + status filter */}
+                  <div className="flex items-center gap-0 border-b border-slate-200 bg-slate-50 px-4 pt-2">
+                    <div className="flex items-center gap-0 flex-1">
+                      {members.map(m => (
+                        <button
+                          key={m.name}
+                          onClick={() => { setMemberTab(m.name); setBugStatusFilter('') }}
+                          className={`flex items-center gap-2 px-4 py-2.5 text-xs font-semibold border-b-2 transition-colors -mb-px mr-1 ${
+                            (memberTab || members[0]?.name) === m.name
+                              ? 'border-red-500 text-red-700 bg-white'
+                              : 'border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300'
+                          }`}
+                        >
+                          {m.avatar
+                            ? <img src={m.avatar} alt={m.name} className="h-5 w-5 rounded-full" />
+                            : <div className="h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center text-white text-[9px] font-bold">{m.name.charAt(0)}</div>
+                          }
+                          {m.name.split(' ')[0]}
+                          <span className={`rounded-full px-1.5 py-0.5 text-[10px] font-bold ${
+                            (memberTab || members[0]?.name) === m.name
+                              ? 'bg-red-100 text-red-700'
+                              : 'bg-slate-200 text-slate-500'
+                          }`}>
+                            {memberBugCounts[m.name] ?? 0}
+                          </span>
+                        </button>
+                      ))}
+                    </div>
+
+                    {/* Status filter */}
+                    <div className="flex items-center gap-2 pb-2">
+                      <select
+                        className="text-xs border border-slate-200 rounded-lg px-2 py-1.5 bg-white text-slate-600 focus:outline-none focus:border-red-300"
+                        value={bugStatusFilter}
+                        onChange={e => setBugStatusFilter(e.target.value)}
+                      >
+                        <option value="">All statuses</option>
+                        {statusOptions.map(s => (
+                          <option key={s} value={s}>{s}</option>
+                        ))}
+                      </select>
+                      <span className="text-xs text-slate-400 whitespace-nowrap">
+                        {sortedBugs.length} bug{sortedBugs.length !== 1 ? 's' : ''}
+                      </span>
+                    </div>
                   </div>
-                  <p className="text-sm font-semibold text-slate-800">{reporter}</p>
-                  <span className="ml-auto text-xs text-slate-500 bg-red-100 text-red-700 rounded-full px-2 py-0.5">
-                    {bugs.length} bug{bugs.length !== 1 ? 's' : ''}
-                  </span>
+
+                  {/* Bugs table */}
+                  {sortedBugs.length === 0 ? (
+                    <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+                      <Bug className="h-8 w-8 opacity-20 mb-2" />
+                      <p className="text-sm">No bugs found for the selected filters.</p>
+                    </div>
+                  ) : (
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse text-xs">
+                        <thead>
+                          <tr className="bg-red-50 text-red-800 text-[11px] font-semibold sticky top-0">
+                            <th className="px-3 py-2.5 text-left whitespace-nowrap">Key</th>
+                            <th className="px-3 py-2.5 text-left">Summary</th>
+                            <th className="px-3 py-2.5 text-left">Description</th>
+                            <th className="px-2 py-2.5 text-left whitespace-nowrap">Status</th>
+                            <th className="px-2 py-2.5 text-left whitespace-nowrap">Priority</th>
+                            <th className="px-3 py-2.5 text-left whitespace-nowrap">Parent</th>
+                            <th className="px-3 py-2.5 text-left whitespace-nowrap">Found In</th>
+                            <th className="px-3 py-2.5 text-left whitespace-nowrap">Assignee</th>
+                            <th className="px-3 py-2.5 text-left whitespace-nowrap">Fix Version</th>
+                            <th className="px-3 py-2.5 text-left whitespace-nowrap">Created</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {sortedBugs.map(b => (
+                            <BugRow key={b.key} bug={b} translations={translateOn ? translations : null} />
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
                 </div>
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse text-xs">
-                    <thead>
-                      <tr className="bg-red-50 text-red-800 text-[11px] font-semibold">
-                        <th className="px-3 py-2 text-left">Project</th>
-                        <th className="px-3 py-2 text-left">Key</th>
-                        <th className="px-3 py-2 text-left">Summary</th>
-                        <th className="px-2 py-2 text-left">Status</th>
-                        <th className="px-2 py-2 text-left">Priority</th>
-                        <th className="px-3 py-2 text-left">Reporter</th>
-                        <th className="px-3 py-2 text-left">Fix Version</th>
-                        <th className="px-3 py-2 text-left">Created</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {bugs.map(b => <BugRow key={b.key} bug={b} translations={translateOn ? translations : null} />)}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            ))}
+              )
+            })()}
 
             {!bugsQuery.isFetching && !bugsQuery.error && (bugsQuery.data?.length === 0) && (
               <div className="flex flex-col items-center justify-center py-16 text-slate-400">
