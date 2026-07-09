@@ -131,6 +131,7 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
   const [epicSearch, setEpicSearch] = useState('')
   const [epicOpen, setEpicOpen] = useState(false)
   const [epicDropdownPos, setEpicDropdownPos] = useState(null)
+  const [filteredEpics, setFilteredEpics] = useState([])
   const epicRef = useRef(null)
   const epicInputRef = useRef(null)
   const epicDropdownRef = useRef(null)
@@ -166,14 +167,21 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
   })
   const isAtt = (att) => form.attachments.some(a => a.name === att.name)
 
-  // ── Epic search — computed inline so it's always fresh ──
+  // ── Sync filteredEpics when meta loads ──
+  useEffect(() => {
+    setFilteredEpics(meta?.epics || [])
+  }, [meta])
+
   const epicQ = epicSearch.trim().toLowerCase()
-  const visibleEpics = epicQ.length === 0
-    ? (meta?.epics || [])
-    : (meta?.epics || []).filter(e =>
-        (e.name || '').toLowerCase().includes(epicQ) ||
-        (e.key  || '').toLowerCase().includes(epicQ)
-      )
+
+  const applyEpicFilter = (query, allEpics) => {
+    const q = query.trim().toLowerCase()
+    if (!q) return allEpics
+    return allEpics.filter(e =>
+      (e.name || '').toLowerCase().includes(q) ||
+      (e.key  || '').toLowerCase().includes(q)
+    )
+  }
 
   useEffect(() => {
     const h = (e) => {
@@ -347,12 +355,15 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
                       placeholder="Search epic by name or key…"
                       value={epicSearch}
                       onChange={e => {
-                        setEpicSearch(e.target.value)
+                        const val = e.target.value
+                        setEpicSearch(val)
+                        setFilteredEpics(applyEpicFilter(val, meta?.epics || []))
                         setEpicOpen(true)
                         const r = epicInputRef.current?.getBoundingClientRect()
                         if (r) setEpicDropdownPos({ top: r.bottom + 2, left: r.left, width: r.width })
                       }}
                       onFocus={() => {
+                        setFilteredEpics(applyEpicFilter(epicSearch, meta?.epics || []))
                         setEpicOpen(true)
                         const r = epicInputRef.current?.getBoundingClientRect()
                         if (r) setEpicDropdownPos({ top: r.bottom + 2, left: r.left, width: r.width })
@@ -360,7 +371,7 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
                     />
                     {epicSearch && (
                       <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
-                        onMouseDown={() => { setEpicSearch(''); set('epic_key', ''); setEpicOpen(false) }}>
+                        onMouseDown={() => { setEpicSearch(''); setFilteredEpics(meta?.epics || []); set('epic_key', ''); setEpicOpen(false) }}>
                         <X className="h-3.5 w-3.5" />
                       </button>
                     )}
@@ -373,20 +384,20 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
                     >
                       <div className="px-3 py-2 text-xs text-gray-400 cursor-pointer hover:bg-gray-50"
                         onMouseDown={() => selectEpic('', '')}>— No epic —</div>
-                      {visibleEpics.length === 0 ? (
+                      {filteredEpics.length === 0 ? (
                         <div className="px-3 py-3 text-sm text-gray-400 italic text-center">
                           No epics match "<span className="text-red-600 font-bold">{epicSearch}</span>"
                         </div>
-                      ) : visibleEpics.map(e => (
+                      ) : filteredEpics.map(e => (
                         <div key={e.key} onMouseDown={() => selectEpic(e.key, e.name)}
                           className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 flex items-center justify-between ${form.epic_key === e.key ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'}`}>
                           <span className="truncate mr-2"><HighlightText text={e.name} query={epicSearch} /></span>
                           <span className="text-xs text-gray-400 shrink-0"><HighlightText text={e.key} query={epicSearch} /></span>
                         </div>
                       ))}
-                      {visibleEpics.length > 0 && (
+                      {filteredEpics.length > 0 && (
                         <div className="px-3 py-1.5 text-xs text-gray-400 border-t border-gray-100">
-                          {visibleEpics.length} epic{visibleEpics.length !== 1 ? 's' : ''}{epicQ ? ` matching "${epicSearch}"` : ' total'}
+                          {filteredEpics.length} epic{filteredEpics.length !== 1 ? 's' : ''}{epicQ ? ` matching "${epicSearch}"` : ' total'}
                         </div>
                       )}
                     </div>,
