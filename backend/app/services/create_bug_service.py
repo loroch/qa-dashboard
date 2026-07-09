@@ -80,9 +80,10 @@ class CreateBugService:
         epics_task        = self._get_epics()
         sprints_task      = self._get_active_sprints()
         priorities_task   = self._get_priorities()
+        assignees_task    = self._get_assignable_users()
 
-        fix_versions, epics, sprints, priorities = await asyncio.gather(
-            fix_versions_task, epics_task, sprints_task, priorities_task,
+        fix_versions, epics, sprints, priorities, assignees = await asyncio.gather(
+            fix_versions_task, epics_task, sprints_task, priorities_task, assignees_task,
             return_exceptions=True,
         )
 
@@ -96,8 +97,21 @@ class CreateBugService:
             "epics":             safe(epics, []),
             "sprints":           safe(sprints, []),
             "priorities":        safe(priorities, []),
+            "assignees":         safe(assignees, []),
             "severities":        SEVERITY_OPTIONS,
         }
+
+    async def _get_assignable_users(self) -> list[dict]:
+        try:
+            data = await self.jira.get("/user/assignable/search", params={"project": "TMT0", "maxResults": 50})
+            return [
+                {"id": u.get("accountId"), "name": u.get("displayName"), "email": u.get("emailAddress", "")}
+                for u in (data if isinstance(data, list) else [])
+                if u.get("accountId") and u.get("displayName")
+            ]
+        except Exception as e:
+            logger.warning(f"Could not fetch assignable users: {e}")
+            return []
 
     async def _get_fix_versions(self) -> list[dict]:
         data = await self.jira.get("/project/TMT0/versions")

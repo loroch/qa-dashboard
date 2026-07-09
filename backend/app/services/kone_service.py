@@ -267,6 +267,7 @@ class KoneService:
         priority_name: Optional[str],
         sprint_id: Optional[int],
         attachment_ids: list,
+        assignee_id: Optional[str] = None,
     ) -> dict:
         from app.services.create_bug_service import get_create_bug_service
         svc = get_create_bug_service()
@@ -296,6 +297,8 @@ class KoneService:
             fields["priority"] = {"name": priority_name}
         if sprint_id:
             fields["customfield_10020"] = {"id": sprint_id}
+        if assignee_id:
+            fields["assignee"] = {"id": assignee_id}
 
         jira = get_jira_client()
         settings = get_settings()

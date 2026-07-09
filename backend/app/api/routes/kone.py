@@ -77,7 +77,8 @@ class KoneCreateBugRequest(BaseModel):
     fix_version_id: Optional[str] = None
     priority_name: Optional[str] = None
     sprint_id: Optional[int] = None
-    attachments: List[dict] = []  # [{href, name, content_type}] selected by user
+    assignee_id: Optional[str] = None
+    attachments: List[dict] = []
 
 
 @router.post("/create-bug")
@@ -100,6 +101,7 @@ async def create_kone_bug(body: KoneCreateBugRequest):
             fix_version_id=body.fix_version_id,
             priority_name=body.priority_name,
             sprint_id=body.sprint_id,
+            assignee_id=body.assignee_id,
             attachment_ids=body.attachments,
         )
         return result
