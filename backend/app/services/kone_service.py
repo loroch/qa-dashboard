@@ -5,11 +5,18 @@ for the dashboard.  Uses a two-step approach:
   1. Service Desk queue API → issue keys.
   2. REST API v3 /issue/{key} → full details (parallel, semaphore-limited).
 """
+import base64
 import logging
+import os
+import tempfile
 from typing import Optional
 
+import httpx
+
 from app.jira.kone_client import get_kone_client, Q_OPEN
+from app.jira.client import get_jira_client
 from app.services.cache_service import get_cache
+from app.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +54,26 @@ def _opt_child(field) -> str:
         return ""
     child = field.get("child") or {}
     return child.get("value", "")
+
+
+def _adf_to_text(adf, max_chars: int = 1200) -> str:
+    """Extract plain text from an Atlassian Document Format (ADF) dict."""
+    if not adf:
+        return ""
+    if isinstance(adf, str):
+        return adf[:max_chars]
+    parts: list[str] = []
+
+    def _walk(node):
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "text":
+            parts.append(node.get("text", ""))
+        for child in node.get("content") or []:
+            _walk(child)
+
+    _walk(adf)
+    return " ".join(p.strip() for p in parts if p.strip())[:max_chars]
 
 
 def _arr_opt(field) -> list[str]:
@@ -161,6 +188,174 @@ class KoneService:
                 "cuentas":  sorted(g["cuentas"]),
             })
         return sorted(result, key=lambda x: -x["total"])
+
+
+    async def get_ticket_detail(self, key: str) -> dict:
+        """Return full issue data + parsed attachments for one KONE ticket."""
+        issue = await self.client.get_issue(key)
+        if not issue:
+            return {}
+        f = issue.get("fields", {})
+
+        attachments = []
+        for att in f.get("attachment") or []:
+            attachments.append({
+                "id":           att.get("id", ""),
+                "name":         att.get("filename", att.get("id", "")),
+                "size":         att.get("size", 0),
+                "content_type": att.get("mimeType", "application/octet-stream"),
+                "href":         att.get("content", ""),
+            })
+
+        description = _adf_to_text(f.get("description"))
+
+        return {
+            "key":         key,
+            "url":         f"{JIRA_BASE}/browse/{key}",
+            "summary":     f.get("summary", ""),
+            "description": description,
+            "status":      (f.get("status") or {}).get("name", ""),
+            "priority":    (f.get("priority") or {}).get("name", ""),
+            "attachments": attachments,
+        }
+
+    async def get_bug_links(self) -> dict[str, dict]:
+        """Return {kone_key: {jira_key, jira_url}} from DB."""
+        from app.database.db import get_session_factory, KoneBugLinkORM
+        from sqlalchemy import select
+        factory = get_session_factory()
+        async with factory() as session:
+            rows = (await session.execute(select(KoneBugLinkORM))).scalars().all()
+        return {r.kone_key: {"jira_key": r.jira_key, "jira_url": r.jira_url} for r in rows}
+
+    async def save_bug_link(self, kone_key: str, jira_key: str, jira_url: str, summary: str = "") -> None:
+        """Persist the KONE → TMT0 mapping."""
+        from app.database.db import get_session_factory, KoneBugLinkORM
+        from sqlalchemy import select
+        factory = get_session_factory()
+        async with factory() as session:
+            existing = (await session.execute(
+                select(KoneBugLinkORM).where(KoneBugLinkORM.kone_key == kone_key)
+            )).scalar_one_or_none()
+            if existing:
+                existing.jira_key = jira_key
+                existing.jira_url = jira_url
+                existing.summary = summary
+            else:
+                session.add(KoneBugLinkORM(
+                    kone_key=kone_key,
+                    jira_key=jira_key,
+                    jira_url=jira_url,
+                    summary=summary,
+                ))
+            await session.commit()
+
+    async def create_jira_bug(
+        self,
+        kone_key: str,
+        kone_url: str,
+        summary: str,
+        description: str,
+        steps_to_reproduce: str,
+        actual_result: str,
+        expected_result: str,
+        severity: str,
+        environments: list,
+        found_in_version_id: Optional[str],
+        epic_key: Optional[str],
+        fix_version_id: Optional[str],
+        priority_name: Optional[str],
+        sprint_id: Optional[int],
+        attachment_ids: list,
+    ) -> dict:
+        from app.services.create_bug_service import get_create_bug_service
+        svc = get_create_bug_service()
+
+        adf = svc._build_adf(description=description, zoho_url=kone_url)
+
+        fields: dict = {
+            "project":   {"key": "TMT0"},
+            "issuetype": {"name": "Bug"},
+            "summary":   summary,
+            "description": adf,
+            "customfield_10409": svc._plain_adf(steps_to_reproduce or " "),
+            "customfield_10598": svc._plain_adf(actual_result or " "),
+            "customfield_10599": svc._plain_adf(expected_result or " "),
+            "customfield_10597": {"value": severity or "Medium"},
+            "customfield_10600": environments or [],
+            "customfield_10434": svc._plain_adf(f"{kone_key} — {kone_url}"),
+        }
+
+        if found_in_version_id:
+            fields["customfield_10601"] = [{"id": found_in_version_id}]
+        if epic_key:
+            fields["parent"] = {"key": epic_key}
+        if fix_version_id:
+            fields["fixVersions"] = [{"id": fix_version_id}]
+        if priority_name:
+            fields["priority"] = {"name": priority_name}
+        if sprint_id:
+            fields["customfield_10020"] = {"id": sprint_id}
+
+        jira = get_jira_client()
+        settings = get_settings()
+        created = await jira.post("/issue", {"fields": fields})
+        issue_key = created.get("key")
+        issue_url = f"{settings.jira_base_url.rstrip('/')}/browse/{issue_key}"
+
+        # Transfer attachments from KONE → TMT0
+        if attachment_ids and issue_key:
+            await self._transfer_kone_attachments(attachment_ids, issue_key)
+
+        # Persist link
+        await self.save_bug_link(kone_key, issue_key, issue_url, summary)
+
+        return {
+            "key": issue_key,
+            "url": issue_url,
+            "id":  created.get("id"),
+        }
+
+    async def _transfer_kone_attachments(self, attachment_ids: list, jira_issue_key: str) -> None:
+        """Download attachments from KONE Jira and upload to TMT0."""
+        settings = get_settings()
+        creds = f"{settings.kone_jira_email}:{settings.kone_jira_token}"
+        auth_header = f"Basic {base64.b64encode(creds.encode()).decode()}"
+
+        jira = get_jira_client()
+
+        for att in attachment_ids:
+            href = att.get("href", "")
+            name = att.get("name", "attachment")
+            ctype = att.get("content_type", "application/octet-stream")
+            if not href:
+                continue
+            tmp_path = None
+            try:
+                async with httpx.AsyncClient(timeout=60) as dl:
+                    resp = await dl.get(href, headers={"Authorization": auth_header})
+                    resp.raise_for_status()
+                    data = resp.content
+                suffix = os.path.splitext(name)[-1] or ""
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    tmp.write(data)
+                    tmp_path = tmp.name
+                with open(tmp_path, "rb") as f:
+                    await jira.upload_attachment(jira_issue_key, name, ctype, f.read())
+                logger.info(f"Uploaded KONE attachment {name} to {jira_issue_key}")
+            except Exception as e:
+                logger.warning(f"Failed to transfer KONE attachment {name}: {e}")
+            finally:
+                if tmp_path and os.path.exists(tmp_path):
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+
+    async def ai_generate_bug_fields(self, summary: str, description: str) -> dict:
+        from app.services.create_bug_service import get_create_bug_service
+        svc = get_create_bug_service()
+        return await svc.ai_generate_bug_fields(summary=summary, description=description)
 
 
 _service: Optional[KoneService] = None

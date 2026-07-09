@@ -79,6 +79,18 @@ class BugHistoryORM(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class KoneBugLinkORM(Base):
+    """Maps a KONE (K-1) ticket key to the TMT0 Jira bug created from it."""
+    __tablename__ = "kone_bug_links"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    kone_key = Column(String(50), nullable=False, unique=True, index=True)
+    jira_key = Column(String(50), nullable=False)
+    jira_url = Column(Text, nullable=False)
+    summary = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 # Engine and session factory
 _engine = None
 _session_factory = None
