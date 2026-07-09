@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect, useRef, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
 import {
@@ -76,6 +77,20 @@ function DonutChart({ data, size = 200 }) {
   )
 }
 
+// ── Highlight matched substring in red ───────────────────────────────────────
+function HighlightText({ text, query }) {
+  if (!query || !text) return <span>{text}</span>
+  const idx = text.toLowerCase().indexOf(query.toLowerCase())
+  if (idx === -1) return <span>{text}</span>
+  return (
+    <span>
+      {text.slice(0, idx)}
+      <span className="text-red-600 font-bold">{text.slice(idx, idx + query.length)}</span>
+      {text.slice(idx + query.length)}
+    </span>
+  )
+}
+
 // ── Fixed-position tooltip ────────────────────────────────────────────────────
 function TooltipCell({ text, className, children }) {
   const [pos, setPos] = useState(null)
@@ -115,7 +130,10 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
   const [error, setError] = useState(null)
   const [epicSearch, setEpicSearch] = useState('')
   const [epicOpen, setEpicOpen] = useState(false)
+  const [epicDropdownPos, setEpicDropdownPos] = useState(null)
   const epicRef = useRef(null)
+  const epicInputRef = useRef(null)
+  const epicDropdownRef = useRef(null)
 
   const { data: meta } = useQuery({
     queryKey: ['kone-create-bug-meta'],
@@ -158,7 +176,10 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
       )
 
   useEffect(() => {
-    const h = (e) => { if (epicRef.current && !epicRef.current.contains(e.target)) setEpicOpen(false) }
+    const h = (e) => {
+      if (epicRef.current?.contains(e.target) || epicDropdownRef.current?.contains(e.target)) return
+      setEpicOpen(false)
+    }
     document.addEventListener('mousedown', h)
     return () => document.removeEventListener('mousedown', h)
   }, [])
@@ -316,16 +337,26 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
               </div>
 
               <div className="grid grid-cols-2 gap-3">
-                {/* Epic — searchable, computed inline */}
-                <div ref={epicRef} className="relative col-span-2">
+                {/* Epic — searchable with portal dropdown to escape overflow clipping */}
+                <div ref={epicRef} className="col-span-2">
                   <label className="block text-xs font-semibold text-gray-600 mb-1">Epic (Parent)</label>
                   <div className="relative">
                     <input type="text"
+                      ref={epicInputRef}
                       className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 pr-8 focus:outline-none focus:border-blue-400"
                       placeholder="Search epic by name or key…"
                       value={epicSearch}
-                      onChange={e => { setEpicSearch(e.target.value); setEpicOpen(true) }}
-                      onFocus={() => setEpicOpen(true)}
+                      onChange={e => {
+                        setEpicSearch(e.target.value)
+                        setEpicOpen(true)
+                        const r = epicInputRef.current?.getBoundingClientRect()
+                        if (r) setEpicDropdownPos({ top: r.bottom + 2, left: r.left, width: r.width })
+                      }}
+                      onFocus={() => {
+                        setEpicOpen(true)
+                        const r = epicInputRef.current?.getBoundingClientRect()
+                        if (r) setEpicDropdownPos({ top: r.bottom + 2, left: r.left, width: r.width })
+                      }}
                     />
                     {epicSearch && (
                       <button className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600"
@@ -334,19 +365,23 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
                       </button>
                     )}
                   </div>
-                  {epicOpen && (
-                    <div className="absolute z-[200] w-full mt-1 bg-white border border-gray-200 rounded-lg shadow-2xl max-h-52 overflow-y-auto">
+                  {epicOpen && epicDropdownPos && createPortal(
+                    <div
+                      ref={epicDropdownRef}
+                      className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-2xl max-h-64 overflow-y-auto"
+                      style={{ top: epicDropdownPos.top, left: epicDropdownPos.left, width: epicDropdownPos.width }}
+                    >
                       <div className="px-3 py-2 text-xs text-gray-400 cursor-pointer hover:bg-gray-50"
                         onMouseDown={() => selectEpic('', '')}>— No epic —</div>
                       {visibleEpics.length === 0 ? (
                         <div className="px-3 py-3 text-sm text-gray-400 italic text-center">
-                          No epics match "{epicSearch}"
+                          No epics match "<span className="text-red-600 font-bold">{epicSearch}</span>"
                         </div>
                       ) : visibleEpics.map(e => (
                         <div key={e.key} onMouseDown={() => selectEpic(e.key, e.name)}
                           className={`px-3 py-2 text-sm cursor-pointer hover:bg-blue-50 flex items-center justify-between ${form.epic_key === e.key ? 'bg-blue-50 text-blue-700 font-medium' : 'text-gray-700'}`}>
-                          <span className="truncate mr-2">{e.name}</span>
-                          <span className="text-xs text-gray-400 shrink-0">{e.key}</span>
+                          <span className="truncate mr-2"><HighlightText text={e.name} query={epicSearch} /></span>
+                          <span className="text-xs text-gray-400 shrink-0"><HighlightText text={e.key} query={epicSearch} /></span>
                         </div>
                       ))}
                       {visibleEpics.length > 0 && (
@@ -354,7 +389,8 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
                           {visibleEpics.length} epic{visibleEpics.length !== 1 ? 's' : ''}{epicQ ? ` matching "${epicSearch}"` : ' total'}
                         </div>
                       )}
-                    </div>
+                    </div>,
+                    document.body
                   )}
                 </div>
 
