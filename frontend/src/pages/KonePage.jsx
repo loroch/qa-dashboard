@@ -5,11 +5,12 @@ import axios from 'axios'
 import {
   RefreshCw, ExternalLink, ChevronDown, ChevronRight,
   Bug, X, Loader2, CheckCircle, AlertCircle, Paperclip, Sparkles, Languages,
-  TrendingUp, Clock, Users, AlertOctagon
+  TrendingUp, Clock, Users, AlertOctagon, Filter
 } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
 const api = axios.create({ baseURL: API, timeout: 60000 })
+const MAX_ATT_BYTES = 10 * 1024 * 1024  // 10 MB — larger files cause timeout on transfer
 
 // ── Colours ──────────────────────────────────────────────────────────────────
 const STATUS_COLORS = {
@@ -21,6 +22,21 @@ const STATUS_COLORS = {
   'Closed':                 'bg-gray-100 text-gray-700',
 }
 const statusColor = (s) => STATUS_COLORS[s] || 'bg-gray-100 text-gray-700'
+
+const JIRA_STATUS_COLORS = {
+  'To Do':                 'bg-gray-100 text-gray-700',
+  'Open':                  'bg-gray-100 text-gray-700',
+  'In Progress':           'bg-blue-100 text-blue-700',
+  'In Review':             'bg-indigo-100 text-indigo-700',
+  'Ready for Testing':     'bg-purple-100 text-purple-700',
+  'Validation':            'bg-violet-100 text-violet-700',
+  'Ready For Deployment':  'bg-teal-100 text-teal-700',
+  'Monitoring':            'bg-cyan-100 text-cyan-700',
+  'Done':                  'bg-green-100 text-green-700',
+  'Reopened':              'bg-orange-100 text-orange-700',
+  'Blocked':               'bg-red-100 text-red-700',
+}
+const jiraStatusColor = (s) => JIRA_STATUS_COLORS[s] || 'bg-gray-100 text-gray-600'
 
 const PRIORITY_COLORS = {
   'Critical':       'text-red-600 font-bold',
@@ -114,6 +130,97 @@ function TooltipCell({ text, className, children }) {
   )
 }
 
+// ── Jira Bug / Status / Fix Version cells (shared across all ticket tables) ───
+function JiraBugCells({ link, ticket, onCreateBug }) {
+  return (
+    <>
+      <td className="px-3 py-2 whitespace-nowrap">
+        {link ? (
+          <a href={link.jira_url} target="_blank" rel="noopener noreferrer"
+            className="text-indigo-600 font-mono hover:underline text-xs font-medium">{link.jira_key} ↗</a>
+        ) : (
+          <button onClick={() => onCreateBug(ticket)}
+            className="inline-flex items-center gap-1 text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded px-2 py-1 font-medium">
+            <Bug className="h-3 w-3" />Create
+          </button>
+        )}
+      </td>
+      <td className="px-3 py-2 whitespace-nowrap">
+        {link?.jira_status ? (
+          <span className={`px-1.5 py-0.5 rounded text-xs ${jiraStatusColor(link.jira_status)}`}>{link.jira_status}</span>
+        ) : (
+          <span className="text-gray-300">—</span>
+        )}
+      </td>
+      <td className="px-3 py-2 whitespace-nowrap text-gray-500">
+        {link?.jira_fix_versions?.length ? link.jira_fix_versions.join(', ') : <span className="text-gray-300">—</span>}
+      </td>
+    </>
+  )
+}
+
+// ── Sort + checkbox-filter table header (shared by all ticket tables) ────────
+function ColumnFilterMenu({ options, selected, onChange }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos] = useState(null)
+  const triggerRef = useRef(null)
+  const dropdownRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const h = (e) => {
+      if (triggerRef.current?.contains(e.target) || dropdownRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+
+  const isActive = selected.size > 0
+  const toggle = (val) => {
+    const next = new Set(selected)
+    if (next.has(val)) next.delete(val); else next.add(val)
+    onChange(next)
+  }
+
+  return (
+    <>
+      <button ref={triggerRef} type="button"
+        onClick={(e) => {
+          e.stopPropagation()
+          const r = triggerRef.current?.getBoundingClientRect()
+          if (r) setPos({ top: r.bottom + 4, left: r.left })
+          setOpen(o => !o)
+        }}
+        className={`p-0.5 rounded hover:bg-gray-200 ${isActive ? 'text-blue-600' : 'text-gray-300'}`}>
+        <Filter className="h-3 w-3" />
+      </button>
+      {open && pos && createPortal(
+        <div ref={dropdownRef} onClick={e => e.stopPropagation()}
+          className="fixed z-[9999] bg-white border border-gray-200 rounded-lg shadow-2xl min-w-[170px] max-h-64 overflow-y-auto py-1 normal-case font-normal"
+          style={{ top: pos.top, left: pos.left }}>
+          {isActive && (
+            <div onMouseDown={() => onChange(new Set())}
+              className="px-3 py-1.5 text-xs text-blue-600 hover:bg-gray-50 cursor-pointer border-b border-gray-100 font-medium">
+              Clear filter
+            </div>
+          )}
+          {options.map(opt => (
+            <label key={opt} onMouseDown={(e) => e.preventDefault()}
+              className="flex items-center gap-2 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50 cursor-pointer">
+              <input type="checkbox" className="h-3 w-3 text-blue-600 rounded"
+                checked={selected.has(opt)} onChange={() => toggle(opt)} />
+              {opt}
+            </label>
+          ))}
+          {options.length === 0 && <div className="px-3 py-1.5 text-xs text-gray-400">No values</div>}
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
 // ── Create Bug Modal ──────────────────────────────────────────────────────────
 function CreateBugModal({ ticket, onClose, onCreated }) {
   const [form, setForm] = useState({
@@ -122,7 +229,7 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
     severity: 'Medium', environments: '',
     found_in_version_id: '', epic_key: '', fix_version_id: '',
     priority_name: '', sprint_id: '', assignee_id: '',
-    attachments: [],
+    attachments: [], comment: '',
   })
   const [submitting, setSubmitting] = useState(false)
   const [aiGenerating, setAiGenerating] = useState(false)
@@ -154,7 +261,7 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
         ...f,
         summary:     f.summary     || detail.summary    || ticket.summary || '',
         description: f.description || detail.description || '',
-        attachments: detail.attachments || [],
+        attachments: (detail.attachments || []).filter(a => a.size <= MAX_ATT_BYTES),
       }))
     }
   }, [detail])
@@ -212,7 +319,8 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
         sprint_id: form.sprint_id ? Number(form.sprint_id) : null,
         assignee_id: form.assignee_id || null,
         attachments: form.attachments,
-      })
+        comment: form.comment || null,
+      }, { timeout: 300000 })
       setResult(res.data)
       onCreated?.(ticket.key, res.data)
     } catch (e) {
@@ -272,6 +380,33 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
               <p className="text-lg font-semibold text-gray-800">Bug created!</p>
               <a href={result.url} target="_blank" rel="noopener noreferrer"
                 className="text-blue-600 font-mono font-bold text-lg hover:underline">{result.key} ↗</a>
+
+              {result.attachment_results?.length > 0 && (
+                <div className="w-full max-w-sm text-left bg-gray-50 rounded-lg px-4 py-3 text-xs space-y-1">
+                  <p className="font-semibold text-gray-600 mb-1.5">Attachments</p>
+                  {result.attachment_results.map((r, i) => (
+                    <div key={i} className="flex items-center gap-1.5">
+                      {r.success
+                        ? <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                        : <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
+                      <span className="truncate text-gray-700">{r.name}</span>
+                      {!r.success && <span className="text-red-500 shrink-0">— failed</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {result.comment_result && (
+                <div className="w-full max-w-sm text-left bg-gray-50 rounded-lg px-4 py-3 text-xs flex items-center gap-1.5">
+                  {result.comment_result.success
+                    ? <CheckCircle className="h-3.5 w-3.5 text-green-500 shrink-0" />
+                    : <AlertCircle className="h-3.5 w-3.5 text-red-500 shrink-0" />}
+                  <span className="text-gray-700">
+                    {result.comment_result.success ? 'Comment posted' : 'Comment failed to post'}
+                  </span>
+                </div>
+              )}
+
               <button onClick={onClose} className="mt-2 px-4 py-1.5 text-sm border border-gray-300 rounded-lg hover:bg-gray-50">Close</button>
             </div>
           )}
@@ -453,19 +588,48 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
                 <div>
                   <label className="block text-xs font-semibold text-gray-600 mb-2">
                     <Paperclip className="h-3.5 w-3.5 inline mr-1" />Attachments from KONE
+                    <span className="font-normal text-gray-400 ml-1">— checked items will be copied to the TMT0 bug</span>
                   </label>
                   <div className="space-y-1.5">
-                    {detail.attachments.map(att => (
-                      <label key={att.id || att.name} className="flex items-center gap-2.5 cursor-pointer hover:bg-gray-50 rounded px-2 py-1">
-                        <input type="checkbox" className="h-3.5 w-3.5 text-blue-600 rounded"
-                          checked={isAtt(att)} onChange={() => toggleAtt(att)} />
-                        <span className="text-sm text-gray-700">{att.name}</span>
-                        {att.size > 0 && <span className="text-xs text-gray-400">({(att.size / 1024).toFixed(0)} KB)</span>}
-                      </label>
-                    ))}
+                    {detail.attachments.map(att => {
+                      const proxyUrl = `${API}/api/kone/ticket/${ticket.key}/attachment/${att.id}`
+                      const isImage = (att.content_type || '').startsWith('image/')
+                      const tooBig = att.size > MAX_ATT_BYTES
+                      return (
+                        <div key={att.id || att.name}
+                          className="flex items-center gap-2.5 hover:bg-gray-50 rounded px-2 py-1">
+                          <label className={`flex items-center gap-2.5 cursor-pointer flex-1 min-w-0 ${tooBig ? 'opacity-60' : ''}`}>
+                            <input type="checkbox" className="h-3.5 w-3.5 text-blue-600 rounded shrink-0"
+                              checked={isAtt(att)} onChange={() => toggleAtt(att)} />
+                            {isImage ? (
+                              <img src={proxyUrl} alt={att.name}
+                                className="h-10 w-10 rounded object-cover border border-gray-200 shrink-0" />
+                            ) : (
+                              <Paperclip className="h-4 w-4 text-gray-400 shrink-0" />
+                            )}
+                            <span className="text-sm text-gray-700 truncate">{att.name}</span>
+                            {att.size > 0 && (
+                              <span className={`text-xs shrink-0 ${tooBig ? 'text-red-500 font-medium' : 'text-gray-400'}`}>
+                                ({att.size > 1024 * 1024 ? `${(att.size / (1024 * 1024)).toFixed(0)} MB` : `${(att.size / 1024).toFixed(0)} KB`})
+                                {tooBig && ' — too large'}
+                              </span>
+                            )}
+                          </label>
+                          <a href={proxyUrl} target="_blank" rel="noopener noreferrer"
+                            className="text-xs text-blue-600 hover:underline shrink-0">Preview ↗</a>
+                        </div>
+                      )
+                    })}
                   </div>
                 </div>
               )}
+
+              <F label="Comment">
+                <textarea rows={2}
+                  className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 focus:outline-none focus:border-blue-400 resize-y"
+                  value={form.comment} onChange={e => set('comment', e.target.value)}
+                  placeholder="Optional — posted as the first comment on the new TMT0 bug…" />
+              </F>
 
               {error && (
                 <div className="flex items-start gap-2 bg-red-50 border border-red-200 rounded-lg px-3 py-2 text-sm text-red-700">
@@ -593,7 +757,7 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
           <table className="w-full text-xs">
             <thead className="bg-gray-50">
               <tr>
-                {['Key','Summary','Status','Cliente','Cuenta','Producto','Assignee','Days Open','Jira Bug'].map(h => (
+                {['Key','Summary','Status','Cliente','Cuenta','Producto','Assignee','Days Open','Jira Bug','Jira Status','Fix Version'].map(h => (
                   <th key={h} className="px-3 py-2 text-left text-gray-600 font-medium whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -620,22 +784,12 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
                     <td className="px-3 py-2 text-center">
                       <span className="text-blue-600 font-semibold">{t.days_open}d</span>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      {link ? (
-                        <a href={link.jira_url} target="_blank" rel="noopener noreferrer"
-                          className="text-indigo-600 font-mono hover:underline text-xs font-medium">{link.jira_key} ↗</a>
-                      ) : (
-                        <button onClick={() => onCreateBug(t)}
-                          className="inline-flex items-center gap-1 text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded px-2 py-1 font-medium">
-                          <Bug className="h-3 w-3" />Create
-                        </button>
-                      )}
-                    </td>
+                    <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
                   </tr>
                 )
               })}
               {recentTickets.length === 0 && (
-                <tr><td colSpan={9} className="text-center py-8 text-gray-400">No tickets in last {days} day{days !== 1 ? 's' : ''}</td></tr>
+                <tr><td colSpan={11} className="text-center py-8 text-gray-400">No tickets in last {days} day{days !== 1 ? 's' : ''}</td></tr>
               )}
             </tbody>
           </table>
@@ -654,7 +808,7 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
             <table className="w-full text-xs">
               <thead className="bg-red-50">
                 <tr>
-                  {['Key','Summary','Days Open','Status','Cliente','Cuenta','Producto','Assignee','Jira Bug'].map(h => (
+                  {['Key','Summary','Days Open','Status','Cliente','Cuenta','Producto','Assignee','Jira Bug','Jira Status','Fix Version'].map(h => (
                     <th key={h} className="px-3 py-2 text-left text-red-700 font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -681,17 +835,7 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
                       <td className="px-3 py-2 whitespace-nowrap text-gray-500">{t.cuenta}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-gray-700">{t.producto}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-gray-500">{t.assignee || <span className="text-orange-400">Unassigned</span>}</td>
-                      <td className="px-3 py-2 whitespace-nowrap">
-                        {link ? (
-                          <a href={link.jira_url} target="_blank" rel="noopener noreferrer"
-                            className="text-indigo-600 font-mono hover:underline text-xs font-medium">{link.jira_key} ↗</a>
-                        ) : (
-                          <button onClick={() => onCreateBug(t)}
-                            className="inline-flex items-center gap-1 text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded px-2 py-1 font-medium">
-                            <Bug className="h-3 w-3" />Create
-                          </button>
-                        )}
-                      </td>
+                      <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
                     </tr>
                   )
                 })}
@@ -707,26 +851,67 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
 // ── By Cliente Tab ────────────────────────────────────────────────────────────
 function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
   const [selectedCliente, setSelectedCliente] = useState(null)
-  const [statusFilter, setStatusFilter] = useState('All')
+  const [statusFilter, setStatusFilter] = useState(new Set())
+  const [priorityFilter, setPriorityFilter] = useState(new Set())
+  const [cuentaFilter, setCuentaFilter] = useState(new Set())
+  const [productoFilter, setProductoFilter] = useState(new Set())
+  const [assigneeFilter, setAssigneeFilter] = useState(new Set())
+  const [jiraStatusFilter, setJiraStatusFilter] = useState(new Set())
+  const [fixVersionFilter, setFixVersionFilter] = useState(new Set())
   const [sortCol, setSortCol] = useState('created')
   const [sortDir, setSortDir] = useState('desc')
 
-  const allStatuses = useMemo(() => ['All', ...Array.from(new Set(tickets.map(t => t.status).filter(Boolean))).sort()], [tickets])
+  const jiraStatusOf = t => bugLinks?.[t.key]?.jira_status || ''
+  const fixVersionsOf = t => bugLinks?.[t.key]?.jira_fix_versions || []
+
+  const options = useMemo(() => ({
+    statuses:     [...new Set(tickets.map(t => t.status).filter(Boolean))].sort(),
+    priorities:   [...new Set(tickets.map(t => t.priority).filter(Boolean))].sort(),
+    cuentas:      [...new Set(tickets.map(t => t.cuenta).filter(Boolean))].sort(),
+    productos:    [...new Set(tickets.map(t => t.producto).filter(Boolean))].sort(),
+    assignees:    [...new Set(tickets.map(t => t.assignee).filter(Boolean))].sort(),
+    jiraStatuses: [...new Set(tickets.map(jiraStatusOf).filter(Boolean))].sort(),
+    fixVersions:  [...new Set(tickets.flatMap(fixVersionsOf))].sort(),
+  }), [tickets, bugLinks])
 
   const filteredTickets = useMemo(() => {
     let list = tickets
-    if (selectedCliente) list = list.filter(t => t.cliente === selectedCliente)
-    if (statusFilter !== 'All') list = list.filter(t => t.status === statusFilter)
+    if (selectedCliente)      list = list.filter(t => t.cliente === selectedCliente)
+    if (statusFilter.size)    list = list.filter(t => statusFilter.has(t.status))
+    if (priorityFilter.size)  list = list.filter(t => priorityFilter.has(t.priority))
+    if (cuentaFilter.size)    list = list.filter(t => cuentaFilter.has(t.cuenta))
+    if (productoFilter.size)  list = list.filter(t => productoFilter.has(t.producto))
+    if (assigneeFilter.size)  list = list.filter(t => assigneeFilter.has(t.assignee))
+    if (jiraStatusFilter.size) list = list.filter(t => jiraStatusFilter.has(jiraStatusOf(t)))
+    if (fixVersionFilter.size) list = list.filter(t => fixVersionsOf(t).some(v => fixVersionFilter.has(v)))
     return [...list].sort((a, b) => {
-      let av = a[sortCol] || '', bv = b[sortCol] || ''
+      let av, bv
+      if (sortCol === 'jira_key') { av = bugLinks?.[a.key]?.jira_key || ''; bv = bugLinks?.[b.key]?.jira_key || '' }
+      else if (sortCol === 'jira_status') { av = jiraStatusOf(a); bv = jiraStatusOf(b) }
+      else if (sortCol === 'fix_version') { av = fixVersionsOf(a).join(', '); bv = fixVersionsOf(b).join(', ') }
+      else { av = a[sortCol] || ''; bv = b[sortCol] || '' }
       if (sortCol === 'days_open') { av = Number(av); bv = Number(bv) }
       const cmp = typeof av === 'number' ? av - bv : av < bv ? -1 : av > bv ? 1 : 0
       return sortDir === 'asc' ? cmp : -cmp
     })
-  }, [tickets, selectedCliente, statusFilter, sortCol, sortDir])
+  }, [tickets, selectedCliente, statusFilter, priorityFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter, sortCol, sortDir, bugLinks])
 
   const toggleSort = col => { if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortCol(col); setSortDir('desc') } }
   const si = col => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
+  const th = (label, col, filterCfg) => (
+    <th className="text-left px-3 py-2 text-gray-600 font-medium whitespace-nowrap">
+      <span className="inline-flex items-center gap-1">
+        <span className="cursor-pointer hover:text-gray-900" onClick={() => toggleSort(col)}>{label}{si(col)}</span>
+        {filterCfg && <ColumnFilterMenu options={filterCfg.options} selected={filterCfg.selected} onChange={filterCfg.onChange} />}
+      </span>
+    </th>
+  )
+
+  const anyFilterActive = [statusFilter, priorityFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter].some(s => s.size > 0)
+  const clearAllFilters = () => {
+    setStatusFilter(new Set()); setPriorityFilter(new Set()); setCuentaFilter(new Set())
+    setProductoFilter(new Set()); setAssigneeFilter(new Set()); setJiraStatusFilter(new Set()); setFixVersionFilter(new Set())
+  }
 
   return (
     <div className="space-y-5">
@@ -765,23 +950,26 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
             {selectedCliente ? `${selectedCliente} — ` : 'All — '}{filteredTickets.length} ticket{filteredTickets.length !== 1 ? 's' : ''}
           </span>
           <div className="flex items-center gap-2">
-            <select className="text-xs border border-gray-200 rounded px-2 py-1" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
-              {allStatuses.map(s => <option key={s}>{s}</option>)}
-            </select>
-            {selectedCliente && <button onClick={() => setSelectedCliente(null)} className="text-xs text-blue-500 hover:underline">Clear</button>}
+            {anyFilterActive && <button onClick={clearAllFilters} className="text-xs text-blue-500 hover:underline">Clear filters</button>}
+            {selectedCliente && <button onClick={() => setSelectedCliente(null)} className="text-xs text-blue-500 hover:underline">Clear cliente</button>}
           </div>
         </div>
         <div className="overflow-x-auto">
           <table className="w-full text-xs">
             <thead className="bg-gray-50">
               <tr>
-                {[['key','Key'],['summary','Summary'],['status','Status'],['priority','Priority'],
-                  ['cliente','Cliente'],['cuenta','Cuenta'],['producto','Producto'],
-                  ['assignee','Assignee'],['days_open','Days Open']].map(([col,label]) => (
-                  <th key={col} className="text-left px-3 py-2 text-gray-600 font-medium cursor-pointer hover:text-gray-900 whitespace-nowrap"
-                    onClick={() => toggleSort(col)}>{label}{si(col)}</th>
-                ))}
-                <th className="px-3 py-2 text-gray-600 font-medium">Jira Bug</th>
+                {th('Key', 'key')}
+                {th('Summary', 'summary')}
+                {th('Status', 'status', { options: options.statuses, selected: statusFilter, onChange: setStatusFilter })}
+                {th('Priority', 'priority', { options: options.priorities, selected: priorityFilter, onChange: setPriorityFilter })}
+                {th('Cliente', 'cliente')}
+                {th('Cuenta', 'cuenta', { options: options.cuentas, selected: cuentaFilter, onChange: setCuentaFilter })}
+                {th('Producto', 'producto', { options: options.productos, selected: productoFilter, onChange: setProductoFilter })}
+                {th('Assignee', 'assignee', { options: options.assignees, selected: assigneeFilter, onChange: setAssigneeFilter })}
+                {th('Days Open', 'days_open')}
+                {th('Jira Bug', 'jira_key')}
+                {th('Jira Status', 'jira_status', { options: options.jiraStatuses, selected: jiraStatusFilter, onChange: setJiraStatusFilter })}
+                {th('Fix Version', 'fix_version', { options: options.fixVersions, selected: fixVersionFilter, onChange: setFixVersionFilter })}
               </tr>
             </thead>
             <tbody>
@@ -806,21 +994,11 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
                     <td className="px-3 py-2 text-center">
                       <span className={t.days_open > 14 ? 'text-red-600 font-semibold' : 'text-gray-500'}>{t.days_open}d</span>
                     </td>
-                    <td className="px-3 py-2 whitespace-nowrap">
-                      {link ? (
-                        <a href={link.jira_url} target="_blank" rel="noopener noreferrer"
-                          className="text-indigo-600 font-mono hover:underline text-xs font-medium">{link.jira_key} ↗</a>
-                      ) : (
-                        <button onClick={() => onCreateBug(t)}
-                          className="inline-flex items-center gap-1 text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded px-2 py-1 font-medium">
-                          <Bug className="h-3 w-3" />Create Bug
-                        </button>
-                      )}
-                    </td>
+                    <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
                   </tr>
                 )
               })}
-              {filteredTickets.length === 0 && <tr><td colSpan={10} className="text-center py-8 text-gray-400">No tickets</td></tr>}
+              {filteredTickets.length === 0 && <tr><td colSpan={12} className="text-center py-8 text-gray-400">No tickets</td></tr>}
             </tbody>
           </table>
         </div>
@@ -831,55 +1009,80 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
 
 // ── All Tickets Tab ───────────────────────────────────────────────────────────
 function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTranslating, translateOn }) {
-  const [search, setSearch]           = useState('')
-  const [statusFilter, setStatus]     = useState('All')
-  const [clienteFilter, setCliente]   = useState('All')
-  const [cuentaFilter, setCuenta]     = useState('All')
-  const [productoFilter, setProducto] = useState('All')
-  const [assigneeFilter, setAssignee] = useState('All')
+  const [search, setSearch]                 = useState('')
+  const [statusFilter, setStatusFilter]     = useState(new Set())
+  const [priorityFilter, setPriorityFilter] = useState(new Set())
+  const [clienteFilter, setClienteFilter]   = useState(new Set())
+  const [cuentaFilter, setCuentaFilter]     = useState(new Set())
+  const [productoFilter, setProductoFilter] = useState(new Set())
+  const [assigneeFilter, setAssigneeFilter] = useState(new Set())
+  const [jiraStatusFilter, setJiraStatusFilter] = useState(new Set())
+  const [fixVersionFilter, setFixVersionFilter] = useState(new Set())
   const [sortCol, setSortCol]         = useState('created')
   const [sortDir, setSortDir]         = useState('desc')
   const [page, setPage]               = useState(1)
   const PAGE_SIZE = 50
 
+  const jiraStatusOf = t => bugLinks?.[t.key]?.jira_status || ''
+  const fixVersionsOf = t => bugLinks?.[t.key]?.jira_fix_versions || []
+
   const options = useMemo(() => ({
-    statuses:  ['All', ...Array.from(new Set(tickets.map(t => t.status).filter(Boolean))).sort()],
-    clientes:  ['All', ...Array.from(new Set(tickets.map(t => t.cliente).filter(Boolean))).sort()],
-    cuentas:   ['All', ...Array.from(new Set(tickets.map(t => t.cuenta).filter(Boolean))).sort()],
-    productos: ['All', ...Array.from(new Set(tickets.map(t => t.producto).filter(Boolean))).sort()],
-    assignees: ['All', ...Array.from(new Set(tickets.map(t => t.assignee).filter(Boolean))).sort()],
-  }), [tickets])
+    statuses:     [...new Set(tickets.map(t => t.status).filter(Boolean))].sort(),
+    priorities:   [...new Set(tickets.map(t => t.priority).filter(Boolean))].sort(),
+    clientes:     [...new Set(tickets.map(t => t.cliente).filter(Boolean))].sort(),
+    cuentas:      [...new Set(tickets.map(t => t.cuenta).filter(Boolean))].sort(),
+    productos:    [...new Set(tickets.map(t => t.producto).filter(Boolean))].sort(),
+    assignees:    [...new Set(tickets.map(t => t.assignee).filter(Boolean))].sort(),
+    jiraStatuses: [...new Set(tickets.map(jiraStatusOf).filter(Boolean))].sort(),
+    fixVersions:  [...new Set(tickets.flatMap(fixVersionsOf))].sort(),
+  }), [tickets, bugLinks])
 
   const tr = (text) => (translateOn && translations[text]) ? translations[text] : text
 
   const filtered = useMemo(() => {
     let list = tickets
-    if (search)                list = list.filter(t => `${t.key} ${t.summary} ${t.assignee} ${t.reporter}`.toLowerCase().includes(search.toLowerCase()))
-    if (statusFilter !== 'All')    list = list.filter(t => t.status   === statusFilter)
-    if (clienteFilter !== 'All')   list = list.filter(t => t.cliente  === clienteFilter)
-    if (cuentaFilter !== 'All')    list = list.filter(t => t.cuenta   === cuentaFilter)
-    if (productoFilter !== 'All')  list = list.filter(t => t.producto === productoFilter)
-    if (assigneeFilter !== 'All')  list = list.filter(t => t.assignee === assigneeFilter)
+    if (search) list = list.filter(t => `${t.key} ${t.summary} ${t.assignee} ${t.reporter}`.toLowerCase().includes(search.toLowerCase()))
+    if (statusFilter.size)     list = list.filter(t => statusFilter.has(t.status))
+    if (priorityFilter.size)   list = list.filter(t => priorityFilter.has(t.priority))
+    if (clienteFilter.size)    list = list.filter(t => clienteFilter.has(t.cliente))
+    if (cuentaFilter.size)     list = list.filter(t => cuentaFilter.has(t.cuenta))
+    if (productoFilter.size)   list = list.filter(t => productoFilter.has(t.producto))
+    if (assigneeFilter.size)   list = list.filter(t => assigneeFilter.has(t.assignee))
+    if (jiraStatusFilter.size) list = list.filter(t => jiraStatusFilter.has(jiraStatusOf(t)))
+    if (fixVersionFilter.size) list = list.filter(t => fixVersionsOf(t).some(v => fixVersionFilter.has(v)))
     return [...list].sort((a, b) => {
-      let av = a[sortCol] || '', bv = b[sortCol] || ''
+      let av, bv
+      if (sortCol === 'jira_key') { av = bugLinks?.[a.key]?.jira_key || ''; bv = bugLinks?.[b.key]?.jira_key || '' }
+      else if (sortCol === 'jira_status') { av = jiraStatusOf(a); bv = jiraStatusOf(b) }
+      else if (sortCol === 'fix_version') { av = fixVersionsOf(a).join(', '); bv = fixVersionsOf(b).join(', ') }
+      else { av = a[sortCol] || ''; bv = b[sortCol] || '' }
       if (sortCol === 'days_open') { av = Number(av); bv = Number(bv) }
       const cmp = typeof av === 'number' ? av - bv : av < bv ? -1 : av > bv ? 1 : 0
       return sortDir === 'asc' ? cmp : -cmp
     })
-  }, [tickets, search, statusFilter, clienteFilter, cuentaFilter, productoFilter, assigneeFilter, sortCol, sortDir])
+  }, [tickets, search, statusFilter, priorityFilter, clienteFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter, sortCol, sortDir, bugLinks])
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
 
   const toggleSort = col => { if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortCol(col); setSortDir('desc') }; setPage(1) }
   const si = col => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
-
-  const Sel = ({ label, value, onChange, options: opts }) => (
-    <select className="text-xs border border-gray-200 rounded px-2 py-1" value={value}
-      onChange={e => { onChange(e.target.value); setPage(1) }} title={label}>
-      {opts.map(o => <option key={o}>{o}</option>)}
-    </select>
+  const wrapFilter = (setter) => (next) => { setter(next); setPage(1) }
+  const th = (label, col, filterCfg) => (
+    <th className="text-left px-3 py-2 text-gray-600 font-medium whitespace-nowrap">
+      <span className="inline-flex items-center gap-1">
+        <span className="cursor-pointer hover:text-gray-900" onClick={() => toggleSort(col)}>{label}{si(col)}</span>
+        {filterCfg && <ColumnFilterMenu options={filterCfg.options} selected={filterCfg.selected} onChange={wrapFilter(filterCfg.onChange)} />}
+      </span>
+    </th>
   )
+
+  const anyFilterActive = [statusFilter, priorityFilter, clienteFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter].some(s => s.size > 0)
+  const clearAllFilters = () => {
+    setStatusFilter(new Set()); setPriorityFilter(new Set()); setClienteFilter(new Set()); setCuentaFilter(new Set())
+    setProductoFilter(new Set()); setAssigneeFilter(new Set()); setJiraStatusFilter(new Set()); setFixVersionFilter(new Set())
+    setPage(1)
+  }
 
   return (
     <div className="bg-white rounded-xl shadow-sm border border-gray-200">
@@ -887,11 +1090,7 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
         <input type="text" placeholder="Search key / summary / assignee…" value={search}
           onChange={e => { setSearch(e.target.value); setPage(1) }}
           className="text-xs border border-gray-200 rounded px-2 py-1 w-52" />
-        <Sel label="Status"   value={statusFilter}   onChange={setStatus}   options={options.statuses} />
-        <Sel label="Cliente"  value={clienteFilter}  onChange={setCliente}  options={options.clientes} />
-        <Sel label="Cuenta"   value={cuentaFilter}   onChange={setCuenta}   options={options.cuentas} />
-        <Sel label="Producto" value={productoFilter} onChange={setProducto} options={options.productos} />
-        <Sel label="Assignee" value={assigneeFilter} onChange={setAssignee} options={options.assignees} />
+        {anyFilterActive && <button onClick={clearAllFilters} className="text-xs text-blue-500 hover:underline">Clear filters</button>}
         {isTranslating && <Loader2 className="h-3.5 w-3.5 animate-spin text-violet-500" />}
         <span className="ml-auto text-xs text-gray-500">{filtered.length} tickets</span>
       </div>
@@ -899,15 +1098,23 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
         <table className="w-full text-xs">
           <thead className="bg-gray-50">
             <tr>
-              {[['key','Key'],['summary','Summary'],['status','Status'],['priority','Priority'],
-                ['cliente','Cliente'],['cliente_site','Site'],['cuenta','Cuenta'],
-                ['producto','Producto'],['modulo','Módulo'],['urgency','Urgency'],
-                ['assignee','Assignee'],['reporter','Reporter'],['days_open','Days Open'],['created','Created']
-              ].map(([col,label]) => (
-                <th key={col} className="text-left px-3 py-2 text-gray-600 font-medium cursor-pointer hover:text-gray-900 whitespace-nowrap"
-                  onClick={() => toggleSort(col)}>{label}{si(col)}</th>
-              ))}
-              <th className="px-3 py-2 text-gray-600 font-medium whitespace-nowrap">Jira Bug</th>
+              {th('Key', 'key')}
+              {th('Summary', 'summary')}
+              {th('Status', 'status', { options: options.statuses, selected: statusFilter, onChange: setStatusFilter })}
+              {th('Priority', 'priority', { options: options.priorities, selected: priorityFilter, onChange: setPriorityFilter })}
+              {th('Cliente', 'cliente', { options: options.clientes, selected: clienteFilter, onChange: setClienteFilter })}
+              {th('Site', 'cliente_site')}
+              {th('Cuenta', 'cuenta', { options: options.cuentas, selected: cuentaFilter, onChange: setCuentaFilter })}
+              {th('Producto', 'producto', { options: options.productos, selected: productoFilter, onChange: setProductoFilter })}
+              {th('Módulo', 'modulo')}
+              {th('Urgency', 'urgency')}
+              {th('Assignee', 'assignee', { options: options.assignees, selected: assigneeFilter, onChange: setAssigneeFilter })}
+              {th('Reporter', 'reporter')}
+              {th('Days Open', 'days_open')}
+              {th('Created', 'created')}
+              {th('Jira Bug', 'jira_key')}
+              {th('Jira Status', 'jira_status', { options: options.jiraStatuses, selected: jiraStatusFilter, onChange: setJiraStatusFilter })}
+              {th('Fix Version', 'fix_version', { options: options.fixVersions, selected: fixVersionFilter, onChange: setFixVersionFilter })}
             </tr>
           </thead>
           <tbody>
@@ -941,21 +1148,11 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
                     <span className={t.days_open > 14 ? 'text-red-600 font-semibold' : 'text-gray-500'}>{t.days_open}d</span>
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-500">{t.created ? t.created.slice(0,10) : ''}</td>
-                  <td className="px-3 py-2 whitespace-nowrap">
-                    {link ? (
-                      <a href={link.jira_url} target="_blank" rel="noopener noreferrer"
-                        className="text-indigo-600 font-mono hover:underline text-xs font-medium">{link.jira_key} ↗</a>
-                    ) : (
-                      <button onClick={() => onCreateBug(t)}
-                        className="inline-flex items-center gap-1 text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded px-2 py-1 font-medium">
-                        <Bug className="h-3 w-3" />Create Bug
-                      </button>
-                    )}
-                  </td>
+                  <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
                 </tr>
               )
             })}
-            {paged.length === 0 && <tr><td colSpan={15} className="text-center py-8 text-gray-400">No tickets match filters</td></tr>}
+            {paged.length === 0 && <tr><td colSpan={17} className="text-center py-8 text-gray-400">No tickets match filters</td></tr>}
           </tbody>
         </table>
       </div>
