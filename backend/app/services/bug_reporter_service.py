@@ -347,9 +347,11 @@ class BugReporterService:
             '  "severity": "one of: Critical, Highest, High, Medium, Low",\n'
             '  "priority": "one of: Highest, High, Medium, Low, Lowest",\n'
             '  "suggested_labels": ["label1", "label2"],\n'
-            '  "environments": ["Production"],\n'
+            '  "environments": ["Staging"],\n'
             '  "ai_confidence": "brief note on how confident the AI is and what info would improve the report"\n'
-            "}"
+            "}\n\n"
+            "IMPORTANT: the environments array must only contain values from this exact list: "
+            "Production, Staging, Development, QA, Demo — no other values, no spaces, no custom strings."
         )
 
         client = anthropic.AsyncAnthropic(api_key=self.settings.anthropic_api_key)
@@ -367,11 +369,18 @@ class BugReporterService:
             "summary": "", "description": "", "steps_to_reproduce": "",
             "actual_result": "", "expected_result": "",
             "severity": "Medium", "priority": "Medium",
-            "suggested_labels": [], "environments": ["Production"],
+            "suggested_labels": [], "environments": ["Staging"],
             "ai_confidence": "",
         }
         for k, v in defaults.items():
             result.setdefault(k, v)
+
+        # Sanitize environments — Jira Labels field rejects values with spaces.
+        # Only keep values from the known list; default to ["Staging"] if nothing valid.
+        _VALID_ENVS = {"Production", "Staging", "Development", "QA", "Demo"}
+        result["environments"] = [e for e in (result.get("environments") or []) if e in _VALID_ENVS]
+        if not result["environments"]:
+            result["environments"] = ["Staging"]
 
         return result
 
@@ -476,6 +485,10 @@ class BugReporterService:
         draft_id            = data.get("draft_id")
         product_name        = data.get("product_name", "")
 
+        # customfield_10600 is a Labels field — values cannot contain spaces
+        _VALID_ENVS = {"Production", "Staging", "Development", "QA", "Demo"}
+        safe_environments = [e for e in (environments or []) if e in _VALID_ENVS]
+
         fields: dict = {
             "project":             {"key": "TMT0"},
             "issuetype":           {"name": "Bug"},
@@ -485,7 +498,7 @@ class BugReporterService:
             "customfield_10598":   self._plain_adf(actual or " "),
             "customfield_10599":   self._plain_adf(expected or " "),
             "customfield_10597":   {"value": severity or "Medium"},
-            "customfield_10600":   environments or [],
+            "customfield_10600":   safe_environments,
         }
 
         if found_in_version_id:
