@@ -33,6 +33,24 @@ ALLOWED_EXTENSIONS = {".txt", ".md", ".csv", ".json", ".log", ".png", ".jpg", ".
 SEVERITY_OPTIONS = ["Critical", "Highest", "High", "Medium", "Low"]
 
 
+def _adf_to_text(adf, max_chars: int = 800) -> str:
+    """Extract plain text from Atlassian Document Format (ADF) or plain string."""
+    if not adf:
+        return ""
+    if isinstance(adf, str):
+        return adf[:max_chars]
+    parts: list[str] = []
+    def _walk(node):
+        if not isinstance(node, dict):
+            return
+        if node.get("type") == "text":
+            parts.append(node.get("text", ""))
+        for child in node.get("content") or []:
+            _walk(child)
+    _walk(adf)
+    return " ".join(p.strip() for p in parts if p.strip())[:max_chars]
+
+
 class BugReporterService:
 
     def __init__(self):
@@ -135,6 +153,13 @@ class BugReporterService:
         Fetch recent bugs under the given epic, summarise them with Claude.
         Returns a dict with ai_summary and a list of bugs found.
         """
+        # Fetch epic description so Claude knows what the feature does
+        epic_issue = await self.jira.get(f"/issue/{epic_key}?fields=summary,description,customfield_10011")
+        epic_fields = epic_issue.get("fields") or {}
+        epic_description = _adf_to_text(epic_fields.get("description"), max_chars=1000)
+        epic_name = (epic_fields.get("customfield_10011")
+                     or epic_fields.get("summary", epic_key))
+
         bugs = await self.jira.search_issues(
             f'project = TMT0 AND issuetype = Bug AND parent = "{epic_key}" ORDER BY created DESC',
             fields=["summary", "status", "description", "priority", "customfield_10597",
@@ -156,15 +181,22 @@ class BugReporterService:
                 "summary": f.get("summary", ""),
                 "status":  (f.get("status") or {}).get("name", ""),
                 "severity": ((f.get("customfield_10597") or {}).get("value") if f.get("customfield_10597") else None) or "",
+                "description": _adf_to_text(f.get("description"), max_chars=300),
                 "url": f"{self.settings.jira_base_url}/browse/{b['key']}",
             })
 
-        story_summaries = [
-            {"key": s["key"], "summary": (s.get("fields") or {}).get("summary", "")}
-            for s in stories
-        ]
+        story_summaries = []
+        for s in stories:
+            sf = s.get("fields") or {}
+            story_summaries.append({
+                "key":         s["key"],
+                "summary":     sf.get("summary", ""),
+                "description": _adf_to_text(sf.get("description"), max_chars=300),
+            })
 
-        ai_summary = await self._summarize_product_context(epic_key, bug_summaries, story_summaries)
+        ai_summary = await self._summarize_product_context(
+            epic_key, epic_name, epic_description, bug_summaries, story_summaries
+        )
 
         return {
             "epic_key":    epic_key,
@@ -177,6 +209,8 @@ class BugReporterService:
     async def _summarize_product_context(
         self,
         epic_key: str,
+        epic_name: str,
+        epic_description: str,
         bugs: list[dict],
         stories: list[dict],
     ) -> str:
@@ -185,22 +219,25 @@ class BugReporterService:
 
         bugs_text = "\n".join(
             f"- [{b['key']}] {b['summary']} (Status: {b['status']}, Severity: {b['severity']})"
+            + (f"\n  Description: {b['description']}" if b.get('description') else "")
             for b in bugs
         ) or "(none)"
         stories_text = "\n".join(
             f"- [{s['key']}] {s['summary']}"
+            + (f"\n  Description: {s['description']}" if s.get('description') else "")
             for s in stories
         ) or "(none)"
 
         prompt = (
-            f"You are a QA lead reviewing the Jira epic {epic_key}.\n\n"
-            f"EXISTING BUGS:\n{bugs_text}\n\n"
+            f"You are a QA lead reviewing the Jira epic {epic_key}: \"{epic_name}\".\n\n"
+            + (f"EPIC DESCRIPTION:\n{epic_description}\n\n" if epic_description else "")
+            + f"EXISTING BUGS:\n{bugs_text}\n\n"
             f"RELATED STORIES/TASKS:\n{stories_text}\n\n"
             "Write a brief 3-5 sentence summary of:\n"
             "1. What product/feature area this epic covers\n"
             "2. Common bug patterns or categories in this area\n"
             "3. What quality risks exist\n"
-            "Keep it under 120 words. Be concrete, not generic."
+            "Keep it under 150 words. Be concrete, not generic."
         )
 
         client = anthropic.AsyncAnthropic(api_key=self.settings.anthropic_api_key)
