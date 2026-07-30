@@ -244,8 +244,8 @@ class CreateBugService:
             # Other required fields
             "customfield_10597": {"value": severity or "Medium"},   # Severity
             "customfield_10600": environments or [],                 # Environments (labels)
-            # Zoho Desk Ticket link (rich-text textarea — needs ADF)
-            "customfield_10434": self._plain_adf(f"#{zoho_ticket_number} — {zoho_ticket_url}"),
+            # Zoho Desk Ticket link — clickable hyperlink in Jira
+            "customfield_10434": self._link_adf(f"#{zoho_ticket_number}", zoho_ticket_url),
         }
 
         if found_in_version_id:
@@ -306,6 +306,21 @@ class CreateBugService:
     # ------------------------------------------------------------------
     # ADF helpers
     # ------------------------------------------------------------------
+
+    def _link_adf(self, label: str, url: str) -> dict:
+        """ADF document with a single clickable hyperlink."""
+        return {
+            "version": 1,
+            "type": "doc",
+            "content": [{
+                "type": "paragraph",
+                "content": [{
+                    "type": "text",
+                    "text": label,
+                    "marks": [{"type": "link", "attrs": {"href": url}}],
+                }],
+            }],
+        }
 
     def _plain_adf(self, text: str) -> dict:
         """Wrap plain text in a minimal ADF document (single paragraph)."""
@@ -403,8 +418,9 @@ class CreateBugService:
 
             tmp_path = None
             try:
-                # Download to a temp file
-                async with httpx.AsyncClient(timeout=60) as dl:
+                # Download to a temp file. follow_redirects is required: Zoho's
+                # attachment href commonly redirects to signed file storage.
+                async with httpx.AsyncClient(timeout=60, follow_redirects=True) as dl:
                     resp = await dl.get(
                         href,
                         headers={"Authorization": f"Zoho-oauthtoken {self.zoho._access_token}"},

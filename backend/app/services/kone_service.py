@@ -220,13 +220,49 @@ class KoneService:
         }
 
     async def get_bug_links(self) -> dict[str, dict]:
-        """Return {kone_key: {jira_key, jira_url}} from DB."""
+        """Return {kone_key: {jira_key, jira_url, jira_status, jira_fix_versions}}.
+        The link itself comes from the local DB; status/fix version are pulled
+        live from Jira in a single batched query so they stay current."""
         from app.database.db import get_session_factory, KoneBugLinkORM
         from sqlalchemy import select
         factory = get_session_factory()
         async with factory() as session:
             rows = (await session.execute(select(KoneBugLinkORM))).scalars().all()
-        return {r.kone_key: {"jira_key": r.jira_key, "jira_url": r.jira_url} for r in rows}
+
+        links = {
+            r.kone_key: {
+                "jira_key": r.jira_key,
+                "jira_url": r.jira_url,
+                "jira_status": None,
+                "jira_fix_versions": [],
+            }
+            for r in rows
+        }
+
+        jira_keys = sorted({r.jira_key for r in rows if r.jira_key})
+        if jira_keys:
+            try:
+                jira = get_jira_client()
+                jql = f"key in ({','.join(jira_keys)})"
+                issues = await jira.search_issues(
+                    jql, fields=["status", "fixVersions"], max_total=len(jira_keys) + 10
+                )
+                by_key = {}
+                for issue in issues:
+                    f = issue.get("fields", {})
+                    by_key[issue.get("key")] = {
+                        "status": (f.get("status") or {}).get("name", ""),
+                        "fix_versions": [v.get("name") for v in (f.get("fixVersions") or []) if v.get("name")],
+                    }
+                for link in links.values():
+                    info = by_key.get(link["jira_key"])
+                    if info:
+                        link["jira_status"] = info["status"]
+                        link["jira_fix_versions"] = info["fix_versions"]
+            except Exception as e:
+                logger.warning(f"Could not enrich bug links with live Jira status: {e}")
+
+        return links
 
     async def save_bug_link(self, kone_key: str, jira_key: str, jira_url: str, summary: str = "") -> None:
         """Persist the KONE → TMT0 mapping."""
@@ -268,6 +304,7 @@ class KoneService:
         sprint_id: Optional[int],
         attachment_ids: list,
         assignee_id: Optional[str] = None,
+        comment: Optional[str] = None,
     ) -> dict:
         from app.services.create_bug_service import get_create_bug_service
         svc = get_create_bug_service()
@@ -284,7 +321,7 @@ class KoneService:
             "customfield_10599": svc._plain_adf(expected_result or " "),
             "customfield_10597": {"value": severity or "Medium"},
             "customfield_10600": environments or [],
-            "customfield_10434": svc._plain_adf(f"{kone_key} — {kone_url}"),
+            "customfield_10434": svc._link_adf(kone_key, kone_url),
         }
 
         if found_in_version_id:
@@ -307,8 +344,19 @@ class KoneService:
         issue_url = f"{settings.jira_base_url.rstrip('/')}/browse/{issue_key}"
 
         # Transfer attachments from KONE → TMT0
+        attachment_results: list[dict] = []
         if attachment_ids and issue_key:
-            await self._transfer_kone_attachments(attachment_ids, issue_key)
+            attachment_results = await self._transfer_kone_attachments(attachment_ids, issue_key)
+
+        # Add the initial comment, if any
+        comment_result = None
+        if comment and comment.strip() and issue_key:
+            try:
+                await jira.post(f"/issue/{issue_key}/comment", {"body": svc._plain_adf(comment)})
+                comment_result = {"success": True, "error": None}
+            except Exception as e:
+                logger.warning(f"Failed to add comment to {issue_key}: {e}")
+                comment_result = {"success": False, "error": str(e)}
 
         # Persist link
         await self.save_bug_link(kone_key, issue_key, issue_url, summary)
@@ -317,25 +365,32 @@ class KoneService:
             "key": issue_key,
             "url": issue_url,
             "id":  created.get("id"),
+            "attachment_results": attachment_results,
+            "comment_result": comment_result,
         }
 
-    async def _transfer_kone_attachments(self, attachment_ids: list, jira_issue_key: str) -> None:
-        """Download attachments from KONE Jira and upload to TMT0."""
+    async def _transfer_kone_attachments(self, attachment_ids: list, jira_issue_key: str) -> list[dict]:
+        """Download attachments from KONE Jira and upload to TMT0. Returns per-file results."""
         settings = get_settings()
         creds = f"{settings.kone_jira_email}:{settings.kone_jira_token}"
         auth_header = f"Basic {base64.b64encode(creds.encode()).decode()}"
 
         jira = get_jira_client()
+        results: list[dict] = []
 
         for att in attachment_ids:
             href = att.get("href", "")
             name = att.get("name", "attachment")
             ctype = att.get("content_type", "application/octet-stream")
             if not href:
+                results.append({"name": name, "success": False, "error": "No download URL for this attachment"})
                 continue
             tmp_path = None
             try:
-                async with httpx.AsyncClient(timeout=60) as dl:
+                # Jira Cloud's attachment content URL responds with a redirect to
+                # the actual file storage — without follow_redirects this silently
+                # downloads the redirect body instead of the file.
+                async with httpx.AsyncClient(timeout=60, follow_redirects=True) as dl:
                     resp = await dl.get(href, headers={"Authorization": auth_header})
                     resp.raise_for_status()
                     data = resp.content
@@ -345,15 +400,35 @@ class KoneService:
                     tmp_path = tmp.name
                 with open(tmp_path, "rb") as f:
                     await jira.upload_attachment(jira_issue_key, name, ctype, f.read())
-                logger.info(f"Uploaded KONE attachment {name} to {jira_issue_key}")
+                logger.info(f"Uploaded KONE attachment {name} ({len(data)} bytes) to {jira_issue_key}")
+                results.append({"name": name, "success": True, "error": None})
             except Exception as e:
                 logger.warning(f"Failed to transfer KONE attachment {name}: {e}")
+                results.append({"name": name, "success": False, "error": str(e)})
             finally:
                 if tmp_path and os.path.exists(tmp_path):
                     try:
                         os.remove(tmp_path)
                     except Exception:
                         pass
+
+        return results
+
+    async def get_attachment_bytes(self, key: str, attachment_id: str) -> tuple[bytes, str, str]:
+        """Fetch one attachment's raw bytes + content-type + filename for preview/proxy."""
+        detail = await self.get_ticket_detail(key)
+        att = next((a for a in detail.get("attachments", []) if str(a.get("id")) == str(attachment_id)), None)
+        if not att or not att.get("href"):
+            raise ValueError(f"Attachment {attachment_id} not found on {key}")
+
+        settings = get_settings()
+        creds = f"{settings.kone_jira_email}:{settings.kone_jira_token}"
+        auth_header = f"Basic {base64.b64encode(creds.encode()).decode()}"
+
+        async with httpx.AsyncClient(timeout=30, follow_redirects=True) as dl:
+            resp = await dl.get(att["href"], headers={"Authorization": auth_header})
+            resp.raise_for_status()
+            return resp.content, att.get("content_type", "application/octet-stream"), att.get("name", "attachment")
 
     async def ai_generate_bug_fields(self, summary: str, description: str) -> dict:
         from app.services.create_bug_service import get_create_bug_service
