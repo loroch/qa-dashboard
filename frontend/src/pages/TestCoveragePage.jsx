@@ -6,7 +6,7 @@ import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import {
   ExternalLink, ChevronDown, ChevronRight, Search,
   Link2, CheckCircle2, XCircle, AlertTriangle, FlaskConical,
-  X, Check
+  X, Check, Wand2, Sparkles, FileText, BookOpen, Figma
 } from 'lucide-react'
 import axios from 'axios'
 
@@ -18,6 +18,8 @@ const getUnlinked    = ()        => api.get('/coverage/unlinked-tests').then(r =
 const searchStories  = (q)       => api.get(`/coverage/search-stories?q=${encodeURIComponent(q)}`).then(r => r.data)
 const assignTest          = (body) => api.post('/coverage/assign-test', body).then(r => r.data)
 const getRegressionTests  = ()     => api.get('/coverage/regression-tests').then(r => r.data)
+const generateStoryTests  = (body) => api.post('/coverage/generate-story-tests', body, { timeout: 120000 }).then(r => r.data)
+const createStoryTests    = (body) => api.post('/coverage/create-story-tests', body).then(r => r.data)
 
 const TABS = ['By Version', 'Unlinked Tests']
 
@@ -215,8 +217,244 @@ function AssignDialog({ testKey, versions, onClose, onSuccess }) {
   )
 }
 
+// ── Generate Test Modal ────────────────────────────────────────────────────────
+function GenerateTestModal({ storyKey, storySummary, version, onClose, onCreated }) {
+  const queryClient = useQueryClient()
+  const [mode, setMode] = useState('basic')
+  const [phase, setPhase] = useState('idle')   // idle | generating | review | creating | done
+  const [testCases, setTestCases] = useState([])
+  const [selected, setSelected] = useState(new Set())
+  const [created, setCreated] = useState([])
+  const [error, setError] = useState(null)
+  const [parentKey, setParentKey] = useState('')
+
+  const generate = async () => {
+    setPhase('generating')
+    setError(null)
+    try {
+      const result = await generateStoryTests({ story_key: storyKey, mode })
+      const tcs = result.test_cases || []
+      setTestCases(tcs)
+      setParentKey(result.parent_key || '')
+      setSelected(new Set(tcs.map((_, i) => i)))
+      setPhase('review')
+    } catch (e) {
+      setError(e.response?.data?.detail || e.message || 'Generation failed')
+      setPhase('idle')
+    }
+  }
+
+  const createAll = async () => {
+    const toCreate = testCases.filter((_, i) => selected.has(i))
+    if (!toCreate.length) return
+    setPhase('creating')
+    setError(null)
+    try {
+      const result = await createStoryTests({ story_key: storyKey, test_cases: toCreate, fix_version: version })
+      setCreated(result.created || [])
+      setPhase('done')
+      queryClient.invalidateQueries(['coverage-version'])
+      onCreated?.()
+    } catch (e) {
+      setError(e.response?.data?.detail || e.message || 'Create failed')
+      setPhase('review')
+    }
+  }
+
+  const toggleAll = () => {
+    if (selected.size === testCases.length) setSelected(new Set())
+    else setSelected(new Set(testCases.map((_, i) => i)))
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] flex flex-col">
+
+        {/* Header */}
+        <div className="flex items-start justify-between p-5 border-b">
+          <div className="flex-1 min-w-0 pr-4">
+            <div className="flex items-center gap-2 mb-1">
+              <Wand2 className="h-5 w-5 text-purple-600 flex-shrink-0" />
+              <h3 className="font-semibold text-gray-800 text-base">Generate Test Cases</h3>
+            </div>
+            <p className="text-xs text-gray-500 font-mono">{storyKey}</p>
+            <p className="text-sm text-gray-700 mt-0.5 line-clamp-2">{storySummary}</p>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 flex-shrink-0">
+            <X className="h-5 w-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto">
+
+          {/* ── Idle: configure ── */}
+          {phase === 'idle' && (
+            <div className="p-5 space-y-5">
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Sources</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { icon: FileText, label: 'Jira Story', color: 'bg-blue-50 text-blue-700 border-blue-200' },
+                    { icon: FileText, label: 'Epic Context', color: 'bg-indigo-50 text-indigo-700 border-indigo-200' },
+                    { icon: BookOpen, label: 'Confluence', color: 'bg-teal-50 text-teal-700 border-teal-200' },
+                    { icon: Figma,    label: 'Figma',      color: 'bg-pink-50 text-pink-700 border-pink-200' },
+                  ].map(({ icon: Icon, label, color }) => (
+                    <span key={label} className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border ${color}`}>
+                      <Icon className="h-3.5 w-3.5" /> {label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Mode</p>
+                <div className="flex gap-2">
+                  {[
+                    { value: 'basic',    label: 'Basic',    sub: '3–5 tests · core paths' },
+                    { value: 'extended', label: 'Extended', sub: '6–10 tests · full coverage' },
+                  ].map(m => (
+                    <button key={m.value} onClick={() => setMode(m.value)}
+                      className={`flex-1 text-left px-4 py-3 rounded-xl border-2 transition-all ${
+                        mode === m.value
+                          ? 'border-purple-500 bg-purple-50'
+                          : 'border-gray-200 hover:border-gray-300'
+                      }`}>
+                      <p className={`text-sm font-semibold ${mode === m.value ? 'text-purple-700' : 'text-gray-700'}`}>{m.label}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{m.sub}</p>
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">{error}</p>}
+            </div>
+          )}
+
+          {/* ── Generating ── */}
+          {phase === 'generating' && (
+            <div className="flex flex-col items-center justify-center py-16 gap-4">
+              <div className="relative">
+                <div className="h-12 w-12 border-4 border-purple-100 border-t-purple-600 rounded-full animate-spin" />
+                <Sparkles className="h-5 w-5 text-purple-500 absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2" />
+              </div>
+              <div className="text-center">
+                <p className="font-medium text-gray-700">Generating test cases…</p>
+                <p className="text-sm text-gray-400 mt-1">Reading Jira story, epic, Confluence & Figma</p>
+              </div>
+            </div>
+          )}
+
+          {/* ── Review ── */}
+          {phase === 'review' && (
+            <div className="p-5 space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-gray-700">{testCases.length} test case{testCases.length !== 1 ? 's' : ''} generated</p>
+                <button onClick={toggleAll} className="text-xs text-purple-600 hover:text-purple-800 font-medium">
+                  {selected.size === testCases.length ? 'Deselect all' : 'Select all'}
+                </button>
+              </div>
+              {testCases.map((tc, i) => (
+                <div key={i}
+                  onClick={() => setSelected(s => { const n = new Set(s); n.has(i) ? n.delete(i) : n.add(i); return n })}
+                  className={`border-2 rounded-xl p-4 cursor-pointer transition-all ${
+                    selected.has(i) ? 'border-purple-400 bg-purple-50' : 'border-gray-200 bg-white hover:border-gray-300'
+                  }`}>
+                  <div className="flex items-start gap-3">
+                    <div className={`mt-0.5 h-4 w-4 flex-shrink-0 rounded border-2 flex items-center justify-center transition-colors ${
+                      selected.has(i) ? 'bg-purple-500 border-purple-500' : 'border-gray-300'
+                    }`}>
+                      {selected.has(i) && <Check className="h-2.5 w-2.5 text-white" />}
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold text-gray-800">{tc.summary}</p>
+                      {tc.description && <p className="text-xs text-gray-500 mt-0.5">{tc.description}</p>}
+                      {tc.steps?.length > 0 && (
+                        <ol className="mt-2 space-y-0.5">
+                          {tc.steps.slice(0, 3).map((step, si) => (
+                            <li key={si} className="text-xs text-gray-600 flex gap-1.5">
+                              <span className="text-gray-400 flex-shrink-0">{si + 1}.</span>
+                              <span className="line-clamp-1">{step}</span>
+                            </li>
+                          ))}
+                          {tc.steps.length > 3 && <li className="text-xs text-gray-400">+{tc.steps.length - 3} more steps…</li>}
+                        </ol>
+                      )}
+                      {tc.expected && (
+                        <p className="text-xs text-green-600 mt-1.5">
+                          <span className="font-medium">Expected: </span>{tc.expected}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ))}
+              {error && <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">{error}</p>}
+            </div>
+          )}
+
+          {/* ── Creating ── */}
+          {phase === 'creating' && (
+            <div className="flex flex-col items-center justify-center py-16 gap-4">
+              <div className="h-10 w-10 border-4 border-purple-100 border-t-purple-600 rounded-full animate-spin" />
+              <p className="font-medium text-gray-700">Creating test cases in Jira…</p>
+            </div>
+          )}
+
+          {/* ── Done ── */}
+          {phase === 'done' && (
+            <div className="p-5 space-y-3">
+              <div className="flex items-center gap-2 text-green-700 bg-green-50 border border-green-200 rounded-xl px-4 py-3">
+                <CheckCircle2 className="h-5 w-5 flex-shrink-0" />
+                <p className="text-sm font-medium">{created.filter(c => c.ok).length} test case{created.filter(c => c.ok).length !== 1 ? 's' : ''} created and linked to {storyKey}</p>
+              </div>
+              {created.map((c, i) => (
+                <div key={i} className={`flex items-center gap-3 px-4 py-2.5 rounded-lg border ${c.ok ? 'border-green-100 bg-green-50' : 'border-red-100 bg-red-50'}`}>
+                  {c.ok
+                    ? <CheckCircle2 className="h-4 w-4 text-green-500 flex-shrink-0" />
+                    : <XCircle className="h-4 w-4 text-red-400 flex-shrink-0" />}
+                  {c.ok && c.url
+                    ? <a href={c.url} target="_blank" rel="noopener noreferrer"
+                        className="text-xs font-mono text-purple-600 hover:underline flex items-center gap-1">
+                        {c.key} <ExternalLink className="h-3 w-3" />
+                      </a>
+                    : <span className="text-xs font-mono text-gray-500">{c.key || '—'}</span>}
+                  <span className="text-xs text-gray-600 flex-1 line-clamp-1">{c.summary}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="border-t p-4 flex items-center justify-between gap-3 bg-gray-50 rounded-b-2xl">
+          <button onClick={onClose} className="btn-secondary px-4 py-2 text-sm">
+            {phase === 'done' ? 'Close' : 'Cancel'}
+          </button>
+          <div className="flex gap-2">
+            {phase === 'idle' && (
+              <button onClick={generate} className="btn-primary px-5 py-2 text-sm flex items-center gap-2">
+                <Wand2 className="h-4 w-4" /> Generate
+              </button>
+            )}
+            {phase === 'review' && (
+              <>
+                <button onClick={() => { setPhase('idle'); setTestCases([]) }}
+                  className="btn-secondary px-4 py-2 text-sm">Regenerate</button>
+                <button onClick={createAll} disabled={!selected.size}
+                  className="btn-primary px-5 py-2 text-sm flex items-center gap-2 disabled:opacity-50">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Create {selected.size > 0 ? selected.size : ''} in Jira
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── Epic Row ───────────────────────────────────────────────────────────────────
-function EpicRow({ epic, search }) {
+function EpicRow({ epic, search, onGenerate }) {
   const [expanded, setExpanded] = useState(true)
 
   const visibleStories = useMemo(() => {
@@ -297,9 +535,18 @@ function EpicRow({ epic, search }) {
                         <span className="text-xs text-gray-400">test{story.test_count > 1 ? 's' : ''}</span>
                       </div>
                     ) : (
-                      <div className="flex items-center gap-1.5">
+                      <div className="flex items-center gap-1.5 flex-wrap">
                         <XCircle className="h-4 w-4 text-red-400" />
                         <span className="text-xs text-red-500 font-medium">No tests</span>
+                        {onGenerate && (
+                          <button
+                            onClick={e => { e.stopPropagation(); onGenerate({ storyKey: story.key, storySummary: story.summary }) }}
+                            className="inline-flex items-center gap-1 text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium px-2 py-0.5 rounded-full transition-colors"
+                            title="Generate test cases with AI"
+                          >
+                            <Wand2 className="h-3 w-3" /> Generate
+                          </button>
+                        )}
                       </div>
                     )}
                   </td>
@@ -503,6 +750,7 @@ export default function TestCoveragePage() {
   const [storySearch, setStorySearch] = useState('')
   const [assignTarget, setAssignTarget] = useState(null)
   const [assignSuccess, setAssignSuccess] = useState(null)
+  const [generateTarget, setGenerateTarget] = useState(null)
   const [unlinkedSearch, setUnlinkedSearch] = useState('')
 
   const versionsQuery = useQuery({
@@ -680,7 +928,7 @@ export default function TestCoveragePage() {
                   {/* Epic/Story list */}
                   <div className="space-y-3">
                     {filteredEpics.map(epic => (
-                      <EpicRow key={epic.epic_key} epic={epic} search={storySearch} />
+                      <EpicRow key={epic.epic_key} epic={epic} search={storySearch} onGenerate={setGenerateTarget} />
                     ))}
                     {filteredEpics.length === 0 && (
                       <p className="text-center py-8 text-gray-400 text-sm">No results found.</p>
@@ -794,6 +1042,17 @@ export default function TestCoveragePage() {
           versions={versionsQuery.data || []}
           onClose={() => setAssignTarget(null)}
           onSuccess={(data) => { setAssignTarget(null); setAssignSuccess(data) }}
+        />
+      )}
+
+      {/* Generate Test Cases Modal */}
+      {generateTarget && (
+        <GenerateTestModal
+          storyKey={generateTarget.storyKey}
+          storySummary={generateTarget.storySummary}
+          version={selectedVersion}
+          onClose={() => setGenerateTarget(null)}
+          onCreated={() => { setGenerateTarget(null) }}
         />
       )}
     </div>
