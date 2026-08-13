@@ -17,7 +17,7 @@ const getByVersion   = (v)       => api.get(`/coverage/by-version?version=${enco
 const getUnlinked    = ()        => api.get('/coverage/unlinked-tests').then(r => r.data)
 const searchStories  = (q)       => api.get(`/coverage/search-stories?q=${encodeURIComponent(q)}`).then(r => r.data)
 const assignTest          = (body) => api.post('/coverage/assign-test', body).then(r => r.data)
-const getRegressionTests  = (v)    => api.get(`/coverage/regression-tests?version=${encodeURIComponent(v)}`).then(r => r.data)
+const getRegressionTests  = ()     => api.get('/coverage/regression-tests').then(r => r.data)
 
 const TABS = ['By Version', 'Unlinked Tests']
 
@@ -317,7 +317,7 @@ function EpicRow({ epic, search }) {
 }
 
 // ── Regression Tests Section ───────────────────────────────────────────────────
-function RegressionTestsSection({ version, query }) {
+function RegressionTestsSection({ query }) {
   const [expanded, setExpanded] = useState(false)
   const data = query.data
 
@@ -333,7 +333,7 @@ function RegressionTestsSection({ version, query }) {
         <FlaskConical className="h-4 w-4 text-purple-400 flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <span className="text-sm font-semibold text-purple-800">Regression Tests</span>
-          <span className="ml-2 text-xs text-purple-500">All tests tagged for {version}</span>
+          <span className="ml-2 text-xs text-purple-500">label: REGRESSION_TEST · issuetype: Test</span>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
           {query.isLoading && <span className="text-xs text-gray-400">Loading…</span>}
@@ -359,7 +359,7 @@ function RegressionTestsSection({ version, query }) {
             <p className="text-sm text-red-500 text-center py-6">{query.error?.message}</p>
           )}
           {data && data.tests.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-8">No tests tagged for {version}.</p>
+            <p className="text-sm text-gray-400 text-center py-8">No tests with label REGRESSION_TEST found.</p>
           )}
           {data && data.tests.length > 0 && (
             <div className="overflow-x-auto">
@@ -438,15 +438,16 @@ export default function TestCoveragePage() {
   })
 
   const regressionQuery = useQuery({
-    queryKey: ['coverage-regression', selectedVersion],
-    queryFn: () => getRegressionTests(selectedVersion),
+    queryKey: ['coverage-regression'],
+    queryFn: getRegressionTests,
     enabled: !!selectedVersion,
+    staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
   })
 
   const { lastRefresh, isRefreshing, refresh } = useAutoRefresh([
     ['coverage-version', selectedVersion],
-    ['coverage-regression', selectedVersion],
+    ['coverage-regression'],
     ['coverage-unlinked'],
   ])
 
@@ -596,7 +597,7 @@ export default function TestCoveragePage() {
                     {filteredEpics.length === 0 && (
                       <p className="text-center py-8 text-gray-400 text-sm">No results found.</p>
                     )}
-                    <RegressionTestsSection version={selectedVersion} query={regressionQuery} />
+                    <RegressionTestsSection query={regressionQuery} />
                   </div>
                 </>
               )}

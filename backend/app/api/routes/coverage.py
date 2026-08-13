@@ -75,14 +75,11 @@ async def assign_test(body: AssignTestRequest):
 
 
 @router.get("/regression-tests")
-async def get_regression_tests(
-    version: str = Query(..., description="Fix version name e.g. K1-S-3.1.0"),
-    refresh: bool = Query(False),
-):
-    """All Test issues tagged with a given fix version (regression test pool)."""
+async def get_regression_tests(refresh: bool = Query(False)):
+    """All Test issues labeled REGRESSION_TEST (global regression suite)."""
     try:
         svc = get_coverage_service()
-        return await svc.get_regression_tests(version, force_refresh=refresh)
+        return await svc.get_regression_tests(force_refresh=refresh)
     except Exception as e:
         logger.error(f"Coverage regression tests error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
