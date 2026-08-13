@@ -504,57 +504,78 @@ function EpicRow({ epic, search, onGenerate }) {
       {/* Stories table */}
       {expanded && (
         <div className="overflow-x-auto">
-          <table className="min-w-full text-sm bg-white">
+          <table className="w-full text-sm bg-white table-fixed">
+            <colgroup>
+              <col style={{ width: '140px' }} />
+              <col />
+              <col style={{ width: '160px' }} />
+              <col style={{ width: '230px' }} />
+              <col style={{ width: '210px' }} />
+            </colgroup>
             <thead className="bg-gray-50 border-b border-gray-100">
               <tr>
                 {['Story Key', 'Summary', 'Status', 'Test Cases', 'Test Status'].map(h => (
-                  <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
+                  <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {visibleStories.map(story => (
-                <tr key={story.key} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5 whitespace-nowrap">
-                    <a href={story.url} target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-brand-600 font-mono text-xs font-medium hover:underline">
-                      {story.key} <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </td>
-                  <td className="px-4 py-2.5 text-gray-700 max-w-md">
-                    <span className="line-clamp-2">{story.summary}</span>
-                  </td>
-                  <td className="px-4 py-2.5 whitespace-nowrap">
-                    <StatusPill status={story.status} />
-                  </td>
-                  <td className="px-4 py-2.5 whitespace-nowrap">
-                    {story.test_count > 0 ? (
-                      <div className="flex items-center gap-1.5">
-                        <CheckCircle2 className="h-4 w-4 text-green-500" />
-                        <span className="font-bold text-green-600">{story.test_count}</span>
-                        <span className="text-xs text-gray-400">test{story.test_count > 1 ? 's' : ''}</span>
-                      </div>
-                    ) : (
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <XCircle className="h-4 w-4 text-red-400" />
-                        <span className="text-xs text-red-500 font-medium">No tests</span>
-                        {onGenerate && (
-                          <button
-                            onClick={e => { e.stopPropagation(); onGenerate({ storyKey: story.key, storySummary: story.summary }) }}
-                            className="inline-flex items-center gap-1 text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium px-2 py-0.5 rounded-full transition-colors"
-                            title="Generate test cases with AI"
-                          >
-                            <Wand2 className="h-3 w-3" /> Generate
-                          </button>
-                        )}
-                      </div>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <TestStatusSummary statuses={story.test_statuses} />
-                  </td>
-                </tr>
-              ))}
+              {visibleStories.map(story => {
+                const jiraBase = story.url.split('/browse/')[0]
+                return (
+                  <tr key={story.key} className="hover:bg-gray-50">
+                    <td className="px-4 py-2.5">
+                      <a href={story.url} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-brand-600 font-mono text-xs font-medium hover:underline">
+                        {story.key} <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </td>
+                    <td className="px-4 py-2.5 text-gray-700">
+                      <span className="line-clamp-2">{story.summary}</span>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <StatusPill status={story.status} />
+                    </td>
+                    <td className="px-4 py-2.5">
+                      {story.test_count > 0 ? (
+                        <div className="space-y-0.5">
+                          {(story.test_keys || []).slice(0, 4).map(k => (
+                            <a key={k}
+                              href={`${jiraBase}/browse/${k}`}
+                              target="_blank" rel="noopener noreferrer"
+                              className="flex items-center gap-1 text-xs font-mono text-purple-600 hover:underline w-fit">
+                              <CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
+                              {k} <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+                            </a>
+                          ))}
+                          {story.test_keys?.length > 4 && (
+                            <span className="text-xs text-gray-400 pl-4">
+                              +{story.test_keys.length - 4} more
+                            </span>
+                          )}
+                        </div>
+                      ) : (
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <XCircle className="h-4 w-4 text-red-400 flex-shrink-0" />
+                          <span className="text-xs text-red-500 font-medium">No tests</span>
+                          {onGenerate && (
+                            <button
+                              onClick={e => { e.stopPropagation(); onGenerate({ storyKey: story.key, storySummary: story.summary }) }}
+                              className="inline-flex items-center gap-1 text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium px-2 py-0.5 rounded-full transition-colors"
+                              title="Generate test cases with AI"
+                            >
+                              <Wand2 className="h-3 w-3" /> Generate
+                            </button>
+                          )}
+                        </div>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <TestStatusSummary statuses={story.test_statuses} />
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
