@@ -317,12 +317,36 @@ function EpicRow({ epic, search }) {
 }
 
 // ── Regression Tests Section ───────────────────────────────────────────────────
+const DONE_STATUSES = new Set(['Done', 'DONE', 'Passed', 'PASSED'])
+const IN_PROGRESS_STATUSES = new Set(['In Progress', 'In Review', 'Validation'])
+const BLOCKED_STATUSES = new Set(['Blocked', 'Reopened'])
+
 function RegressionTestsSection({ query }) {
   const [expanded, setExpanded] = useState(false)
   const data = query.data
 
+  const stats = useMemo(() => {
+    if (!data || !data.total) return null
+    const total = data.total
+    const counts = data.status_counts || {}
+    const done = Object.entries(counts)
+      .filter(([s]) => DONE_STATUSES.has(s))
+      .reduce((a, [, n]) => a + n, 0)
+    const inProgress = Object.entries(counts)
+      .filter(([s]) => IN_PROGRESS_STATUSES.has(s))
+      .reduce((a, [, n]) => a + n, 0)
+    const blocked = Object.entries(counts)
+      .filter(([s]) => BLOCKED_STATUSES.has(s))
+      .reduce((a, [, n]) => a + n, 0)
+    const notRun = total - done - inProgress - blocked
+    const pct = Math.round(done / total * 100)
+    const barColor = pct === 100 ? 'bg-green-500' : pct >= 50 ? 'bg-yellow-400' : 'bg-red-400'
+    return { total, done, inProgress, blocked, notRun: Math.max(0, notRun), pct, barColor, counts }
+  }, [data])
+
   return (
     <div className="border border-purple-200 rounded-xl overflow-hidden">
+      {/* ── Header (click to expand table) ── */}
       <div
         className="flex items-center gap-3 bg-purple-50 px-4 py-3 cursor-pointer hover:bg-purple-100 transition-colors"
         onClick={() => setExpanded(e => !e)}
@@ -337,72 +361,136 @@ function RegressionTestsSection({ query }) {
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
           {query.isLoading && <span className="text-xs text-gray-400">Loading…</span>}
-          {data && (
-            <>
-              <TestStatusSummary statuses={data.status_counts} />
-              <span className="text-xs text-gray-500 whitespace-nowrap">
-                <span className="font-bold text-purple-600">{data.total}</span> tests
-              </span>
-            </>
+          {stats && (
+            <span className="text-xs text-gray-500 whitespace-nowrap">
+              <span className="font-bold text-purple-600">{stats.total}</span> tests ·{' '}
+              <span className="font-bold text-green-600">{stats.pct}%</span> passed
+            </span>
           )}
         </div>
       </div>
 
-      {expanded && (
-        <div>
-          {query.isLoading && (
-            <div className="text-center py-8">
-              <div className="h-6 w-6 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto" />
-            </div>
-          )}
-          {query.isError && (
-            <p className="text-sm text-red-500 text-center py-6">{query.error?.message}</p>
-          )}
-          {data && data.tests.length === 0 && (
-            <p className="text-sm text-gray-400 text-center py-8">No tests with label REGRESSION_TEST found.</p>
-          )}
-          {data && data.tests.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="min-w-full text-sm bg-white">
-                <thead className="bg-gray-50 border-b border-gray-100">
-                  <tr>
-                    {['Test Key', 'Summary', 'Status', 'Labels'].map(h => (
-                      <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  {data.tests.map(test => (
-                    <tr key={test.key} className="hover:bg-gray-50">
-                      <td className="px-4 py-2.5 whitespace-nowrap">
-                        <a href={test.url} target="_blank" rel="noopener noreferrer"
-                          className="inline-flex items-center gap-1 text-purple-600 font-mono text-xs font-medium hover:underline">
-                          {test.key} <ExternalLink className="h-3 w-3" />
-                        </a>
-                      </td>
-                      <td className="px-4 py-2.5 text-gray-700 max-w-md">
-                        <span className="line-clamp-2">{test.summary}</span>
-                      </td>
-                      <td className="px-4 py-2.5 whitespace-nowrap">
-                        <StatusPill status={test.status} />
-                      </td>
-                      <td className="px-4 py-2.5">
-                        <div className="flex flex-wrap gap-1">
-                          {test.labels.length > 0
-                            ? test.labels.map(l => (
-                                <span key={l} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">{l}</span>
-                              ))
-                            : <span className="text-xs text-gray-300">—</span>
-                          }
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
+      {/* ── Summary panel — always visible when data loaded ── */}
+      {query.isLoading && (
+        <div className="flex items-center gap-3 px-5 py-4 bg-white border-t border-purple-100">
+          <div className="h-5 w-5 border-2 border-purple-200 border-t-purple-500 rounded-full animate-spin" />
+          <span className="text-sm text-gray-400">Loading regression suite…</span>
         </div>
+      )}
+      {query.isError && (
+        <p className="text-sm text-red-500 px-5 py-4 border-t border-purple-100">{query.error?.message}</p>
+      )}
+      {stats && (
+        <div className="bg-white border-t border-purple-100 px-5 py-4 space-y-4">
+          {/* Coverage bar */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Pass Rate</span>
+              <span className="text-sm font-bold text-purple-700">{stats.pct}%</span>
+            </div>
+            <div className="relative bg-gray-200 rounded-full h-3">
+              <div
+                className={`${stats.barColor} h-3 rounded-full transition-all`}
+                style={{ width: `${stats.pct}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-xs text-gray-400 mt-1">
+              <span>{stats.done} passed</span>
+              <span>{stats.total - stats.done} remaining</span>
+            </div>
+          </div>
+
+          {/* Status breakdown grid */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">Status Breakdown</p>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="bg-green-50 border border-green-100 rounded-lg px-3 py-2 text-center">
+                <p className="text-xl font-bold text-green-600">{stats.done}</p>
+                <p className="text-xs text-green-500 font-medium mt-0.5">Passed</p>
+                <p className="text-xs text-gray-400">{stats.total ? Math.round(stats.done / stats.total * 100) : 0}%</p>
+              </div>
+              <div className="bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 text-center">
+                <p className="text-xl font-bold text-blue-600">{stats.inProgress}</p>
+                <p className="text-xs text-blue-500 font-medium mt-0.5">In Progress</p>
+                <p className="text-xs text-gray-400">{stats.total ? Math.round(stats.inProgress / stats.total * 100) : 0}%</p>
+              </div>
+              <div className="bg-red-50 border border-red-100 rounded-lg px-3 py-2 text-center">
+                <p className="text-xl font-bold text-red-500">{stats.blocked}</p>
+                <p className="text-xs text-red-400 font-medium mt-0.5">Blocked</p>
+                <p className="text-xs text-gray-400">{stats.total ? Math.round(stats.blocked / stats.total * 100) : 0}%</p>
+              </div>
+              <div className="bg-gray-50 border border-gray-200 rounded-lg px-3 py-2 text-center">
+                <p className="text-xl font-bold text-gray-500">{stats.notRun}</p>
+                <p className="text-xs text-gray-400 font-medium mt-0.5">Not Run</p>
+                <p className="text-xs text-gray-400">{stats.total ? Math.round(stats.notRun / stats.total * 100) : 0}%</p>
+              </div>
+            </div>
+          </div>
+
+          {/* All statuses with exact counts */}
+          <div className="flex flex-wrap gap-1.5">
+            {Object.entries(stats.counts)
+              .sort((a, b) => b[1] - a[1])
+              .map(([status, count]) => {
+                const cls = STATUS_COLORS[status] || 'bg-gray-100 text-gray-500'
+                const pct = stats.total ? Math.round(count / stats.total * 100) : 0
+                return (
+                  <span key={status}
+                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${cls}`}>
+                    <span className="font-bold">{count}</span>
+                    <span>{status}</span>
+                    <span className="opacity-60">({pct}%)</span>
+                  </span>
+                )
+              })}
+          </div>
+        </div>
+      )}
+
+      {/* ── Test table — only when expanded ── */}
+      {expanded && stats && data.tests.length > 0 && (
+        <div className="overflow-x-auto border-t border-purple-100">
+          <table className="min-w-full text-sm bg-white">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                {['Test Key', 'Summary', 'Status', 'Labels'].map(h => (
+                  <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {data.tests.map(test => (
+                <tr key={test.key} className="hover:bg-gray-50">
+                  <td className="px-4 py-2.5 whitespace-nowrap">
+                    <a href={test.url} target="_blank" rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-purple-600 font-mono text-xs font-medium hover:underline">
+                      {test.key} <ExternalLink className="h-3 w-3" />
+                    </a>
+                  </td>
+                  <td className="px-4 py-2.5 text-gray-700 max-w-md">
+                    <span className="line-clamp-2">{test.summary}</span>
+                  </td>
+                  <td className="px-4 py-2.5 whitespace-nowrap">
+                    <StatusPill status={test.status} />
+                  </td>
+                  <td className="px-4 py-2.5">
+                    <div className="flex flex-wrap gap-1">
+                      {test.labels.length > 0
+                        ? test.labels.map(l => (
+                            <span key={l} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">{l}</span>
+                          ))
+                        : <span className="text-xs text-gray-300">—</span>
+                      }
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {expanded && stats && data.tests.length === 0 && (
+        <p className="text-sm text-gray-400 text-center py-8 border-t border-purple-100">No tests with label REGRESSION_TEST found.</p>
       )}
     </div>
   )
