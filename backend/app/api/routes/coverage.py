@@ -74,6 +74,20 @@ async def assign_test(body: AssignTestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/regression-tests")
+async def get_regression_tests(
+    version: str = Query(..., description="Fix version name e.g. K1-S-3.1.0"),
+    refresh: bool = Query(False),
+):
+    """All Test issues tagged with a given fix version (regression test pool)."""
+    try:
+        svc = get_coverage_service()
+        return await svc.get_regression_tests(version, force_refresh=refresh)
+    except Exception as e:
+        logger.error(f"Coverage regression tests error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/search-stories")
 async def search_stories(q: str = Query(..., min_length=2)):
     """Search stories by text for the assign dialog."""

@@ -16,7 +16,8 @@ const getVersions    = ()        => api.get('/coverage/versions').then(r => r.da
 const getByVersion   = (v)       => api.get(`/coverage/by-version?version=${encodeURIComponent(v)}`).then(r => r.data)
 const getUnlinked    = ()        => api.get('/coverage/unlinked-tests').then(r => r.data)
 const searchStories  = (q)       => api.get(`/coverage/search-stories?q=${encodeURIComponent(q)}`).then(r => r.data)
-const assignTest     = (body)    => api.post('/coverage/assign-test', body).then(r => r.data)
+const assignTest          = (body) => api.post('/coverage/assign-test', body).then(r => r.data)
+const getRegressionTests  = (v)    => api.get(`/coverage/regression-tests?version=${encodeURIComponent(v)}`).then(r => r.data)
 
 const TABS = ['By Version', 'Unlinked Tests']
 
@@ -315,6 +316,98 @@ function EpicRow({ epic, search }) {
   )
 }
 
+// ── Regression Tests Section ───────────────────────────────────────────────────
+function RegressionTestsSection({ version, query }) {
+  const [expanded, setExpanded] = useState(false)
+  const data = query.data
+
+  return (
+    <div className="border border-purple-200 rounded-xl overflow-hidden">
+      <div
+        className="flex items-center gap-3 bg-purple-50 px-4 py-3 cursor-pointer hover:bg-purple-100 transition-colors"
+        onClick={() => setExpanded(e => !e)}
+      >
+        {expanded
+          ? <ChevronDown className="h-4 w-4 text-purple-500 flex-shrink-0" />
+          : <ChevronRight className="h-4 w-4 text-purple-500 flex-shrink-0" />}
+        <FlaskConical className="h-4 w-4 text-purple-400 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <span className="text-sm font-semibold text-purple-800">Regression Tests</span>
+          <span className="ml-2 text-xs text-purple-500">All tests tagged for {version}</span>
+        </div>
+        <div className="flex items-center gap-3 flex-shrink-0">
+          {query.isLoading && <span className="text-xs text-gray-400">Loading…</span>}
+          {data && (
+            <>
+              <TestStatusSummary statuses={data.status_counts} />
+              <span className="text-xs text-gray-500 whitespace-nowrap">
+                <span className="font-bold text-purple-600">{data.total}</span> tests
+              </span>
+            </>
+          )}
+        </div>
+      </div>
+
+      {expanded && (
+        <div>
+          {query.isLoading && (
+            <div className="text-center py-8">
+              <div className="h-6 w-6 border-2 border-purple-200 border-t-purple-600 rounded-full animate-spin mx-auto" />
+            </div>
+          )}
+          {query.isError && (
+            <p className="text-sm text-red-500 text-center py-6">{query.error?.message}</p>
+          )}
+          {data && data.tests.length === 0 && (
+            <p className="text-sm text-gray-400 text-center py-8">No tests tagged for {version}.</p>
+          )}
+          {data && data.tests.length > 0 && (
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm bg-white">
+                <thead className="bg-gray-50 border-b border-gray-100">
+                  <tr>
+                    {['Test Key', 'Summary', 'Status', 'Labels'].map(h => (
+                      <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {data.tests.map(test => (
+                    <tr key={test.key} className="hover:bg-gray-50">
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <a href={test.url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-purple-600 font-mono text-xs font-medium hover:underline">
+                          {test.key} <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-700 max-w-md">
+                        <span className="line-clamp-2">{test.summary}</span>
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <StatusPill status={test.status} />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex flex-wrap gap-1">
+                          {test.labels.length > 0
+                            ? test.labels.map(l => (
+                                <span key={l} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">{l}</span>
+                              ))
+                            : <span className="text-xs text-gray-300">—</span>
+                          }
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function TestCoveragePage() {
   const [tab, setTab] = useState('By Version')
@@ -344,8 +437,16 @@ export default function TestCoveragePage() {
     refetchInterval: 5 * 60 * 1000,
   })
 
+  const regressionQuery = useQuery({
+    queryKey: ['coverage-regression', selectedVersion],
+    queryFn: () => getRegressionTests(selectedVersion),
+    enabled: !!selectedVersion,
+    refetchInterval: 5 * 60 * 1000,
+  })
+
   const { lastRefresh, isRefreshing, refresh } = useAutoRefresh([
     ['coverage-version', selectedVersion],
+    ['coverage-regression', selectedVersion],
     ['coverage-unlinked'],
   ])
 
@@ -457,12 +558,13 @@ export default function TestCoveragePage() {
               {selectedVersion && data && !coverageQuery.isLoading && (
                 <>
                   {/* Summary cards */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
                     <SummaryTile label="Total Stories" value={summary.total_stories} color="blue" />
                     <SummaryTile label="Covered" value={summary.covered_stories} color="green"
                       sub={`${summary.coverage_pct}%`} />
                     <SummaryTile label="Uncovered" value={summary.uncovered_stories} color="red" />
-                    <SummaryTile label="Total Tests" value={summary.total_tests} color="purple" />
+                    <SummaryTile label="Story Tests" value={summary.total_tests} color="purple" />
+                    <SummaryTile label="Regression Tests" value={regressionQuery.data?.total ?? '…'} color="indigo" />
                   </div>
 
                   {/* Coverage progress */}
@@ -494,6 +596,7 @@ export default function TestCoveragePage() {
                     {filteredEpics.length === 0 && (
                       <p className="text-center py-8 text-gray-400 text-sm">No results found.</p>
                     )}
+                    <RegressionTestsSection version={selectedVersion} query={regressionQuery} />
                   </div>
                 </>
               )}
@@ -614,6 +717,7 @@ function SummaryTile({ label, value, color, sub }) {
     green:  'text-green-600',
     red:    'text-red-500',
     purple: 'text-purple-600',
+    indigo: 'text-indigo-600',
   }
   return (
     <div className="bg-gray-50 rounded-xl p-4 text-center">

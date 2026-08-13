@@ -38,21 +38,15 @@ class CoverageService:
     def _issue_url(self, key: str) -> str:
         return f"{self.jira_base_url}/browse/{key}"
 
-    async def _fetch_all(self, jql: str, fields: list[str], page_size: int = 100) -> list[dict]:
-        """Paginate through all Jira results for a JQL query."""
-        all_issues = []
-        start = 0
-        while True:
-            print(f"[coverage] _fetch_all page start={start} jql={jql[:80]}")
-            batch = await self.jira.search_issues(
-                jql, fields=fields, max_results=page_size, start_at=start
-            )
-            all_issues.extend(batch)
-            print(f"[coverage] _fetch_all got {len(batch)} items, total so far: {len(all_issues)}")
-            if len(batch) < page_size:
-                break
-            start += page_size
-        return all_issues
+    async def _fetch_all(self, jql: str, fields: list[str]) -> list[dict]:
+        """Paginate through all Jira results for a JQL query.
+
+        Delegates to JiraClient.search_issues' own pagination rather than
+        looping with startAt here — /search/jql ignores startAt and only
+        supports cursor (nextPageToken) pagination, which search_issues
+        already handles correctly.
+        """
+        return await self.jira.search_issues(jql, fields=fields, max_total=5000)
 
     # ── public API ─────────────────────────────────────────────────────────
 
@@ -236,6 +230,44 @@ class CoverageService:
             ]
 
         return await self.cache.get_or_fetch(CACHE_KEY_UNLINKED, fetch, ttl=300)
+
+    async def get_regression_tests(self, version: str, force_refresh: bool = False) -> dict:
+        """Return all Test issues tagged with a given fix version (regression pool)."""
+        cache_key = f"coverage:regression:{version}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                f'issuetype = Test AND fixVersion = "{version}" '
+                f'ORDER BY status ASC, key ASC'
+            )
+            tests_raw = await self._fetch_all(
+                jql,
+                fields=["summary", "status", "labels"],
+            )
+            tests = []
+            for issue in tests_raw:
+                f = issue.get("fields", {})
+                tests.append({
+                    "key":     issue["key"],
+                    "url":     self._issue_url(issue["key"]),
+                    "summary": f.get("summary", ""),
+                    "status":  (f.get("status") or {}).get("name", ""),
+                    "labels":  f.get("labels") or [],
+                })
+            status_counts: dict[str, int] = {}
+            for t in tests:
+                st = t["status"]
+                status_counts[st] = status_counts.get(st, 0) + 1
+            return {
+                "version":       version,
+                "tests":         tests,
+                "total":         len(tests),
+                "status_counts": status_counts,
+            }
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
 
     async def assign_test(
         self,
