@@ -3,7 +3,7 @@ K-1 KONE service desk API routes.
 """
 import logging
 from typing import Optional, List
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, Response
 from pydantic import BaseModel
 
 from app.services.kone_service import get_kone_service
@@ -11,6 +11,19 @@ from app.services.create_bug_service import get_create_bug_service
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/kone", tags=["kone"])
+
+
+@router.get("/field-discovery")
+async def kone_field_discovery():
+    """List all fields available on the KONE Jira instance (for dev/admin use)."""
+    from app.jira.kone_client import get_kone_client
+    import httpx
+    client = get_kone_client()._get_client()
+    resp = await client.get(f"{get_kone_client().base_url}/rest/api/3/field")
+    if resp.status_code != 200:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text[:500])
+    fields = resp.json()
+    return [{"id": f["id"], "name": f["name"], "custom": f.get("custom", False)} for f in fields]
 
 
 @router.get("/tickets")
@@ -37,6 +50,25 @@ async def get_ticket_detail(key: str):
         return await svc.get_ticket_detail(key)
     except Exception as e:
         logger.error(f"KONE ticket detail error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/ticket/{key}/attachment/{attachment_id}")
+async def get_ticket_attachment(key: str, attachment_id: str):
+    """Proxy one KONE attachment's bytes (image preview / download) — the KONE Jira
+    attachment URL needs server-side Basic auth, so the browser can't load it directly."""
+    try:
+        svc = get_kone_service()
+        data, content_type, name = await svc.get_attachment_bytes(key, attachment_id)
+        return Response(
+            content=data,
+            media_type=content_type,
+            headers={"Content-Disposition": f'inline; filename="{name}"'},
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        logger.error(f"KONE attachment proxy error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -79,6 +111,7 @@ class KoneCreateBugRequest(BaseModel):
     sprint_id: Optional[int] = None
     assignee_id: Optional[str] = None
     attachments: List[dict] = []
+    comment: Optional[str] = None
 
 
 @router.post("/create-bug")
@@ -103,6 +136,7 @@ async def create_kone_bug(body: KoneCreateBugRequest):
             sprint_id=body.sprint_id,
             assignee_id=body.assignee_id,
             attachment_ids=body.attachments,
+            comment=body.comment,
         )
         return result
     except Exception as e:

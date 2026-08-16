@@ -38,6 +38,15 @@ const JIRA_STATUS_COLORS = {
 }
 const jiraStatusColor = (s) => JIRA_STATUS_COLORS[s] || 'bg-gray-100 text-gray-600'
 
+const SUPPORT_VAL_COLORS = {
+  'Approved':    'bg-green-100 text-green-800',
+  'Rejected':    'bg-red-100 text-red-800',
+  'Pending':     'bg-yellow-100 text-yellow-800',
+  'In Review':   'bg-blue-100 text-blue-800',
+  'N/A':         'bg-gray-100 text-gray-500',
+}
+const supportValColor = (v) => SUPPORT_VAL_COLORS[v] || (v ? 'bg-purple-100 text-purple-700' : '')
+
 const PRIORITY_COLORS = {
   'Critical':       'text-red-600 font-bold',
   'High':           'text-orange-500 font-semibold',
@@ -757,7 +766,7 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
           <table className="w-full text-xs">
             <thead className="bg-gray-50">
               <tr>
-                {['Key','Summary','Status','Cliente','Cuenta','Producto','Assignee','Days Open','Jira Bug','Jira Status','Fix Version'].map(h => (
+                {['Key','Summary','Status','Cliente','Cuenta','Producto','Assignee','Days Open','Support Validation','Jira Bug','Jira Status','Fix Version'].map(h => (
                   <th key={h} className="px-3 py-2 text-left text-gray-600 font-medium whitespace-nowrap">{h}</th>
                 ))}
               </tr>
@@ -784,12 +793,17 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
                     <td className="px-3 py-2 text-center">
                       <span className="text-blue-600 font-semibold">{t.days_open}d</span>
                     </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {t.support_validation
+                        ? <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${supportValColor(t.support_validation)}`}>{t.support_validation}</span>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
                     <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
                   </tr>
                 )
               })}
               {recentTickets.length === 0 && (
-                <tr><td colSpan={11} className="text-center py-8 text-gray-400">No tickets in last {days} day{days !== 1 ? 's' : ''}</td></tr>
+                <tr><td colSpan={12} className="text-center py-8 text-gray-400">No tickets in last {days} day{days !== 1 ? 's' : ''}</td></tr>
               )}
             </tbody>
           </table>
@@ -808,7 +822,7 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
             <table className="w-full text-xs">
               <thead className="bg-red-50">
                 <tr>
-                  {['Key','Summary','Days Open','Status','Cliente','Cuenta','Producto','Assignee','Jira Bug','Jira Status','Fix Version'].map(h => (
+                  {['Key','Summary','Days Open','Status','Cliente','Cuenta','Producto','Assignee','Support Validation','Jira Bug','Jira Status','Fix Version'].map(h => (
                     <th key={h} className="px-3 py-2 text-left text-red-700 font-medium whitespace-nowrap">{h}</th>
                   ))}
                 </tr>
@@ -835,6 +849,11 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
                       <td className="px-3 py-2 whitespace-nowrap text-gray-500">{t.cuenta}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-gray-700">{t.producto}</td>
                       <td className="px-3 py-2 whitespace-nowrap text-gray-500">{t.assignee || <span className="text-orange-400">Unassigned</span>}</td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        {t.support_validation
+                          ? <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${supportValColor(t.support_validation)}`}>{t.support_validation}</span>
+                          : <span className="text-gray-300">—</span>}
+                      </td>
                       <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
                     </tr>
                   )
@@ -858,6 +877,7 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
   const [assigneeFilter, setAssigneeFilter] = useState(new Set())
   const [jiraStatusFilter, setJiraStatusFilter] = useState(new Set())
   const [fixVersionFilter, setFixVersionFilter] = useState(new Set())
+  const [supportValFilter, setSupportValFilter] = useState(new Set())
   const [sortCol, setSortCol] = useState('created')
   const [sortDir, setSortDir] = useState('desc')
 
@@ -865,25 +885,27 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
   const fixVersionsOf = t => bugLinks?.[t.key]?.jira_fix_versions || []
 
   const options = useMemo(() => ({
-    statuses:     [...new Set(tickets.map(t => t.status).filter(Boolean))].sort(),
-    priorities:   [...new Set(tickets.map(t => t.priority).filter(Boolean))].sort(),
-    cuentas:      [...new Set(tickets.map(t => t.cuenta).filter(Boolean))].sort(),
-    productos:    [...new Set(tickets.map(t => t.producto).filter(Boolean))].sort(),
-    assignees:    [...new Set(tickets.map(t => t.assignee).filter(Boolean))].sort(),
-    jiraStatuses: [...new Set(tickets.map(jiraStatusOf).filter(Boolean))].sort(),
-    fixVersions:  [...new Set(tickets.flatMap(fixVersionsOf))].sort(),
+    statuses:      [...new Set(tickets.map(t => t.status).filter(Boolean))].sort(),
+    priorities:    [...new Set(tickets.map(t => t.priority).filter(Boolean))].sort(),
+    cuentas:       [...new Set(tickets.map(t => t.cuenta).filter(Boolean))].sort(),
+    productos:     [...new Set(tickets.map(t => t.producto).filter(Boolean))].sort(),
+    assignees:     [...new Set(tickets.map(t => t.assignee).filter(Boolean))].sort(),
+    jiraStatuses:  [...new Set(tickets.map(jiraStatusOf).filter(Boolean))].sort(),
+    fixVersions:   [...new Set(tickets.flatMap(fixVersionsOf))].sort(),
+    supportVals:   [...new Set(tickets.map(t => t.support_validation).filter(Boolean))].sort(),
   }), [tickets, bugLinks])
 
   const filteredTickets = useMemo(() => {
     let list = tickets
-    if (selectedCliente)      list = list.filter(t => t.cliente === selectedCliente)
-    if (statusFilter.size)    list = list.filter(t => statusFilter.has(t.status))
-    if (priorityFilter.size)  list = list.filter(t => priorityFilter.has(t.priority))
-    if (cuentaFilter.size)    list = list.filter(t => cuentaFilter.has(t.cuenta))
-    if (productoFilter.size)  list = list.filter(t => productoFilter.has(t.producto))
-    if (assigneeFilter.size)  list = list.filter(t => assigneeFilter.has(t.assignee))
+    if (selectedCliente)       list = list.filter(t => t.cliente === selectedCliente)
+    if (statusFilter.size)     list = list.filter(t => statusFilter.has(t.status))
+    if (priorityFilter.size)   list = list.filter(t => priorityFilter.has(t.priority))
+    if (cuentaFilter.size)     list = list.filter(t => cuentaFilter.has(t.cuenta))
+    if (productoFilter.size)   list = list.filter(t => productoFilter.has(t.producto))
+    if (assigneeFilter.size)   list = list.filter(t => assigneeFilter.has(t.assignee))
     if (jiraStatusFilter.size) list = list.filter(t => jiraStatusFilter.has(jiraStatusOf(t)))
     if (fixVersionFilter.size) list = list.filter(t => fixVersionsOf(t).some(v => fixVersionFilter.has(v)))
+    if (supportValFilter.size) list = list.filter(t => supportValFilter.has(t.support_validation))
     return [...list].sort((a, b) => {
       let av, bv
       if (sortCol === 'jira_key') { av = bugLinks?.[a.key]?.jira_key || ''; bv = bugLinks?.[b.key]?.jira_key || '' }
@@ -907,10 +929,11 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
     </th>
   )
 
-  const anyFilterActive = [statusFilter, priorityFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter].some(s => s.size > 0)
+  const anyFilterActive = [statusFilter, priorityFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter, supportValFilter].some(s => s.size > 0)
   const clearAllFilters = () => {
     setStatusFilter(new Set()); setPriorityFilter(new Set()); setCuentaFilter(new Set())
-    setProductoFilter(new Set()); setAssigneeFilter(new Set()); setJiraStatusFilter(new Set()); setFixVersionFilter(new Set())
+    setProductoFilter(new Set()); setAssigneeFilter(new Set()); setJiraStatusFilter(new Set())
+    setFixVersionFilter(new Set()); setSupportValFilter(new Set())
   }
 
   return (
@@ -967,6 +990,7 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
                 {th('Producto', 'producto', { options: options.productos, selected: productoFilter, onChange: setProductoFilter })}
                 {th('Assignee', 'assignee', { options: options.assignees, selected: assigneeFilter, onChange: setAssigneeFilter })}
                 {th('Days Open', 'days_open')}
+                {th('Support Validation', 'support_validation', { options: options.supportVals, selected: supportValFilter, onChange: setSupportValFilter })}
                 {th('Jira Bug', 'jira_key')}
                 {th('Jira Status', 'jira_status', { options: options.jiraStatuses, selected: jiraStatusFilter, onChange: setJiraStatusFilter })}
                 {th('Fix Version', 'fix_version', { options: options.fixVersions, selected: fixVersionFilter, onChange: setFixVersionFilter })}
@@ -994,11 +1018,16 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
                     <td className="px-3 py-2 text-center">
                       <span className={t.days_open > 14 ? 'text-red-600 font-semibold' : 'text-gray-500'}>{t.days_open}d</span>
                     </td>
+                    <td className="px-3 py-2 whitespace-nowrap">
+                      {t.support_validation
+                        ? <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${supportValColor(t.support_validation)}`}>{t.support_validation}</span>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
                     <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
                   </tr>
                 )
               })}
-              {filteredTickets.length === 0 && <tr><td colSpan={12} className="text-center py-8 text-gray-400">No tickets</td></tr>}
+              {filteredTickets.length === 0 && <tr><td colSpan={13} className="text-center py-8 text-gray-400">No tickets</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1018,6 +1047,7 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
   const [assigneeFilter, setAssigneeFilter] = useState(new Set())
   const [jiraStatusFilter, setJiraStatusFilter] = useState(new Set())
   const [fixVersionFilter, setFixVersionFilter] = useState(new Set())
+  const [supportValFilter, setSupportValFilter] = useState(new Set())
   const [sortCol, setSortCol]         = useState('created')
   const [sortDir, setSortDir]         = useState('desc')
   const [page, setPage]               = useState(1)
@@ -1035,6 +1065,7 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
     assignees:    [...new Set(tickets.map(t => t.assignee).filter(Boolean))].sort(),
     jiraStatuses: [...new Set(tickets.map(jiraStatusOf).filter(Boolean))].sort(),
     fixVersions:  [...new Set(tickets.flatMap(fixVersionsOf))].sort(),
+    supportVals:  [...new Set(tickets.map(t => t.support_validation).filter(Boolean))].sort(),
   }), [tickets, bugLinks])
 
   const tr = (text) => (translateOn && translations[text]) ? translations[text] : text
@@ -1050,6 +1081,7 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
     if (assigneeFilter.size)   list = list.filter(t => assigneeFilter.has(t.assignee))
     if (jiraStatusFilter.size) list = list.filter(t => jiraStatusFilter.has(jiraStatusOf(t)))
     if (fixVersionFilter.size) list = list.filter(t => fixVersionsOf(t).some(v => fixVersionFilter.has(v)))
+    if (supportValFilter.size) list = list.filter(t => supportValFilter.has(t.support_validation))
     return [...list].sort((a, b) => {
       let av, bv
       if (sortCol === 'jira_key') { av = bugLinks?.[a.key]?.jira_key || ''; bv = bugLinks?.[b.key]?.jira_key || '' }
@@ -1060,7 +1092,7 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
       const cmp = typeof av === 'number' ? av - bv : av < bv ? -1 : av > bv ? 1 : 0
       return sortDir === 'asc' ? cmp : -cmp
     })
-  }, [tickets, search, statusFilter, priorityFilter, clienteFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter, sortCol, sortDir, bugLinks])
+  }, [tickets, search, statusFilter, priorityFilter, clienteFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter, supportValFilter, sortCol, sortDir, bugLinks])
 
   const totalPages = Math.ceil(filtered.length / PAGE_SIZE)
   const paged = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
@@ -1077,11 +1109,11 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
     </th>
   )
 
-  const anyFilterActive = [statusFilter, priorityFilter, clienteFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter].some(s => s.size > 0)
+  const anyFilterActive = [statusFilter, priorityFilter, clienteFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter, supportValFilter].some(s => s.size > 0)
   const clearAllFilters = () => {
     setStatusFilter(new Set()); setPriorityFilter(new Set()); setClienteFilter(new Set()); setCuentaFilter(new Set())
     setProductoFilter(new Set()); setAssigneeFilter(new Set()); setJiraStatusFilter(new Set()); setFixVersionFilter(new Set())
-    setPage(1)
+    setSupportValFilter(new Set()); setPage(1)
   }
 
   return (
@@ -1112,6 +1144,7 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
               {th('Reporter', 'reporter')}
               {th('Days Open', 'days_open')}
               {th('Created', 'created')}
+              {th('Support Validation', 'support_validation', { options: options.supportVals, selected: supportValFilter, onChange: wrapFilter(setSupportValFilter) })}
               {th('Jira Bug', 'jira_key')}
               {th('Jira Status', 'jira_status', { options: options.jiraStatuses, selected: jiraStatusFilter, onChange: setJiraStatusFilter })}
               {th('Fix Version', 'fix_version', { options: options.fixVersions, selected: fixVersionFilter, onChange: setFixVersionFilter })}
@@ -1148,11 +1181,16 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
                     <span className={t.days_open > 14 ? 'text-red-600 font-semibold' : 'text-gray-500'}>{t.days_open}d</span>
                   </td>
                   <td className="px-3 py-2 whitespace-nowrap text-gray-500">{t.created ? t.created.slice(0,10) : ''}</td>
+                  <td className="px-3 py-2 whitespace-nowrap">
+                    {t.support_validation
+                      ? <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${supportValColor(t.support_validation)}`}>{t.support_validation}</span>
+                      : <span className="text-gray-300">—</span>}
+                  </td>
                   <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
                 </tr>
               )
             })}
-            {paged.length === 0 && <tr><td colSpan={17} className="text-center py-8 text-gray-400">No tickets match filters</td></tr>}
+            {paged.length === 0 && <tr><td colSpan={18} className="text-center py-8 text-gray-400">No tickets match filters</td></tr>}
           </tbody>
         </table>
       </div>

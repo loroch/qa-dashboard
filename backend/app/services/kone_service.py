@@ -34,6 +34,7 @@ F_CLASSIF       = "customfield_10123"   # Classification: Externo / Interno
 F_AFECTED_SVC   = "customfield_10072"   # Affected services: Producción, …
 F_LANG          = "customfield_10040"   # Request language
 F_ORGS          = "customfield_10002"   # Organizations (array)
+F_SUPPORT_VAL   = "customfield_10226"   # Support Validation (option)
 JIRA_BASE        = "https://kabatone-ops-it.atlassian.net"
 
 
@@ -138,7 +139,8 @@ def _fmt_ticket(issue: dict) -> dict:
         "source":       _opt(f.get(F_SOURCE)),   # e.g. "Phone message"
         "urgency":      _opt(f.get(F_URGENCY)),
         "classification": ", ".join(_arr_opt(f.get(F_CLASSIF))),  # "Externo"
-        "affected_svc": _opt(f.get(F_AFECTED_SVC)),
+        "affected_svc":      _opt(f.get(F_AFECTED_SVC)),
+        "support_validation": _opt(f.get(F_SUPPORT_VAL)),
         "created":      created,
         "updated":      updated,
         "days_open":    days_open,
