@@ -11,7 +11,7 @@ from app.jira.client import get_jira_client
 from app.jira.queries import get_jql_builder
 from app.jira.field_mapper import get_field_mapper
 from app.services.cache_service import get_cache
-from app.config import get_field_mapping
+from app.config import get_field_mapping, get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -29,6 +29,7 @@ class DashboardService:
         self.mapper = get_field_mapper()
         self.cache = get_cache()
         self.mapping = get_field_mapping()
+        self.jira_base_url = get_settings().jira_base_url.rstrip("/")
 
     @property
     def team_members(self) -> dict:
@@ -47,7 +48,87 @@ class DashboardService:
         )
         logger.info(f"RFT JQL: {jql}")
         issues = await self.jira.search_issues(jql)
-        return self.mapper.map_issues(issues)
+        mapped = self.mapper.map_issues(issues)
+        return await self._apply_qa_estimates(mapped)
+
+    async def _apply_qa_estimates(self, issues: list[dict]) -> list[dict]:
+        """Merge in each issue's QA time estimate: a stored override if one
+        exists, otherwise the type-based default (configurable for Bugs via
+        the default_bug_qa_hours setting; blank for every other type)."""
+        overrides = await self.get_qa_estimates([i["key"] for i in issues])
+        default_bug_hours = await self.get_default_bug_qa_hours()
+        for i in issues:
+            if i["key"] in overrides:
+                i["qa_estimate_hours"] = overrides[i["key"]]
+            else:
+                i["qa_estimate_hours"] = default_bug_hours if i.get("issue_type") == "Bug" else None
+        return issues
+
+    async def get_default_bug_qa_hours(self) -> float:
+        value = await self._get_app_setting("default_bug_qa_hours")
+        try:
+            return float(value) if value is not None else 0.5
+        except (TypeError, ValueError):
+            return 0.5
+
+    async def set_default_bug_qa_hours(self, hours: float) -> None:
+        await self._set_app_setting("default_bug_qa_hours", str(hours))
+        self.cache.invalidate_all()
+
+    async def _get_app_setting(self, key: str) -> Optional[str]:
+        from app.database.db import get_session_factory, AppSettingORM
+        from sqlalchemy import select
+        factory = get_session_factory()
+        async with factory() as session:
+            row = (await session.execute(
+                select(AppSettingORM).where(AppSettingORM.key == key)
+            )).scalar_one_or_none()
+        return row.value if row else None
+
+    async def _set_app_setting(self, key: str, value: str) -> None:
+        from app.database.db import get_session_factory, AppSettingORM
+        from sqlalchemy import select
+        factory = get_session_factory()
+        async with factory() as session:
+            existing = (await session.execute(
+                select(AppSettingORM).where(AppSettingORM.key == key)
+            )).scalar_one_or_none()
+            if existing:
+                existing.value = value
+            else:
+                session.add(AppSettingORM(key=key, value=value))
+            await session.commit()
+
+    async def get_qa_estimates(self, issue_keys: list[str]) -> dict[str, Optional[float]]:
+        from app.database.db import get_session_factory, QaEstimateORM
+        from sqlalchemy import select
+        if not issue_keys:
+            return {}
+        factory = get_session_factory()
+        async with factory() as session:
+            rows = (await session.execute(
+                select(QaEstimateORM).where(QaEstimateORM.issue_key.in_(issue_keys))
+            )).scalars().all()
+        return {r.issue_key: r.hours for r in rows}
+
+    async def set_qa_estimate(self, issue_key: str, hours: Optional[float]) -> None:
+        """Set an override, or clear it (hours=None) to revert to the default."""
+        from app.database.db import get_session_factory, QaEstimateORM
+        from sqlalchemy import select, delete
+        factory = get_session_factory()
+        async with factory() as session:
+            if hours is None:
+                await session.execute(delete(QaEstimateORM).where(QaEstimateORM.issue_key == issue_key))
+            else:
+                existing = (await session.execute(
+                    select(QaEstimateORM).where(QaEstimateORM.issue_key == issue_key)
+                )).scalar_one_or_none()
+                if existing:
+                    existing.hours = hours
+                else:
+                    session.add(QaEstimateORM(issue_key=issue_key, hours=hours))
+            await session.commit()
+        self.cache.invalidate_all()
 
     async def _fetch_bugs(self, filters: dict | None = None) -> list[dict]:
         jql = self.jql.bugs_last_30_days(
@@ -104,7 +185,7 @@ class DashboardService:
             g = groups[member_id]
             g["issues"].append(issue)
             g["total_assigned"] += 1
-            if issue.get("status") == self.jql.rft_status:
+            if issue.get("status") in self.jql.rft_statuses:
                 g["ready_for_testing_count"] += 1
             for v in issue.get("fix_versions", []):
                 g["versions"].add(v["name"])
@@ -134,7 +215,12 @@ class DashboardService:
             else:
                 groups["No Version"].append(issue)
         return [
-            {"version": k, "count": len(v), "issues": v}
+            {
+                "version": k,
+                "count": len(v),
+                "issues": v,
+                "total_qa_hours": round(sum(i.get("qa_estimate_hours") or 0 for i in v), 2),
+            }
             for k, v in sorted(groups.items(), key=lambda x: len(x[1]), reverse=True)
         ]
 
@@ -209,7 +295,7 @@ class DashboardService:
                     trend[day]["created"] += 1
                     if issue.get("issue_type") == "Bug":
                         trend[day]["bugs"] += 1
-            if issue.get("status") == self.jql.rft_status:
+            if issue.get("status") in self.jql.rft_statuses:
                 updated = issue.get("updated", "")
                 if updated:
                     day = updated[:10]
@@ -242,6 +328,26 @@ class DashboardService:
         if force_refresh:
             self.cache.invalidate(cache_key)
         return await self.cache.get_or_fetch(cache_key, lambda: self._fetch_rft(filters))
+
+    async def get_issue_transitions(self, issue_key: str) -> list[dict]:
+        return await self.jira.get_transitions(issue_key)
+
+    async def transition_issue(self, issue_key: str, transition_id: str) -> None:
+        await self.jira.transition_issue(issue_key, transition_id)
+        # The issue's status just changed under RFT/bugs/blockers JQL filters —
+        # drop every cached view so the next load reflects reality instead of
+        # showing a now-stale "Ready for Testing" row for this issue.
+        self.cache.invalidate_all()
+
+    async def reassign_qa_owner(self, issue_key: str, account_id: Optional[str]) -> None:
+        """Reassign the QA Owner. Uses the dedicated custom field if field_mapping.yaml
+        configures one; otherwise "QA Owner" is just the standard Jira assignee."""
+        qa_owner_field = self.mapping["jira"]["fields"].get("qa_owner")
+        if qa_owner_field:
+            await self.jira.set_custom_user_field(issue_key, qa_owner_field, account_id)
+        else:
+            await self.jira.set_assignee(issue_key, account_id)
+        self.cache.invalidate_all()
 
     async def get_bugs(self, filters: dict | None = None, force_refresh: bool = False) -> list[dict]:
         if force_refresh:
@@ -296,9 +402,17 @@ class DashboardService:
                 by_reporter[reporter_name] += 1
 
             story_by_status: dict[str, int] = defaultdict(int)
+            stories_list = []
             for s in stories_raw:
-                st = ((s.get("fields") or {}).get("status") or {}).get("name") or "Unknown"
+                f = s.get("fields") or {}
+                st = (f.get("status") or {}).get("name") or "Unknown"
                 story_by_status[st] += 1
+                stories_list.append({
+                    "key":     s["key"],
+                    "url":     f"{self.jira_base_url}/browse/{s['key']}",
+                    "summary": f.get("summary", ""),
+                    "status":  st,
+                })
 
             open_bugs = sum(1 for b in bugs if b.get("status_category") != "Done")
             high_critical = sum(1 for b in bugs if b.get("priority") in ("Highest", "Critical", "High"))
@@ -329,6 +443,7 @@ class DashboardService:
                         {"status": s, "count": c}
                         for s, c in sorted(story_by_status.items(), key=lambda x: -x[1])
                     ],
+                    "stories": stories_list,
                 },
             }
 
@@ -426,9 +541,17 @@ class DashboardService:
                 by_reporter[reporter_name] += 1
 
             story_by_status: dict[str, int] = defaultdict(int)
+            stories_list = []
             for s in stories_raw:
-                st = ((s.get("fields") or {}).get("status") or {}).get("name") or "Unknown"
+                f = s.get("fields") or {}
+                st = (f.get("status") or {}).get("name") or "Unknown"
                 story_by_status[st] += 1
+                stories_list.append({
+                    "key":     s["key"],
+                    "url":     f"{self.jira_base_url}/browse/{s['key']}",
+                    "summary": f.get("summary", ""),
+                    "status":  st,
+                })
 
             open_bugs = sum(1 for b in bugs if b.get("status_category") != "Done")
             high_critical = sum(1 for b in bugs if b.get("priority") in ("Highest", "Critical", "High"))
@@ -459,6 +582,7 @@ class DashboardService:
                         {"status": s, "count": c}
                         for s, c in sorted(story_by_status.items(), key=lambda x: -x[1])
                     ],
+                    "stories": stories_list,
                 },
             }
 

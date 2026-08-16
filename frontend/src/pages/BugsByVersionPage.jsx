@@ -81,11 +81,19 @@ const STORY_STATUS_COLOR = {
 }
 
 function StoryStatusPanel({ stats }) {
-  const total = stats?.stories_total ?? 0
-  const done  = stats?.stories_done  ?? 0
+  const [activeStatus, setActiveStatus] = useState(null)
+  const total    = stats?.stories_total ?? 0
+  const done     = stats?.stories_done  ?? 0
   const byStatus = stats?.stories_by_status || []
+  const stories  = stats?.stories || []
   if (total === 0) return null
   const pct = total ? Math.round(done / total * 100) : 0
+
+  const visibleStories = activeStatus
+    ? stories.filter(s => s.status === activeStatus)
+    : []
+
+  const toggle = (status) => setActiveStatus(prev => prev === status ? null : status)
 
   return (
     <div className="card">
@@ -98,19 +106,43 @@ function StoryStatusPanel({ stats }) {
       <div className="w-full bg-gray-100 rounded-full h-2 mb-4">
         <div className="bg-green-500 h-2 rounded-full transition-all" style={{ width: `${pct}%` }} />
       </div>
-      {/* Status pills */}
+      {/* Status pills — click to expand */}
       <div className="flex flex-wrap gap-2">
         {byStatus.map(({ status, count }) => (
-          <span
+          <button
             key={status}
-            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium
+            onClick={() => toggle(status)}
+            className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full border text-xs font-medium transition-all
+              ${activeStatus === status ? 'ring-2 ring-offset-1 ring-indigo-400 shadow-md' : 'hover:shadow-sm'}
               ${STORY_STATUS_COLOR[status] || 'bg-gray-100 text-gray-600 border-gray-200'}`}
           >
             {status}
             <span className="font-bold">{count}</span>
-          </span>
+          </button>
         ))}
       </div>
+
+      {/* Expanded story list */}
+      {activeStatus && visibleStories.length > 0 && (
+        <div className="mt-4 border-t border-gray-100 pt-3 space-y-1.5">
+          <p className="text-xs font-semibold text-gray-500 mb-2 uppercase tracking-wide">
+            {activeStatus} — {visibleStories.length} {visibleStories.length === 1 ? 'story' : 'stories'}
+          </p>
+          {visibleStories.map(s => (
+            <div key={s.key} className="flex items-start gap-2.5 group">
+              <a
+                href={s.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="shrink-0 font-mono text-xs text-indigo-600 hover:underline font-medium mt-0.5"
+              >
+                {s.key} ↗
+              </a>
+              <span className="text-xs text-gray-700 leading-snug">{s.summary}</span>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   )
 }
