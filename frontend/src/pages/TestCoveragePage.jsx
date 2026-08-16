@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useRef, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { Header } from '../components/layout/Header'
@@ -20,6 +20,8 @@ const assignTest          = (body) => api.post('/coverage/assign-test', body).th
 const getRegressionTests  = ()     => api.get('/coverage/regression-tests').then(r => r.data)
 const generateStoryTests  = (body) => api.post('/coverage/generate-story-tests', body, { timeout: 120000 }).then(r => r.data)
 const createStoryTests    = (body) => api.post('/coverage/create-story-tests', body).then(r => r.data)
+const getTestTransitions  = (k)    => api.get(`/coverage/test-transitions/${k}`).then(r => r.data)
+const postTestTransition  = (body) => api.post('/coverage/test-transition', body).then(r => r.data)
 
 const TABS = ['By Version', 'Unlinked Tests']
 
@@ -213,6 +215,102 @@ function AssignDialog({ testKey, versions, onClose, onSuccess }) {
           </div>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Status Changer ─────────────────────────────────────────────────────────────
+function StatusChanger({ testKey, currentStatus, onChanged }) {
+  const queryClient = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [transitions, setTransitions] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [applying, setApplying] = useState(false)
+  const [localStatus, setLocalStatus] = useState(currentStatus)
+  const containerRef = useRef(null)
+
+  useEffect(() => { setLocalStatus(currentStatus) }, [currentStatus])
+
+  useEffect(() => {
+    if (!open) return
+    const close = (e) => {
+      if (containerRef.current && !containerRef.current.contains(e.target)) setOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
+  const openDropdown = async (e) => {
+    e.stopPropagation()
+    if (open) { setOpen(false); return }
+    setLoading(true)
+    try {
+      const data = await getTestTransitions(testKey)
+      setTransitions(data.transitions || [])
+      setOpen(true)
+    } catch (err) {
+      console.error('transitions fetch failed:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const apply = async (e, t) => {
+    e.stopPropagation()
+    setOpen(false)
+    setApplying(true)
+    const next = t.to_status || t.name
+    try {
+      await postTestTransition({ test_key: testKey, transition_id: t.id })
+      setLocalStatus(next)
+      queryClient.invalidateQueries(['coverage-version'])
+      queryClient.invalidateQueries(['coverage-regression'])
+      onChanged?.(next)
+    } catch (err) {
+      console.error('transition failed:', err)
+    } finally {
+      setApplying(false)
+    }
+  }
+
+  const cls = STATUS_COLORS[localStatus] || 'bg-gray-100 text-gray-600'
+
+  return (
+    <div className="relative inline-block" ref={containerRef}>
+      <button
+        onClick={openDropdown}
+        disabled={applying}
+        title="Change status"
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium transition-opacity cursor-pointer select-none
+          ${cls} ${applying ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-75'}`}
+      >
+        {(applying || loading) && (
+          <span className="h-2.5 w-2.5 border border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+        )}
+        <span>{localStatus || '—'}</span>
+        {!applying && !loading && <ChevronDown className="h-2.5 w-2.5 opacity-50 flex-shrink-0" />}
+      </button>
+
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-2xl min-w-[180px] py-1">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 py-1.5 border-b border-gray-100">
+            Transition to…
+          </p>
+          {transitions.length === 0 && (
+            <p className="text-xs text-gray-400 px-3 py-2">No transitions available</p>
+          )}
+          {transitions.map(t => {
+            const toCls = STATUS_COLORS[t.to_status] || 'bg-gray-100 text-gray-500'
+            return (
+              <button key={t.id} onClick={(e) => apply(e, t)}
+                className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 transition-colors flex items-center justify-between gap-3">
+                <span className="text-gray-700 font-medium">{t.name}</span>
+                <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${toCls}`}>{t.to_status}</span>
+              </button>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -538,19 +636,21 @@ function EpicRow({ epic, search, onGenerate }) {
                     </td>
                     <td className="px-4 py-2.5">
                       {story.test_count > 0 ? (
-                        <div className="space-y-0.5">
-                          {(story.test_keys || []).slice(0, 4).map(k => (
-                            <a key={k}
-                              href={`${jiraBase}/browse/${k}`}
-                              target="_blank" rel="noopener noreferrer"
-                              className="flex items-center gap-1 text-xs font-mono text-purple-600 hover:underline w-fit">
-                              <CheckCircle2 className="h-3 w-3 text-green-500 flex-shrink-0" />
-                              {k} <ExternalLink className="h-2.5 w-2.5 opacity-60" />
-                            </a>
+                        <div className="space-y-1">
+                          {(story.test_cases || (story.test_keys || []).map(k => ({ key: k, status: '' }))).slice(0, 4).map(tc => (
+                            <div key={tc.key} className="flex items-center gap-1.5">
+                              <a href={`${jiraBase}/browse/${tc.key}`}
+                                target="_blank" rel="noopener noreferrer"
+                                onClick={e => e.stopPropagation()}
+                                className="text-xs font-mono text-purple-600 hover:underline flex items-center gap-0.5 flex-shrink-0">
+                                {tc.key} <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+                              </a>
+                              <StatusChanger testKey={tc.key} currentStatus={tc.status} />
+                            </div>
                           ))}
-                          {story.test_keys?.length > 4 && (
-                            <span className="text-xs text-gray-400 pl-4">
-                              +{story.test_keys.length - 4} more
+                          {(story.test_cases || story.test_keys || []).length > 4 && (
+                            <span className="text-xs text-gray-400">
+                              +{(story.test_cases || story.test_keys).length - 4} more
                             </span>
                           )}
                         </div>
@@ -739,7 +839,7 @@ function RegressionTestsSection({ query }) {
                     <span className="line-clamp-2">{test.summary}</span>
                   </td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
-                    <StatusPill status={test.status} />
+                    <StatusChanger testKey={test.key} currentStatus={test.status} />
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex flex-wrap gap-1">
@@ -1019,7 +1119,7 @@ export default function TestCoveragePage() {
                               <span className="line-clamp-2">{test.summary}</span>
                             </td>
                             <td className="px-4 py-2.5 whitespace-nowrap">
-                              <StatusPill status={test.status} />
+                              <StatusChanger testKey={test.key} currentStatus={test.status} />
                             </td>
                             <td className="px-4 py-2.5 whitespace-nowrap text-xs text-gray-500">
                               {test.versions?.length > 0 ? test.versions.join(', ') : (

@@ -104,20 +104,19 @@ class CoverageService:
                 # Count test case links — accept multiple link type names,
                 # check both inward and outward sides
                 links = f.get("issuelinks") or []
-                tc_keys = []
+                tc_cases: list[dict] = []   # [{key, status}]
                 tc_statuses: dict[str, int] = {}
                 for lk in links:
                     if lk.get("type", {}).get("name") in TEST_LINK_TYPES:
                         for side in ("inwardIssue", "outwardIssue"):
                             linked = lk.get(side)
                             if linked:
-                                tc_keys.append(linked["key"])
-                                # Status is embedded in the link object
                                 st = (
                                     (linked.get("fields") or {})
                                     .get("status", {})
                                     .get("name", "Unknown")
                                 )
+                                tc_cases.append({"key": linked["key"], "status": st})
                                 tc_statuses[st] = tc_statuses.get(st, 0) + 1
 
                 stories.append({
@@ -126,8 +125,9 @@ class CoverageService:
                     "summary":      f.get("summary", ""),
                     "status":       (f.get("status") or {}).get("name", ""),
                     "epic_key":     epic_key,
-                    "test_count":   len(tc_keys),
-                    "test_keys":    tc_keys,
+                    "test_count":   len(tc_cases),
+                    "test_keys":    [t["key"] for t in tc_cases],
+                    "test_cases":   tc_cases,
                     "test_statuses": tc_statuses,
                 })
                 if epic_key:

@@ -8,6 +8,7 @@ from typing import Optional
 
 from app.services.coverage_service import get_coverage_service
 from app.services.test_generator_service import TestGeneratorService
+from app.jira.client import get_jira_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/coverage", tags=["coverage"])
@@ -28,6 +29,11 @@ class CreateStoryTestsRequest(BaseModel):
     story_key: str
     test_cases: list[dict]
     fix_version: str = ""
+
+
+class TestTransitionRequest(BaseModel):
+    test_key: str
+    transition_id: str
 
 
 @router.get("/versions")
@@ -128,6 +134,44 @@ async def create_story_tests(body: CreateStoryTestsRequest):
         return {"created": created, "total": len(created), "ok": sum(1 for c in created if c.get("ok"))}
     except Exception as e:
         logger.error(f"create_story_tests error for {body.story_key}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/test-transitions/{test_key}")
+async def get_test_transitions(test_key: str):
+    """Get available Jira workflow transitions for a test issue."""
+    try:
+        jira = get_jira_client()
+        data = await jira.get(f"/issue/{test_key}/transitions")
+        transitions = [
+            {
+                "id":        t["id"],
+                "name":      t["name"],
+                "to_status": (t.get("to") or {}).get("name", ""),
+            }
+            for t in (data.get("transitions") or [])
+        ]
+        return {"transitions": transitions}
+    except Exception as e:
+        logger.error(f"get_test_transitions error for {test_key}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/test-transition")
+async def perform_test_transition(body: TestTransitionRequest):
+    """Perform a Jira workflow transition on a test issue."""
+    try:
+        jira = get_jira_client()
+        await jira.post(
+            f"/issue/{body.test_key}/transitions",
+            {"transition": {"id": body.transition_id}},
+        )
+        # Invalidate caches so the new status is reflected on next load
+        svc = get_coverage_service()
+        svc.cache.invalidate("coverage:regression_tests")
+        return {"ok": True}
+    except Exception as e:
+        logger.error(f"perform_test_transition error for {body.test_key}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
