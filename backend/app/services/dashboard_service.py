@@ -391,6 +391,7 @@ class DashboardService:
                 ),
             )
             bugs = self.mapper.map_issues(bugs_raw)
+            bugs = await self._apply_qa_estimates(bugs)
 
             by_status: dict[str, int] = defaultdict(int)
             by_priority: dict[str, int] = defaultdict(int)
@@ -530,6 +531,7 @@ class DashboardService:
                 ),
             )
             bugs = self.mapper.map_issues(bugs_raw)
+            bugs = await self._apply_qa_estimates(bugs)
 
             by_status: dict[str, int] = defaultdict(int)
             by_priority: dict[str, int] = defaultdict(int)

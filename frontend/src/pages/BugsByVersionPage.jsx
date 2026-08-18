@@ -149,6 +149,7 @@ function StoryStatusPanel({ stats }) {
 
 function BugResults({ data, refetch }) {
   const [activeStatuses, setActiveStatuses] = useState(new Set())
+  const [qaOverrides, setQaOverrides] = useState({})
   const allBugs = data?.bugs || []
   const stats   = data?.stats || {}
 
@@ -164,9 +165,28 @@ function BugResults({ data, refetch }) {
   )
 
   const visibleBugs = useMemo(() => {
-    if (activeStatuses.size === 0) return allBugs
-    return allBugs.filter(b => activeStatuses.has(b.status))
-  }, [allBugs, activeStatuses])
+    const base = activeStatuses.size === 0 ? allBugs : allBugs.filter(b => activeStatuses.has(b.status))
+    return base.map(b => ({
+      ...b,
+      qa_estimate_hours: qaOverrides[b.key] !== undefined ? qaOverrides[b.key] : b.qa_estimate_hours,
+    }))
+  }, [allBugs, activeStatuses, qaOverrides])
+
+  const totalQaHours = useMemo(
+    () => visibleBugs.reduce((sum, b) => sum + (b.qa_estimate_hours || 0), 0),
+    [visibleBugs]
+  )
+
+  const handleQaEstimateChanged = useCallback((key, hours) => {
+    setQaOverrides(prev => {
+      if (hours === null) {
+        const next = { ...prev }
+        delete next[key]
+        return next
+      }
+      return { ...prev, [key]: hours }
+    })
+  }, [])
 
   function toggleStatus(key) {
     setActiveStatuses(prev => {
@@ -297,11 +317,22 @@ function BugResults({ data, refetch }) {
           <h3 className="text-sm font-semibold text-gray-700">
             {isFiltered ? `Bugs — ${[...activeStatuses].join(' + ')}` : 'All Bugs'}
           </h3>
-          <span className="text-xs text-gray-400">{visibleBugs.length} bug{visibleBugs.length !== 1 ? 's' : ''}</span>
+          <div className="flex items-center gap-4">
+            {totalQaHours > 0 && (
+              <span className="text-xs text-gray-500">
+                Total QA: <strong className="text-gray-800">{totalQaHours.toFixed(1)}h</strong>
+              </span>
+            )}
+            <span className="text-xs text-gray-400">{visibleBugs.length} bug{visibleBugs.length !== 1 ? 's' : ''}</span>
+          </div>
         </div>
         {visibleBugs.length === 0
           ? <p className="text-sm text-gray-400 text-center py-8">No bugs match the selected filters.</p>
-          : <IssueTable issues={visibleBugs} />
+          : <IssueTable
+              issues={visibleBugs}
+              editableQaEstimate={true}
+              onQaEstimateChanged={handleQaEstimateChanged}
+            />
         }
       </div>
     </>
