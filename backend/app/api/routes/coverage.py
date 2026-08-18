@@ -170,11 +170,10 @@ async def perform_test_transition(body: TestTransitionRequest):
             f"/issue/{body.test_key}/transitions",
             {"transition": {"id": body.transition_id}},
         )
-        # Invalidate caches so the new status is reflected on next load
+        # Invalidate the label-keyed cache for the version family
         svc = get_coverage_service()
-        svc.cache.invalidate("coverage:regression_tests")
-        if body.version:
-            svc.cache.invalidate(f"coverage:regression_tests:{body.version}")
+        label = svc._regression_label(body.version)
+        svc.cache.invalidate(f"coverage:regression_tests:{label}")
         return {"ok": True}
     except Exception as e:
         logger.error(f"perform_test_transition error for {body.test_key}: {e}", exc_info=True)

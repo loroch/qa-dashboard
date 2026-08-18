@@ -231,52 +231,55 @@ class CoverageService:
 
         return await self.cache.get_or_fetch(CACHE_KEY_UNLINKED, fetch, ttl=300)
 
+    # Map version-name prefix (uppercase) → regression label in Jira
+    _VERSION_LABEL_MAP: list[tuple[str, str]] = [
+        ("K1-S",  "REGRESSION_TEST"),
+        ("CI-MG", "REGRESSION_TEST_CI"),
+        ("MG-CI", "REGRESSION_TEST_CI"),
+    ]
+
+    def _regression_label(self, version: str | None) -> str:
+        """Return the Jira label to use for the regression suite of a given version."""
+        if not version:
+            return "REGRESSION_TEST"
+        v = version.upper()
+        for prefix, label in self._VERSION_LABEL_MAP:
+            if v.startswith(prefix):
+                return label
+        return "REGRESSION_TEST"  # fallback
+
     async def get_regression_tests(self, version: str | None = None, force_refresh: bool = False) -> dict:
-        """Return Test issues whose labels contain 'regression_test' (case-insensitive).
+        """Return Test issues for the regression suite that matches the version family.
 
-        When version is given: fetch all Test issues for that fixVersion, then
-        filter client-side for any label matching /regression.?test/i — this
-        catches REGRESSION_TEST, regression_test, REGRESSION_TEST_K1, etc.
-
-        When no version: fall back to the exact JQL label filter.
+        Label mapping (by version prefix):
+          K1-S-*   → REGRESSION_TEST
+          CI-MG-*  → REGRESSION_TEST_CI
+          MG-CI-*  → REGRESSION_TEST_CI
+        No fixVersion filter — the label is the version-family identifier.
         """
-        import re
-        _REGRESSION_RE = re.compile(r'regression.?test', re.IGNORECASE)
-
-        cache_key = f"coverage:regression_tests:{version}" if version else "coverage:regression_tests"
+        label = self._regression_label(version)
+        cache_key = f"coverage:regression_tests:{label}"
         if force_refresh:
             self.cache.invalidate(cache_key)
 
         async def fetch():
-            if version:
-                # Fetch ALL Test issues for this fixVersion, filter labels in Python
-                jql = (
-                    f'issuetype = Test AND fixVersion = "{version}" '
-                    f'ORDER BY status ASC, key ASC'
-                )
-            else:
-                jql = (
-                    'issuetype = Test AND labels = "REGRESSION_TEST" '
-                    'ORDER BY status ASC, key ASC'
-                )
+            jql = (
+                f'issuetype = Test AND labels = "{label}" '
+                f'ORDER BY status ASC, key ASC'
+            )
             tests_raw = await self._fetch_all(
                 jql,
-                fields=["summary", "status", "labels", "fixVersions"],
+                fields=["summary", "status", "labels"],
             )
             tests = []
             for issue in tests_raw:
                 f = issue.get("fields", {})
-                labels = f.get("labels") or []
-                # When scoped to a version, only include tests whose labels
-                # contain "regression_test" (case-insensitive, any variant)
-                if version and not any(_REGRESSION_RE.search(lbl) for lbl in labels):
-                    continue
                 tests.append({
                     "key":     issue["key"],
                     "url":     self._issue_url(issue["key"]),
                     "summary": f.get("summary", ""),
                     "status":  (f.get("status") or {}).get("name", ""),
-                    "labels":  labels,
+                    "labels":  f.get("labels") or [],
                 })
             status_counts: dict[str, int] = {}
             for t in tests:
@@ -286,6 +289,7 @@ class CoverageService:
                 "tests":         tests,
                 "total":         len(tests),
                 "status_counts": status_counts,
+                "label":         label,
             }
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)

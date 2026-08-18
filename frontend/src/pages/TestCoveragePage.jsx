@@ -725,7 +725,7 @@ function RegressionTestsSection({ query, version }) {
         <FlaskConical className="h-4 w-4 text-purple-400 flex-shrink-0" />
         <div className="flex-1 min-w-0">
           <span className="text-sm font-semibold text-purple-800">Regression Tests</span>
-          <span className="ml-2 text-xs text-purple-500">label: REGRESSION_TEST* · fixVersion: {version || 'global'} · issuetype: Test</span>
+          <span className="ml-2 text-xs text-purple-500">label: {query.data?.label || 'REGRESSION_TEST'} · issuetype: Test</span>
         </div>
         <div className="flex items-center gap-3 flex-shrink-0">
           {query.isLoading && <span className="text-xs text-gray-400">Loading…</span>}
