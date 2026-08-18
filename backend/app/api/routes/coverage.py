@@ -34,6 +34,7 @@ class CreateStoryTestsRequest(BaseModel):
 class TestTransitionRequest(BaseModel):
     test_key: str
     transition_id: str
+    version: Optional[str] = None
 
 
 @router.get("/versions")
@@ -93,11 +94,14 @@ async def assign_test(body: AssignTestRequest):
 
 
 @router.get("/regression-tests")
-async def get_regression_tests(refresh: bool = Query(False)):
-    """All Test issues labeled REGRESSION_TEST (global regression suite)."""
+async def get_regression_tests(
+    version: Optional[str] = Query(None, description="Fix version to scope regression tests"),
+    refresh: bool = Query(False),
+):
+    """Test issues labeled REGRESSION_TEST, scoped to a fix version when provided."""
     try:
         svc = get_coverage_service()
-        return await svc.get_regression_tests(force_refresh=refresh)
+        return await svc.get_regression_tests(version=version or None, force_refresh=refresh)
     except Exception as e:
         logger.error(f"Coverage regression tests error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
@@ -169,6 +173,8 @@ async def perform_test_transition(body: TestTransitionRequest):
         # Invalidate caches so the new status is reflected on next load
         svc = get_coverage_service()
         svc.cache.invalidate("coverage:regression_tests")
+        if body.version:
+            svc.cache.invalidate(f"coverage:regression_tests:{body.version}")
         return {"ok": True}
     except Exception as e:
         logger.error(f"perform_test_transition error for {body.test_key}: {e}", exc_info=True)

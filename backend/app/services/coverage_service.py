@@ -231,20 +231,26 @@ class CoverageService:
 
         return await self.cache.get_or_fetch(CACHE_KEY_UNLINKED, fetch, ttl=300)
 
-    async def get_regression_tests(self, force_refresh: bool = False) -> dict:
-        """Return all Test issues labeled REGRESSION_TEST (global regression suite)."""
-        cache_key = "coverage:regression_tests"
+    async def get_regression_tests(self, version: str | None = None, force_refresh: bool = False) -> dict:
+        """Return Test issues labeled REGRESSION_TEST, optionally filtered by fixVersion."""
+        cache_key = f"coverage:regression_tests:{version}" if version else "coverage:regression_tests"
         if force_refresh:
             self.cache.invalidate(cache_key)
 
         async def fetch():
-            jql = (
-                'issuetype = Test AND labels = "REGRESSION_TEST" '
-                'ORDER BY status ASC, key ASC'
-            )
+            if version:
+                jql = (
+                    f'issuetype = Test AND labels = "REGRESSION_TEST" AND fixVersion = "{version}" '
+                    f'ORDER BY status ASC, key ASC'
+                )
+            else:
+                jql = (
+                    'issuetype = Test AND labels = "REGRESSION_TEST" '
+                    'ORDER BY status ASC, key ASC'
+                )
             tests_raw = await self._fetch_all(
                 jql,
-                fields=["summary", "status", "labels"],
+                fields=["summary", "status", "labels", "fixVersions"],
             )
             tests = []
             for issue in tests_raw:

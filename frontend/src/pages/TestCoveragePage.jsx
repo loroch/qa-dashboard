@@ -17,7 +17,7 @@ const getByVersion   = (v)       => api.get(`/coverage/by-version?version=${enco
 const getUnlinked    = ()        => api.get('/coverage/unlinked-tests').then(r => r.data)
 const searchStories  = (q)       => api.get(`/coverage/search-stories?q=${encodeURIComponent(q)}`).then(r => r.data)
 const assignTest          = (body) => api.post('/coverage/assign-test', body).then(r => r.data)
-const getRegressionTests  = ()     => api.get('/coverage/regression-tests').then(r => r.data)
+const getRegressionTests  = (v)    => api.get(`/coverage/regression-tests${v ? `?version=${encodeURIComponent(v)}` : ''}`).then(r => r.data)
 const generateStoryTests  = (body) => api.post('/coverage/generate-story-tests', body, { timeout: 120000 }).then(r => r.data)
 const createStoryTests    = (body) => api.post('/coverage/create-story-tests', body).then(r => r.data)
 const getTestTransitions  = (k)    => api.get(`/coverage/test-transitions/${k}`).then(r => r.data)
@@ -220,7 +220,7 @@ function AssignDialog({ testKey, versions, onClose, onSuccess }) {
 }
 
 // ── Status Changer ─────────────────────────────────────────────────────────────
-function StatusChanger({ testKey, currentStatus, onChanged }) {
+function StatusChanger({ testKey, currentStatus, version, onChanged }) {
   const queryClient = useQueryClient()
   const [open, setOpen] = useState(false)
   const [transitions, setTransitions] = useState([])
@@ -261,10 +261,10 @@ function StatusChanger({ testKey, currentStatus, onChanged }) {
     setApplying(true)
     const next = t.to_status || t.name
     try {
-      await postTestTransition({ test_key: testKey, transition_id: t.id })
+      await postTestTransition({ test_key: testKey, transition_id: t.id, version: version || null })
       setLocalStatus(next)
       queryClient.invalidateQueries(['coverage-version'])
-      queryClient.invalidateQueries(['coverage-regression'])
+      queryClient.invalidateQueries(['coverage-regression', version])
       onChanged?.(next)
     } catch (err) {
       console.error('transition failed:', err)
@@ -552,7 +552,7 @@ function GenerateTestModal({ storyKey, storySummary, version, onClose, onCreated
 }
 
 // ── Epic Row ───────────────────────────────────────────────────────────────────
-function EpicRow({ epic, search, onGenerate }) {
+function EpicRow({ epic, search, version, onGenerate }) {
   const [expanded, setExpanded] = useState(true)
 
   const visibleStories = useMemo(() => {
@@ -645,7 +645,7 @@ function EpicRow({ epic, search, onGenerate }) {
                                 className="text-xs font-mono text-purple-600 hover:underline flex items-center gap-0.5 flex-shrink-0">
                                 {tc.key} <ExternalLink className="h-2.5 w-2.5 opacity-60" />
                               </a>
-                              <StatusChanger testKey={tc.key} currentStatus={tc.status} />
+                              <StatusChanger testKey={tc.key} currentStatus={tc.status} version={version} />
                             </div>
                           ))}
                           {(story.test_cases || story.test_keys || []).length > 4 && (
@@ -689,7 +689,7 @@ const DONE_STATUSES = new Set(['Done', 'DONE', 'Passed', 'PASSED'])
 const IN_PROGRESS_STATUSES = new Set(['In Progress', 'In Review', 'Validation'])
 const BLOCKED_STATUSES = new Set(['Blocked', 'Reopened'])
 
-function RegressionTestsSection({ query }) {
+function RegressionTestsSection({ query, version }) {
   const [expanded, setExpanded] = useState(false)
   const data = query.data
 
@@ -839,7 +839,7 @@ function RegressionTestsSection({ query }) {
                     <span className="line-clamp-2">{test.summary}</span>
                   </td>
                   <td className="px-4 py-2.5 whitespace-nowrap">
-                    <StatusChanger testKey={test.key} currentStatus={test.status} />
+                    <StatusChanger testKey={test.key} currentStatus={test.status} version={version} />
                   </td>
                   <td className="px-4 py-2.5">
                     <div className="flex flex-wrap gap-1">
@@ -895,8 +895,8 @@ export default function TestCoveragePage() {
   })
 
   const regressionQuery = useQuery({
-    queryKey: ['coverage-regression'],
-    queryFn: getRegressionTests,
+    queryKey: ['coverage-regression', selectedVersion],
+    queryFn: () => getRegressionTests(selectedVersion),
     enabled: !!selectedVersion,
     staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
@@ -904,7 +904,7 @@ export default function TestCoveragePage() {
 
   const { lastRefresh, isRefreshing, refresh } = useAutoRefresh([
     ['coverage-version', selectedVersion],
-    ['coverage-regression'],
+    ['coverage-regression', selectedVersion],
     ['coverage-unlinked'],
   ])
 
@@ -1049,12 +1049,12 @@ export default function TestCoveragePage() {
                   {/* Epic/Story list */}
                   <div className="space-y-3">
                     {filteredEpics.map(epic => (
-                      <EpicRow key={epic.epic_key} epic={epic} search={storySearch} onGenerate={setGenerateTarget} />
+                      <EpicRow key={epic.epic_key} epic={epic} search={storySearch} version={selectedVersion} onGenerate={setGenerateTarget} />
                     ))}
                     {filteredEpics.length === 0 && (
                       <p className="text-center py-8 text-gray-400 text-sm">No results found.</p>
                     )}
-                    <RegressionTestsSection query={regressionQuery} />
+                    <RegressionTestsSection query={regressionQuery} version={selectedVersion} />
                   </div>
                 </>
               )}
