@@ -258,15 +258,22 @@ class CoverageService:
         No fixVersion filter — the label is the version-family identifier.
         """
         label = self._regression_label(version)
-        cache_key = f"coverage:regression_tests:{label}"
+        cache_key = f"coverage:regression_tests:{version or label}"
         if force_refresh:
             self.cache.invalidate(cache_key)
 
         async def fetch():
-            jql = (
-                f'issuetype = Test AND labels = "{label}" '
-                f'ORDER BY status ASC, key ASC'
-            )
+            if version:
+                # Both conditions required: label (version family) + exact fixVersion
+                jql = (
+                    f'issuetype = Test AND labels = "{label}" AND fixVersion = "{version}" '
+                    f'ORDER BY status ASC, key ASC'
+                )
+            else:
+                jql = (
+                    f'issuetype = Test AND labels = "{label}" '
+                    f'ORDER BY status ASC, key ASC'
+                )
             tests_raw = await self._fetch_all(
                 jql,
                 fields=["summary", "status", "labels"],
