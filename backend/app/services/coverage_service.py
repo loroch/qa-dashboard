@@ -232,15 +232,26 @@ class CoverageService:
         return await self.cache.get_or_fetch(CACHE_KEY_UNLINKED, fetch, ttl=300)
 
     async def get_regression_tests(self, version: str | None = None, force_refresh: bool = False) -> dict:
-        """Return Test issues labeled REGRESSION_TEST, optionally filtered by fixVersion."""
+        """Return Test issues whose labels contain 'regression_test' (case-insensitive).
+
+        When version is given: fetch all Test issues for that fixVersion, then
+        filter client-side for any label matching /regression.?test/i — this
+        catches REGRESSION_TEST, regression_test, REGRESSION_TEST_K1, etc.
+
+        When no version: fall back to the exact JQL label filter.
+        """
+        import re
+        _REGRESSION_RE = re.compile(r'regression.?test', re.IGNORECASE)
+
         cache_key = f"coverage:regression_tests:{version}" if version else "coverage:regression_tests"
         if force_refresh:
             self.cache.invalidate(cache_key)
 
         async def fetch():
             if version:
+                # Fetch ALL Test issues for this fixVersion, filter labels in Python
                 jql = (
-                    f'issuetype = Test AND labels = "REGRESSION_TEST" AND fixVersion = "{version}" '
+                    f'issuetype = Test AND fixVersion = "{version}" '
                     f'ORDER BY status ASC, key ASC'
                 )
             else:
@@ -255,12 +266,17 @@ class CoverageService:
             tests = []
             for issue in tests_raw:
                 f = issue.get("fields", {})
+                labels = f.get("labels") or []
+                # When scoped to a version, only include tests whose labels
+                # contain "regression_test" (case-insensitive, any variant)
+                if version and not any(_REGRESSION_RE.search(lbl) for lbl in labels):
+                    continue
                 tests.append({
                     "key":     issue["key"],
                     "url":     self._issue_url(issue["key"]),
                     "summary": f.get("summary", ""),
                     "status":  (f.get("status") or {}).get("name", ""),
-                    "labels":  f.get("labels") or [],
+                    "labels":  labels,
                 })
             status_counts: dict[str, int] = {}
             for t in tests:
