@@ -11,7 +11,7 @@ import Changelog from './pages/Changelog'
 import ZohoDeskPage from './pages/ZohoDeskPage'
 import ZohoReportsPage from './pages/ZohoReportsPage'
 import TestCoveragePage from './pages/TestCoveragePage'
-import TestGeneratorPage from './pages/TestGeneratorPage'
+import AutomationPage from './pages/AutomationPage'
 import AnomalyPage from './pages/AnomalyPage'
 import BugsByVersionPage from './pages/BugsByVersionPage'
 import TestPlansPage from './pages/TestPlansPage'
@@ -21,6 +21,7 @@ import BugReporterPage from './pages/BugReporterPage'
 import BugTriagePage from './pages/BugTriagePage'
 import MexicoQAPage from './pages/MexicoQAPage'
 import KonePage from './pages/KonePage'
+import SprintPlanningPage from './pages/SprintPlanningPage'
 
 export default function App() {
   return (
@@ -40,7 +41,7 @@ export default function App() {
             <Route path="/zoho"              element={<ZohoDeskPage />} />
             <Route path="/zoho-reports"     element={<ZohoReportsPage />} />
             <Route path="/changelog"         element={<Changelog />} />
-            <Route path="/test-generator"    element={<TestGeneratorPage />} />
+            <Route path="/automation"        element={<AutomationPage />} />
             <Route path="/anomaly"           element={<AnomalyPage />} />
             <Route path="/bugs-by-version"   element={<BugsByVersionPage />} />
             <Route path="/test-plans"        element={<TestPlansPage />} />
@@ -50,6 +51,7 @@ export default function App() {
             <Route path="/bug-triage"        element={<BugTriagePage />} />
             <Route path="/mexico-qa"         element={<MexicoQAPage />} />
             <Route path="/kone"              element={<KonePage />} />
+            <Route path="/sprint-planning"   element={<SprintPlanningPage />} />
           </Routes>
         </main>
       </div>

@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, CheckSquare, Users, AlertTriangle,
-  Bug, Clock, TrendingUp, History, Ticket, BarChart2, FlaskConical, Wand2, Zap, Layers, ClipboardList, FileText, GitBranch, PenLine, Target, Globe
+  Bug, Clock, TrendingUp, History, Ticket, BarChart2, FlaskConical, PlayCircle, Zap, Layers, ClipboardList, FileText, GitBranch, PenLine, Target, Globe, CalendarDays
 } from 'lucide-react'
 
 const nav = [
@@ -16,10 +16,11 @@ const nav = [
   { to: '/zoho',           label: 'Zoho Desk',        icon: Ticket },
   { to: '/zoho-reports',  label: 'Zoho Reports',     icon: BarChart2 },
   { to: '/coverage',       label: 'Test Coverage',    icon: FlaskConical },
-  { to: '/test-generator', label: 'Test Generator',   icon: Wand2 },
+  { to: '/automation',     label: 'Automation',       icon: PlayCircle },
   { to: '/test-plans',     label: 'Test Plans',       icon: ClipboardList },
   { to: '/release-notes',  label: 'Release Notes',    icon: FileText },
   { to: '/investigation',  label: 'Investigation',    icon: GitBranch },
+  { to: '/sprint-planning', label: 'Sprint Planning',  icon: CalendarDays },
   { to: '/bug-triage',     label: 'Bug Priority Mtg', icon: Target },
   { to: '/mexico-qa',      label: 'Mexico QA Team',   icon: Globe },
   { to: '/kone',           label: 'K1-Support',        icon: Ticket },
