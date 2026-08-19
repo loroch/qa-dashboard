@@ -49,20 +49,41 @@ class SprintPlanningService:
                     if not boards:
                         return []
                     SprintPlanningService._board_id = boards[0]["id"]
-                sprint_data = await self.jira.agile_get(
-                    f"/board/{SprintPlanningService._board_id}/sprint",
-                    {"state": "active,future,closed", "maxResults": 100},
-                )
-                sprints = []
-                for s in sprint_data.get("values", []):
-                    sprints.append({
+
+                board_id = SprintPlanningService._board_id
+                sprint_params = {"state": "active,future,closed", "maxResults": 50}
+
+                # Step 1: probe the total so we can jump to the last page
+                probe = await self.jira.agile_get(f"/board/{board_id}/sprint", {**sprint_params, "startAt": 0})
+                total = probe.get("total", 0)
+                is_last = probe.get("isLast", False)
+
+                if total == 0:
+                    return []
+
+                # Step 2: if there are more sprints than one page, jump to the end
+                if not is_last and total > 50:
+                    # Fetch the last 50 (covers most recent sprints including any active/future)
+                    start_at = max(0, total - 50)
+                    last_page = await self.jira.agile_get(
+                        f"/board/{board_id}/sprint",
+                        {**sprint_params, "startAt": start_at},
+                    )
+                    raw_sprints = last_page.get("values", [])
+                else:
+                    raw_sprints = probe.get("values", [])
+
+                def _fmt(s: dict) -> dict:
+                    return {
                         "id": s["id"],
                         "name": s["name"],
                         "state": s.get("state", ""),
                         "start_date": s.get("startDate", ""),
                         "end_date": s.get("endDate", ""),
                         "complete_date": s.get("completeDate", ""),
-                    })
+                    }
+
+                sprints = [_fmt(s) for s in raw_sprints]
                 order = {"active": 0, "future": 1, "closed": 2}
                 sprints.sort(key=lambda x: (order.get(x["state"], 3), x.get("start_date", "") or ""))
 
@@ -86,9 +107,9 @@ class SprintPlanningService:
                     return False
 
                 windowed = [s for s in sprints if in_window(s)]
-                # If no sprints fall in the 3-month window (e.g. board is dormant),
-                # show the 20 most recent instead so the page is still usable
+                # Fall back to the 20 most recent when nothing matches the window
                 return windowed if windowed else sprints[-20:]
+
             except Exception as e:
                 logger.warning(f"Failed to fetch sprints: {e}")
                 SprintPlanningService._board_id = None
