@@ -54,19 +54,32 @@ function AgeTag({ created }) {
   return <span className={`text-xs ${cls}`} title={fmtDate(created)}>{days}d</span>
 }
 
-/* ── Status toggle cards (same pattern as BugsByVersionPage) ── */
+/* ── Status config — exhaustive list matching Jira workflow statuses ── */
 const STATUS_CFG = [
-  { key: 'To Do',             label: 'To Do',             bg: 'bg-gray-50',   border: 'border-gray-300',   text: 'text-gray-700',   activeBg: 'bg-gray-600',   activeText: 'text-white' },
-  { key: 'In Progress',       label: 'In Progress',       bg: 'bg-blue-50',   border: 'border-blue-300',   text: 'text-blue-700',   activeBg: 'bg-blue-600',   activeText: 'text-white' },
-  { key: 'In Review',         label: 'In Review',         bg: 'bg-indigo-50', border: 'border-indigo-300', text: 'text-indigo-700', activeBg: 'bg-indigo-600', activeText: 'text-white' },
-  { key: 'Ready for Testing', label: 'Ready for Testing', bg: 'bg-purple-50', border: 'border-purple-300', text: 'text-purple-700', activeBg: 'bg-purple-600', activeText: 'text-white' },
-  { key: 'Validation',        label: 'Validation',        bg: 'bg-violet-50', border: 'border-violet-300', text: 'text-violet-700', activeBg: 'bg-violet-600', activeText: 'text-white' },
-  { key: 'Reopened',          label: 'Reopened',          bg: 'bg-orange-50', border: 'border-orange-300', text: 'text-orange-700', activeBg: 'bg-orange-500', activeText: 'text-white' },
-  { key: 'Known Issue',       label: 'Known Issue',       bg: 'bg-yellow-50', border: 'border-yellow-300', text: 'text-yellow-700', activeBg: 'bg-yellow-500', activeText: 'text-white' },
-  { key: 'Blocked',           label: 'Blocked',           bg: 'bg-red-50',    border: 'border-red-300',    text: 'text-red-700',    activeBg: 'bg-red-600',    activeText: 'text-white' },
-  { key: 'Done',              label: 'Done',              bg: 'bg-green-50',  border: 'border-green-300',  text: 'text-green-700',  activeBg: 'bg-green-600',  activeText: 'text-white' },
-  { key: 'DONE',              label: 'Done',              bg: 'bg-green-50',  border: 'border-green-300',  text: 'text-green-700',  activeBg: 'bg-green-600',  activeText: 'text-white' },
+  { key: 'To Do',                label: 'To Do',                bg: 'bg-gray-50',   border: 'border-gray-300',   text: 'text-gray-700',   activeBg: 'bg-gray-600',   activeText: 'text-white' },
+  { key: 'ToDo',                 label: 'To Do',                bg: 'bg-gray-50',   border: 'border-gray-300',   text: 'text-gray-700',   activeBg: 'bg-gray-600',   activeText: 'text-white' },
+  { key: 'Open',                 label: 'Open',                 bg: 'bg-gray-50',   border: 'border-gray-300',   text: 'text-gray-700',   activeBg: 'bg-gray-600',   activeText: 'text-white' },
+  { key: 'In Progress',          label: 'In Progress',          bg: 'bg-blue-50',   border: 'border-blue-300',   text: 'text-blue-700',   activeBg: 'bg-blue-600',   activeText: 'text-white' },
+  { key: 'In Review',            label: 'In Review',            bg: 'bg-indigo-50', border: 'border-indigo-300', text: 'text-indigo-700', activeBg: 'bg-indigo-600', activeText: 'text-white' },
+  { key: 'Ready for Testing',    label: 'Ready for Testing',    bg: 'bg-purple-50', border: 'border-purple-300', text: 'text-purple-700', activeBg: 'bg-purple-600', activeText: 'text-white' },
+  { key: 'Validation',           label: 'Validation',           bg: 'bg-violet-50', border: 'border-violet-300', text: 'text-violet-700', activeBg: 'bg-violet-600', activeText: 'text-white' },
+  { key: 'Ready For Deployment', label: 'Ready for Deployment', bg: 'bg-teal-50',   border: 'border-teal-300',   text: 'text-teal-700',   activeBg: 'bg-teal-600',   activeText: 'text-white' },
+  { key: 'Ready for Deployment', label: 'Ready for Deployment', bg: 'bg-teal-50',   border: 'border-teal-300',   text: 'text-teal-700',   activeBg: 'bg-teal-600',   activeText: 'text-white' },
+  { key: 'Monitoring',           label: 'Monitoring',           bg: 'bg-cyan-50',   border: 'border-cyan-300',   text: 'text-cyan-700',   activeBg: 'bg-cyan-600',   activeText: 'text-white' },
+  { key: 'Done',                 label: 'Done',                 bg: 'bg-green-50',  border: 'border-green-300',  text: 'text-green-700',  activeBg: 'bg-green-600',  activeText: 'text-white' },
+  { key: 'DONE',                 label: 'Done',                 bg: 'bg-green-50',  border: 'border-green-300',  text: 'text-green-700',  activeBg: 'bg-green-600',  activeText: 'text-white' },
+  { key: 'Closed',               label: 'Closed',               bg: 'bg-green-50',  border: 'border-green-300',  text: 'text-green-700',  activeBg: 'bg-green-600',  activeText: 'text-white' },
+  { key: 'Reopened',             label: 'Reopened',             bg: 'bg-orange-50', border: 'border-orange-300', text: 'text-orange-700', activeBg: 'bg-orange-500', activeText: 'text-white' },
+  { key: 'Known Issue',          label: 'Known Issue',          bg: 'bg-yellow-50', border: 'border-yellow-300', text: 'text-yellow-700', activeBg: 'bg-yellow-500', activeText: 'text-white' },
+  { key: 'Blocked',              label: 'Blocked',              bg: 'bg-red-50',    border: 'border-red-300',    text: 'text-red-700',    activeBg: 'bg-red-600',    activeText: 'text-white' },
+  { key: 'Removed',              label: 'Removed',              bg: 'bg-gray-50',   border: 'border-gray-200',   text: 'text-gray-400',   activeBg: 'bg-gray-400',   activeText: 'text-white' },
 ]
+
+const STATUS_CFG_MAP = Object.fromEntries(STATUS_CFG.map(c => [c.key, c]))
+const STATUS_CFG_DEFAULT = {
+  bg: 'bg-slate-50', border: 'border-slate-200', text: 'text-slate-600',
+  activeBg: 'bg-slate-500', activeText: 'text-white',
+}
 
 function StatusToggle({ cfg, count, active, onClick }) {
   const { label, bg, border, text, activeBg, activeText } = cfg
@@ -547,10 +560,26 @@ export default function BugTriagePage() {
     return m
   }, [localBugs])
 
-  const presentCfgs = useMemo(
-    () => STATUS_CFG.filter(c => countByStatus[c.key] > 0),
-    [countByStatus]
-  )
+  // Build toggle list from actual statuses in the data, preserving predefined order
+  const presentCfgs = useMemo(() => {
+    const seen = new Set()
+    const result = []
+    // First: add statuses that are in our predefined list, in order
+    for (const cfg of STATUS_CFG) {
+      if (countByStatus[cfg.key] > 0 && !seen.has(cfg.key)) {
+        seen.add(cfg.key)
+        result.push(cfg)
+      }
+    }
+    // Then: add any remaining statuses from the data not in the predefined list
+    for (const s of Object.keys(countByStatus)) {
+      if (countByStatus[s] > 0 && !seen.has(s)) {
+        seen.add(s)
+        result.push({ key: s, label: s, ...STATUS_CFG_DEFAULT })
+      }
+    }
+    return result
+  }, [countByStatus])
 
   const byStatus = useMemo(() => {
     return Object.entries(countByStatus)
