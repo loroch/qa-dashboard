@@ -3,7 +3,7 @@ Sprint Planning service — local sprint management layer on top of Jira.
 Stores QA activities and RTF tracking in SQLite; reads sprint/story data from Jira.
 """
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 from sqlalchemy import select, delete
 
@@ -51,7 +51,7 @@ class SprintPlanningService:
                     SprintPlanningService._board_id = boards[0]["id"]
                 sprint_data = await self.jira.agile_get(
                     f"/board/{SprintPlanningService._board_id}/sprint",
-                    {"state": "active,future,closed", "maxResults": 50},
+                    {"state": "active,future,closed", "maxResults": 100},
                 )
                 sprints = []
                 for s in sprint_data.get("values", []):
@@ -65,7 +65,30 @@ class SprintPlanningService:
                     })
                 order = {"active": 0, "future": 1, "closed": 2}
                 sprints.sort(key=lambda x: (order.get(x["state"], 3), x.get("start_date", "") or ""))
-                return sprints[:25]
+
+                # Prefer sprints in [now-90d, now+90d]; fall back to last 20 if none match
+                now = datetime.now(timezone.utc)
+                window_start = now - timedelta(days=90)
+                window_end = now + timedelta(days=90)
+
+                def in_window(sp: dict) -> bool:
+                    if sp["state"] == "active":
+                        return True
+                    for key in ("start_date", "end_date", "complete_date"):
+                        raw = sp.get(key)
+                        if raw:
+                            try:
+                                dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                                if window_start <= dt <= window_end:
+                                    return True
+                            except Exception:
+                                pass
+                    return False
+
+                windowed = [s for s in sprints if in_window(s)]
+                # If no sprints fall in the 3-month window (e.g. board is dormant),
+                # show the 20 most recent instead so the page is still usable
+                return windowed if windowed else sprints[-20:]
             except Exception as e:
                 logger.warning(f"Failed to fetch sprints: {e}")
                 SprintPlanningService._board_id = None
