@@ -457,16 +457,17 @@ function BugRow({ bug, meta, saveState, onSave }) {
 
 /* ── BugTriagePage ───────────────────────────────────────── */
 export default function BugTriagePage() {
-  const [mode,           setMode]          = useState('epic')
-  const [selectedEpics,  setSelectedEpics] = useState([])
-  const [days,           setDays]          = useState(14)
-  const [daysInput,      setDaysInput]     = useState('14')
-  const [creators,       setCreators]      = useState([])
-  const [saveState,      setSaveState]     = useState({})
-  const [localBugs,      setLocalBugs]     = useState(null)
-  const [activeStatuses, setActiveStatuses] = useState(new Set())
-  const [labelFilter,    setLabelFilter]   = useState(new Set())
-  const [priorityFilter, setPriorityFilter] = useState('')
+  const [mode,            setMode]           = useState('epic')
+  const [selectedEpics,   setSelectedEpics]  = useState([])
+  const [selectedVersion, setSelectedVersion] = useState('')
+  const [days,            setDays]           = useState(14)
+  const [daysInput,       setDaysInput]      = useState('14')
+  const [creators,        setCreators]       = useState([])
+  const [saveState,       setSaveState]      = useState({})
+  const [localBugs,       setLocalBugs]      = useState(null)
+  const [activeStatuses,  setActiveStatuses] = useState(new Set())
+  const [labelFilter,     setLabelFilter]    = useState(new Set())
+  const [priorityFilter,  setPriorityFilter] = useState('')
 
   /* ── meta */
   const metaQuery = useQuery({
@@ -478,14 +479,18 @@ export default function BugTriagePage() {
 
   /* ── bug query */
   const epicParam  = mode === 'epic' ? selectedEpics.map(e => e.key).join(',') : ''
-  const bugEnabled = mode === 'epic' ? selectedEpics.length > 0 : true
+  const bugEnabled =
+    mode === 'epic'    ? selectedEpics.length > 0 :
+    mode === 'version' ? !!selectedVersion :
+    true  // date mode always enabled
 
   const bugQuery = useQuery({
-    queryKey: ['triage-bugs', mode, epicParam, days, creators.join(',')],
+    queryKey: ['triage-bugs', mode, epicParam, selectedVersion, days, creators.join(',')],
     queryFn: ({ signal }) => {
-      const params = mode === 'epic'
-        ? { epic_keys: epicParam }
-        : { days, creators: creators.join(',') || undefined }
+      let params = {}
+      if (mode === 'epic')    params = { epic_keys: epicParam }
+      else if (mode === 'version') params = { fix_version: selectedVersion }
+      else params = { days, creators: creators.join(',') || undefined }
       return axios.get(`${API}/bugs`, { params, signal }).then(r => r.data.bugs)
     },
     enabled: bugEnabled,
@@ -639,6 +644,13 @@ export default function BugTriagePage() {
             By Epic
           </button>
           <button
+            onClick={() => setMode('version')}
+            className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === 'version' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
+          >
+            <Tag className="h-3.5 w-3.5" />
+            By Fix Version
+          </button>
+          <button
             onClick={() => setMode('date')}
             className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors ${mode === 'date' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}
           >
@@ -656,6 +668,28 @@ export default function BugTriagePage() {
             onAdd={e => setSelectedEpics(prev => prev.find(x => x.key === e.key) ? prev : [...prev, e])}
             onRemove={k => setSelectedEpics(prev => prev.filter(e => e.key !== k))}
           />
+        ) : mode === 'version' ? (
+          <div className="flex items-center gap-3">
+            <label className="text-sm font-medium text-slate-700 shrink-0">Fix Version</label>
+            {metaQuery.isLoading ? (
+              <span className="text-sm text-slate-400 flex items-center gap-1.5">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Loading versions…
+              </span>
+            ) : (
+              <select
+                className="border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-300 min-w-[280px] bg-white"
+                value={selectedVersion}
+                onChange={e => setSelectedVersion(e.target.value)}
+              >
+                <option value="">— Select a version —</option>
+                {(meta.versions || []).map(v => (
+                  <option key={v.id} value={v.name}>
+                    {v.name}{v.released ? ' (released)' : ''}
+                  </option>
+                ))}
+              </select>
+            )}
+          </div>
         ) : (
           <div className="flex flex-wrap items-center gap-3">
             {/* Days presets */}
@@ -704,12 +738,19 @@ export default function BugTriagePage() {
       {/* Body */}
       <div className="flex-1 overflow-auto px-6 py-4 space-y-4">
 
-        {/* Empty state – epic mode */}
+        {/* Empty states */}
         {mode === 'epic' && selectedEpics.length === 0 && (
           <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-3">
             <Bug className="h-12 w-12 opacity-25" />
             <p className="text-lg font-semibold">Select one or more Epics</p>
             <p className="text-sm text-center max-w-sm">Search for an Epic above to load its bugs for review.</p>
+          </div>
+        )}
+        {mode === 'version' && !selectedVersion && (
+          <div className="flex flex-col items-center justify-center py-24 text-slate-400 space-y-3">
+            <Tag className="h-12 w-12 opacity-25" />
+            <p className="text-lg font-semibold">Select a Fix Version</p>
+            <p className="text-sm text-center max-w-sm">Choose a fix version above to load its bugs for review.</p>
           </div>
         )}
 
@@ -892,7 +933,9 @@ export default function BugTriagePage() {
                       ? `Bugs — filtered`
                       : mode === 'date'
                         ? `Bugs opened in last ${days} days`
-                        : `Bugs by Epic`
+                        : mode === 'version'
+                          ? `Bugs — ${selectedVersion}`
+                          : `Bugs by Epic`
                     }
                   </p>
                   <span className="text-xs text-gray-400">{displayBugs.length} bug{displayBugs.length !== 1 ? 's' : ''}</span>

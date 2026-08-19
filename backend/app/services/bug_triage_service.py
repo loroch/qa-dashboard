@@ -149,6 +149,23 @@ class BugTriageService:
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=180)
 
+    async def get_bugs_by_fix_version(
+        self, version: str, force_refresh: bool = False
+    ) -> list[dict]:
+        cache_key = f"triage:version:{hashlib.md5(version.encode()).hexdigest()[:12]}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                f'project = TMT0 AND issuetype = Bug AND fixVersion = "{version}" '
+                f'ORDER BY priority ASC, created DESC'
+            )
+            raw = await self.jira.search_issues(jql, fields=BUG_FIELDS, max_total=500)
+            return [_fmt_bug(i, self.jira_base_url) for i in raw]
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=180)
+
     async def get_bugs_by_date(
         self,
         days: int,

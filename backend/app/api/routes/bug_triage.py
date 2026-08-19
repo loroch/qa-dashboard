@@ -24,10 +24,11 @@ async def search_epics(q: str = Query(..., min_length=1)):
 
 @router.get("/bugs")
 async def get_bugs(
-    epic_keys: Optional[str] = Query(None, description="Comma-separated epic keys"),
-    days:      Optional[int] = Query(None, description="Last N days (7, 14, 30)"),
-    creators:  Optional[str] = Query(None, description="Comma-separated reporter accountIds"),
-    refresh:   bool          = Query(False),
+    epic_keys:   Optional[str] = Query(None, description="Comma-separated epic keys"),
+    days:        Optional[int] = Query(None, description="Last N days (7, 14, 30)"),
+    creators:    Optional[str] = Query(None, description="Comma-separated reporter accountIds"),
+    fix_version: Optional[str] = Query(None, description="Fix version name"),
+    refresh:     bool          = Query(False),
 ):
     svc = get_bug_triage_service()
     try:
@@ -36,11 +37,13 @@ async def get_bugs(
             if not keys:
                 raise HTTPException(status_code=400, detail="No epic keys provided")
             bugs = await svc.get_bugs_by_epics(keys, force_refresh=refresh)
+        elif fix_version:
+            bugs = await svc.get_bugs_by_fix_version(fix_version, force_refresh=refresh)
         elif days:
             creator_list = [c.strip() for c in creators.split(",") if c.strip()] if creators else None
             bugs = await svc.get_bugs_by_date(days, creators=creator_list, force_refresh=refresh)
         else:
-            raise HTTPException(status_code=400, detail="Provide epic_keys or days")
+            raise HTTPException(status_code=400, detail="Provide epic_keys, fix_version, or days")
         return {"bugs": bugs, "total": len(bugs)}
     except HTTPException:
         raise
