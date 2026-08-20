@@ -144,7 +144,9 @@ $tmp = Get-Command serve -ErrorAction SilentlyContinue
 $serveCmd = if ($tmp) { $tmp.Source } else { $null }
 if (-not $serveCmd) {
     Write-INFO "Installing 'serve' (static file server for frontend)..."
-    npm install -g serve 2>&1 | Out-Null
+    $ErrorActionPreference = "Continue"
+    npm install -g serve --silent
+    $ErrorActionPreference = "Stop"
     Refresh-Path
     Write-OK "'serve' installed"
 } else {
@@ -218,7 +220,9 @@ $venvPip = "$VENV_DIR\Scripts\pip.exe"
 Write-INFO "Installing Python dependencies (may take a few minutes)..."
 Push-Location "$INSTALL_DIR\backend"
 try {
-    & $venvPip install --upgrade pip 2>&1 | Out-Null
+    $ErrorActionPreference = "Continue"
+    & $venvPip install --upgrade pip --quiet
+    $ErrorActionPreference = "Stop"
     & $venvPip install -r requirements.txt
     Write-OK "Python dependencies installed"
 } finally { Pop-Location }
@@ -261,13 +265,17 @@ Write-OK ".env written"
 # Build frontend
 Write-INFO "Installing frontend dependencies..."
 Push-Location "$INSTALL_DIR\frontend"
+$ErrorActionPreference = "Continue"
 try {
-    npm install
+    npm install --silent
     Write-OK "Frontend packages installed"
     Write-INFO "Building frontend (production)..."
     npm run build
     Write-OK "Frontend built"
-} finally { Pop-Location }
+} finally {
+    $ErrorActionPreference = "Stop"
+    Pop-Location
+}
 
 # Create logs directory
 New-Item -ItemType Directory -Path $LOG_DIR -Force | Out-Null
