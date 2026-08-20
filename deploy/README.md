@@ -30,8 +30,9 @@ comes back up automatically after every reboot.
    | Zoho token | *(optional — leave blank to skip)* |
 
 4. **If Docker Desktop is being installed for the first time**, the script will
-   ask you to reboot. After rebooting, run `setup.ps1` again — it will skip
-   already-completed steps.
+   reboot the PC automatically. After rebooting, **a scheduled task will
+   continue the setup automatically** — a PowerShell window opens by itself
+   and finishes steps 4-6 without you having to run anything.
 
 5. **First build takes 5–10 minutes** (downloading base images). Subsequent
    updates are much faster.

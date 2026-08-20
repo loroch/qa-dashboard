@@ -8,6 +8,8 @@ $INSTALL_DIR   = "C:\qa-dashboard"
 $REPO_URL      = "https://github.com/KABATONE-OP/QA.git"
 $FRONTEND_PORT = 3000
 $BACKEND_PORT  = 8000
+$RESUME_FILE   = "$env:TEMP\qa-dashboard-setup.json"
+$RESUME_TASK   = "QA-Dashboard-Setup-Resume"
 
 function Write-Header {
     param([string]$Text)
@@ -20,6 +22,17 @@ function Write-OK   { param([string]$T); Write-Host "  [OK]  $T" -ForegroundColo
 function Write-INFO { param([string]$T); Write-Host "  [..]  $T" -ForegroundColor Yellow }
 function Write-FAIL { param([string]$T); Write-Host "  [!!]  $T" -ForegroundColor Red    }
 
+function Save-Resume {
+    param([hashtable]$Data)
+    $Data | ConvertTo-Json | Out-File -FilePath $RESUME_FILE -Encoding utf8 -Force
+}
+
+function Remove-ResumeTask {
+    if (Get-ScheduledTask -TaskName $RESUME_TASK -ErrorAction SilentlyContinue) {
+        Unregister-ScheduledTask -TaskName $RESUME_TASK -Confirm:$false
+    }
+}
+
 # ── Admin check ───────────────────────────────────────────────────────────────
 Write-Header "QA Dashboard - Team Setup"
 $isAdmin = ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole(
@@ -29,42 +42,91 @@ if (-not $isAdmin) {
     exit 1
 }
 
-# ── Collect credentials ───────────────────────────────────────────────────────
-Write-Header "Step 1/6 - Collect credentials"
-Write-Host ""
-Write-Host "  Enter credentials below. Press ENTER to skip optional items." -ForegroundColor White
-Write-Host ""
+# ── Load resume state or collect credentials ──────────────────────────────────
+$resumeStep = 1
+$REPO_TOKEN = $jiraEmail = $jiraToken = $anthropicKey = $zohoToken = $zohoOrgId = ""
 
-$REPO_TOKEN   = Read-Host "  GitHub access token (get from Loro)"
-$jiraEmail    = Read-Host "  Jira email (e.g. you@kabatone.com)"
-$jiraToken    = Read-Host "  Jira API token"
-$anthropicKey = Read-Host "  Anthropic API key (for AI features, optional)"
-$zohoToken    = Read-Host "  Zoho Desk token (optional)"
-$zohoOrgId    = Read-Host "  Zoho Org ID (optional)"
-
-# ── Install Git ───────────────────────────────────────────────────────────────
-Write-Header "Step 2/6 - Git"
-$gitCmd = Get-Command git -ErrorAction SilentlyContinue
-if ($gitCmd) {
-    Write-OK "Git already installed"
-} else {
-    Write-INFO "Installing Git via winget..."
+if (Test-Path $RESUME_FILE) {
+    Write-HOST ""
+    Write-HOST "  Resuming from previous run..." -ForegroundColor Magenta
     try {
-        winget install --id Git.Git -e --source winget --silent --accept-package-agreements --accept-source-agreements
-        $env:PATH = $env:PATH + ";C:\Program Files\Git\cmd"
-        Write-OK "Git installed"
+        $saved = Get-Content $RESUME_FILE | ConvertFrom-Json
+        $REPO_TOKEN   = $saved.REPO_TOKEN
+        $jiraEmail    = $saved.jiraEmail
+        $jiraToken    = $saved.jiraToken
+        $anthropicKey = $saved.anthropicKey
+        $zohoToken    = $saved.zohoToken
+        $zohoOrgId    = $saved.zohoOrgId
+        $resumeStep   = [int]$saved.nextStep
+        Write-OK "Credentials loaded from resume file. Continuing at step $resumeStep."
     } catch {
-        Write-FAIL "winget failed. Install Git manually from https://git-scm.com and re-run."
-        exit 1
+        Write-INFO "Could not read resume file - starting fresh."
+        Remove-Item $RESUME_FILE -Force -ErrorAction SilentlyContinue
+        $resumeStep = 1
     }
 }
 
-# ── Install / start Docker Desktop ───────────────────────────────────────────
-Write-Header "Step 3/6 - Docker Desktop"
+if ($resumeStep -le 1) {
+    Write-Header "Step 1/6 - Collect credentials"
+    Write-Host ""
+    Write-Host "  Enter credentials below. Press ENTER to skip optional items." -ForegroundColor White
+    Write-Host ""
 
+    $REPO_TOKEN   = Read-Host "  GitHub access token (get from Loro)"
+    $jiraEmail    = Read-Host "  Jira email (e.g. you@kabatone.com)"
+    $jiraToken    = Read-Host "  Jira API token"
+    $anthropicKey = Read-Host "  Anthropic API key (for AI features, optional)"
+    $zohoToken    = Read-Host "  Zoho Desk token (optional)"
+    $zohoOrgId    = Read-Host "  Zoho Org ID (optional)"
+
+    Save-Resume @{
+        REPO_TOKEN   = $REPO_TOKEN
+        jiraEmail    = $jiraEmail
+        jiraToken    = $jiraToken
+        anthropicKey = $anthropicKey
+        zohoToken    = $zohoToken
+        zohoOrgId    = $zohoOrgId
+        nextStep     = 2
+    }
+    Write-OK "Credentials saved"
+} else {
+    Write-Header "Step 1/6 - Collect credentials"
+    Write-OK "Skipped (already collected)"
+}
+
+# ── Install Git ───────────────────────────────────────────────────────────────
+if ($resumeStep -le 2) {
+    Write-Header "Step 2/6 - Git"
+    $gitCmd = Get-Command git -ErrorAction SilentlyContinue
+    if ($gitCmd) {
+        Write-OK "Git already installed"
+    } else {
+        Write-INFO "Installing Git via winget..."
+        try {
+            winget install --id Git.Git -e --source winget --silent --accept-package-agreements --accept-source-agreements
+            $env:PATH = $env:PATH + ";C:\Program Files\Git\cmd"
+            Write-OK "Git installed"
+        } catch {
+            Write-FAIL "winget failed. Install Git manually from https://git-scm.com and re-run."
+            exit 1
+        }
+    }
+    Save-Resume @{
+        REPO_TOKEN = $REPO_TOKEN; jiraEmail = $jiraEmail; jiraToken = $jiraToken
+        anthropicKey = $anthropicKey; zohoToken = $zohoToken; zohoOrgId = $zohoOrgId
+        nextStep = 3
+    }
+} else {
+    Write-Header "Step 2/6 - Git"
+    Write-OK "Skipped"
+}
+
+# ── Install / start Docker Desktop ────────────────────────────────────────────
 function Test-DockerRunning {
     try { $null = docker info 2>$null; return $true } catch { return $false }
 }
+
+Write-Header "Step 3/6 - Docker Desktop"
 
 if (Test-DockerRunning) {
     Write-OK "Docker Desktop is already running"
@@ -87,10 +149,10 @@ if (Test-DockerRunning) {
         }
     } else {
         Write-INFO "Downloading Docker Desktop (~600 MB)..."
-        $dlUrl = "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe"
         $installer = "$env:TEMP\DockerDesktopInstaller.exe"
         try {
-            Invoke-WebRequest -Uri $dlUrl -OutFile $installer -UseBasicParsing
+            Invoke-WebRequest -Uri "https://desktop.docker.com/win/main/amd64/Docker%20Desktop%20Installer.exe" `
+                -OutFile $installer -UseBasicParsing
         } catch {
             Write-FAIL "Download failed. Get Docker Desktop from https://www.docker.com and re-run."
             exit 1
@@ -98,63 +160,93 @@ if (Test-DockerRunning) {
         Write-INFO "Installing Docker Desktop (silent)..."
         Start-Process -FilePath $installer -ArgumentList "install --quiet --accept-license" -Wait
         Write-OK "Docker Desktop installed"
+
+        # Save resume state so after reboot we skip to step 3 (re-check Docker)
+        Save-Resume @{
+            REPO_TOKEN = $REPO_TOKEN; jiraEmail = $jiraEmail; jiraToken = $jiraToken
+            anthropicKey = $anthropicKey; zohoToken = $zohoToken; zohoOrgId = $zohoOrgId
+            nextStep = 3
+        }
+
+        # Register auto-resume task so script runs automatically after reboot
+        Remove-ResumeTask
+        $scriptPath = $MyInvocation.MyCommand.Path
+        $action   = New-ScheduledTaskAction -Execute "powershell.exe" `
+            -Argument "-NonInteractive -ExecutionPolicy Bypass -File `"$scriptPath`""
+        $trigger  = New-ScheduledTaskTrigger -AtLogOn
+        $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable
+        Register-ScheduledTask -TaskName $RESUME_TASK -Action $action -Trigger $trigger `
+            -Settings $settings -RunLevel Highest -Force | Out-Null
+        Write-OK "Auto-resume task registered - setup will continue after reboot automatically"
+
         Write-Host ""
         Write-Host "  *** REBOOT REQUIRED ***" -ForegroundColor Yellow
-        Write-Host "  After reboot, run this script again to continue." -ForegroundColor Yellow
+        Write-Host "  The setup will CONTINUE AUTOMATICALLY after you log back in." -ForegroundColor Yellow
         Write-Host ""
-        Read-Host "  Press ENTER to reboot now (or Ctrl+C to reboot later)"
+        Read-Host "  Press ENTER to reboot now"
         Restart-Computer -Force
         exit 0
     }
 }
 
-# ── Clone / pull repo ─────────────────────────────────────────────────────────
-Write-Header "Step 4/6 - Repository"
-$authUrl = "https://" + $REPO_TOKEN + "@github.com/KABATONE-OP/QA.git"
+# Remove the auto-resume task now that Docker is running
+Remove-ResumeTask
 
-if (Test-Path (Join-Path $INSTALL_DIR ".git")) {
-    Write-INFO "Repo exists - pulling latest..."
-    Push-Location $INSTALL_DIR
-    try {
-        git remote set-url origin $authUrl
-        git pull origin master --rebase
-        Write-OK "Repository updated"
-    } catch {
-        Write-FAIL "git pull failed: $_"
-    } finally {
-        Pop-Location
+# ── Clone / pull repo ─────────────────────────────────────────────────────────
+if ($resumeStep -le 4) {
+    Write-Header "Step 4/6 - Repository"
+    $authUrl = "https://" + $REPO_TOKEN + "@github.com/KABATONE-OP/QA.git"
+
+    if (Test-Path (Join-Path $INSTALL_DIR ".git")) {
+        Write-INFO "Repo exists - pulling latest..."
+        Push-Location $INSTALL_DIR
+        try {
+            git remote set-url origin $authUrl
+            git pull origin master --rebase
+            Write-OK "Repository updated"
+        } catch {
+            Write-FAIL "git pull failed: $_"
+        } finally {
+            Pop-Location
+        }
+    } else {
+        Write-INFO "Cloning to $INSTALL_DIR ..."
+        git clone $authUrl $INSTALL_DIR
+        Write-OK "Repository cloned"
+    }
+    Save-Resume @{
+        REPO_TOKEN = $REPO_TOKEN; jiraEmail = $jiraEmail; jiraToken = $jiraToken
+        anthropicKey = $anthropicKey; zohoToken = $zohoToken; zohoOrgId = $zohoOrgId
+        nextStep = 5
     }
 } else {
-    Write-INFO "Cloning to $INSTALL_DIR ..."
-    git clone $authUrl $INSTALL_DIR
-    Write-OK "Repository cloned"
+    Write-Header "Step 4/6 - Repository"
+    Write-OK "Skipped"
 }
 
 # ── Write .env ────────────────────────────────────────────────────────────────
 Write-Header "Step 5/6 - Environment configuration"
-
 $lanIP = (Get-NetIPAddress -AddressFamily IPv4 |
     Where-Object { $_.IPAddress -notmatch "^(127\.|169\.254)" } |
     Select-Object -First 1).IPAddress
 
 $corsOrigins = "http://localhost:3000,http://localhost:5173,http://" + $lanIP + ":3000"
-
 $envLines = @(
-    "# QA Dashboard - Environment Variables (auto-generated)"
+    "# QA Dashboard - Environment Variables"
     ""
-    "# Jira"
     "JIRA_BASE_URL=https://avite.atlassian.net"
     "JIRA_USER_EMAIL=$jiraEmail"
     "JIRA_API_TOKEN=$jiraToken"
     ""
-    "# AI"
+    "KONE_JIRA_BASE_URL=https://kabatone-ops-it.atlassian.net"
+    "KONE_JIRA_EMAIL=$jiraEmail"
+    "KONE_JIRA_TOKEN=$jiraToken"
+    ""
     "ANTHROPIC_API_KEY=$anthropicKey"
     ""
-    "# Zoho"
     "ZOHO_DESK_TOKEN=$zohoToken"
     "ZOHO_ORG_ID=$zohoOrgId"
     ""
-    "# Config"
     "FIELD_MAPPING_PATH=./config/field_mapping.yaml"
     "CACHE_TTL_SECONDS=300"
     "BACKGROUND_REFRESH_HOURS=5"
@@ -163,15 +255,12 @@ $envLines = @(
     "ENVIRONMENT=production"
     "EXPORT_MAX_ROWS=10000"
     "JIRA_MAX_RESULTS=100"
-    ""
-    "# CORS"
     "CORS_ORIGINS=$corsOrigins"
 )
-
 $envPath = Join-Path $INSTALL_DIR ".env"
 $envLines -join "`r`n" | Out-File -FilePath $envPath -Encoding utf8 -Force
 Write-OK ".env written to $envPath"
-Write-OK "LAN IP detected: $lanIP"
+Write-OK "LAN IP: $lanIP  (team access: http://${lanIP}:${FRONTEND_PORT})"
 
 # ── Build and start containers ────────────────────────────────────────────────
 Write-Header "Step 6/6 - Build and launch Docker containers"
@@ -194,11 +283,8 @@ try {
             if ($r.StatusCode -eq 200) { $healthy = $true; break }
         } catch {}
     }
-    if ($healthy) {
-        Write-OK "Backend is healthy"
-    } else {
-        Write-FAIL "Backend health check timed out. Check: docker logs qa-dashboard-api"
-    }
+    if ($healthy) { Write-OK "Backend is healthy" }
+    else { Write-FAIL "Backend health check timed out. Check: docker logs qa-dashboard-api" }
 } finally {
     Pop-Location
 }
@@ -206,9 +292,9 @@ try {
 # ── Firewall ──────────────────────────────────────────────────────────────────
 Write-INFO "Configuring Windows Firewall..."
 foreach ($entry in @("QA Dashboard Frontend,$FRONTEND_PORT", "QA Dashboard Backend,$BACKEND_PORT")) {
-    $parts = $entry -split ","
+    $parts    = $entry -split ","
     $ruleName = $parts[0]
-    $port = [int]$parts[1]
+    $port     = [int]$parts[1]
     if (-not (Get-NetFirewallRule -DisplayName $ruleName -ErrorAction SilentlyContinue)) {
         New-NetFirewallRule -DisplayName $ruleName -Direction Inbound -Protocol TCP `
             -LocalPort $port -Action Allow -Profile Any | Out-Null
@@ -222,7 +308,6 @@ foreach ($entry in @("QA Dashboard Frontend,$FRONTEND_PORT", "QA Dashboard Backe
 Write-INFO "Registering auto-start scheduled task..."
 $bootScript = Join-Path $INSTALL_DIR "deploy\start-on-boot.ps1"
 "Set-Location '$INSTALL_DIR'; docker-compose up -d" | Out-File -FilePath $bootScript -Encoding utf8 -Force
-
 $taskName = "QA-Dashboard-Autostart"
 if (Get-ScheduledTask -TaskName $taskName -ErrorAction SilentlyContinue) {
     Unregister-ScheduledTask -TaskName $taskName -Confirm:$false
@@ -234,6 +319,9 @@ Register-ScheduledTask -TaskName $taskName -Action $action -Trigger $trigger `
     -Settings $settings -RunLevel Highest -Force | Out-Null
 Write-OK "Auto-start task registered"
 
+# ── Cleanup resume file ───────────────────────────────────────────────────────
+Remove-Item $RESUME_FILE -Force -ErrorAction SilentlyContinue
+
 # ── Done ──────────────────────────────────────────────────────────────────────
 Write-Host ""
 Write-Host "================================================" -ForegroundColor Green
@@ -243,9 +331,9 @@ Write-Host ""
 Write-Host "  This machine : http://localhost:$FRONTEND_PORT" -ForegroundColor White
 Write-Host "  Team access  : http://${lanIP}:${FRONTEND_PORT}" -ForegroundColor White
 Write-Host ""
-Write-Host "  Useful commands (run in $INSTALL_DIR):" -ForegroundColor Gray
+Write-Host "  Commands (run in $INSTALL_DIR):" -ForegroundColor Gray
 Write-Host "    docker-compose logs -f    (live logs)" -ForegroundColor Gray
 Write-Host "    docker-compose down       (stop)" -ForegroundColor Gray
 Write-Host "    docker-compose up -d      (start)" -ForegroundColor Gray
-Write-Host "    .\deploy\update.ps1       (pull + rebuild)" -ForegroundColor Gray
+Write-Host "    .\deploy\update.ps1       (pull latest + rebuild)" -ForegroundColor Gray
 Write-Host ""
