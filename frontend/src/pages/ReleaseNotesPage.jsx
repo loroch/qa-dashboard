@@ -342,17 +342,19 @@ export default function ReleaseNotesPage() {
 
   const queryClient = useQueryClient()
 
-  const { data: versions = [], isLoading: versionsLoading } = useQuery({
+  const { data: versionsRaw, isLoading: versionsLoading } = useQuery({
     queryKey: ['rn-versions'],
     queryFn: getVersions,
     staleTime: 10 * 60 * 1000,
   })
+  const versions = Array.isArray(versionsRaw) ? versionsRaw : []
 
-  const { data: epics = [], isLoading: epicsLoading } = useQuery({
+  const { data: epicsRaw, isLoading: epicsLoading } = useQuery({
     queryKey: ['rn-epics'],
     queryFn: getEpics,
     staleTime: 30 * 60 * 1000,
   })
+  const epics = Array.isArray(epicsRaw) ? epicsRaw : []
 
   const tableParams = useMemo(() => {
     if (mode === 'version' && selectedVersion) return { version: selectedVersion }

@@ -820,12 +820,13 @@ export default function AutomationPage() {
   const [step, setStep] = useState(1)   // 1=select, 2=context, 3=review, 4=automation
 
   // Fix versions
-  const { data: allVersions = [], isLoading: versionsLoading, isError: versionsError } = useQuery({
+  const { data: allVersionsRaw, isLoading: versionsLoading, isError: versionsError } = useQuery({
     queryKey: ['fix-versions'],
     queryFn: fetchVersions,
     staleTime: 5 * 60 * 1000,
     retry: 1,
   })
+  const allVersions = Array.isArray(allVersionsRaw) ? allVersionsRaw : []
   const visibleVersions = allVersions.filter(v => !v.archived)
 
   // Step 1 state
@@ -838,12 +839,14 @@ export default function AutomationPage() {
   // Step 1 state — search by Epic (alternative to the fix-version list above)
   const [selectedEpic, setSelectedEpic]   = useState(null)
   const {
-    data: epicChildren = [], isLoading: epicChildrenLoading, isError: epicChildrenError,
+    data: epicChildrenRaw, isLoading: epicChildrenLoading, isError: epicChildrenError,
   } = useQuery({
     queryKey: ['epic-children', selectedEpic?.key],
     queryFn: () => fetchEpicChildren(selectedEpic.key),
     enabled: !!selectedEpic,
   })
+
+  const epicChildren = Array.isArray(epicChildrenRaw) ? epicChildrenRaw : []
 
   // Once a story/task is picked, check whether it already has test cases —
   // if so, offer a shortcut straight to the persistent Automation view

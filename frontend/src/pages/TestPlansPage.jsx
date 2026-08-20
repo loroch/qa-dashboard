@@ -137,11 +137,12 @@ export default function TestPlansPage() {
   const [expandedGroups, setExpanded] = useState({})
   const [execResult, setExecResult] = useState(null)
 
-  const { data: versions = [], isLoading: versionsLoading } = useQuery({
+  const { data: versionsRaw, isLoading: versionsLoading } = useQuery({
     queryKey:  ['test-plan-versions'],
     queryFn:   fetchVersions,
     staleTime: 60 * 60 * 1000,
   })
+  const versions = Array.isArray(versionsRaw) ? versionsRaw : []
 
   useEffect(() => {
     if (selectedVersion) {
