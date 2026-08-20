@@ -250,7 +250,7 @@ $envLines = @(
     "ZOHO_DESK_TOKEN=$zohoToken",
     "ZOHO_ORG_ID=$zohoOrgId",
     "",
-    "FIELD_MAPPING_PATH=./config/field_mapping.yaml",
+    "FIELD_MAPPING_PATH=C:/qa-dashboard/config/field_mapping.yaml",
     "CACHE_TTL_SECONDS=300",
     "BACKGROUND_REFRESH_HOURS=5",
     "DATABASE_URL=sqlite+aiosqlite:///./data/qa_dashboard.db",
