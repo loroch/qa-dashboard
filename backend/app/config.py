@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     # Claude / Anthropic
     anthropic_api_key: str = Field("", description="Anthropic API key for test case generation")
 
+    # Figma
+    figma_api_token: str = Field("", description="Figma personal access token for reading design context")
+
     # K-1 KONE Jira (separate instance)
     kone_jira_base_url: str = Field("https://kabatone-ops-it.atlassian.net")
     kone_jira_email: str = Field("loroc@kabatone.com")

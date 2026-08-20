@@ -58,6 +58,20 @@ async def list_jira_projects():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/team-members")
+async def list_team_members():
+    """QA team roster from field_mapping.yaml — used to populate QA Owner reassignment."""
+    try:
+        mapping = get_field_mapping()
+        return [
+            {"id": m["id"], "name": m["name"], "role": m.get("role", "QA Engineer")}
+            for m in mapping["jira"]["team_members"]
+        ]
+    except Exception as e:
+        logger.error(f"List team members error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/config")
 async def get_current_config():
     """Return current field mapping configuration (for debugging)."""

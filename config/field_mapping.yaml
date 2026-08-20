@@ -13,6 +13,13 @@ jira:
   # Common alternatives: "QA", "To Test", "UAT", "Awaiting QA"
   ready_for_testing_status: "Ready for Testing"
 
+  # All statuses shown on the Ready for Testing tab (superset of the single
+  # status above). Ready For Deployment is included so post-QA items stay
+  # visible until they actually ship.
+  ready_for_testing_statuses:
+    - "Ready for Testing"
+    - "Ready For Deployment"
+
   # All statuses tracked for aging and flow metrics
   tracked_statuses:
     - "Ready for Testing"

@@ -16,12 +16,52 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/export", tags=["export"])
 
 
+def _filter_rft_issues(
+    issues: list[dict],
+    member_id: Optional[str] = None,
+    member_name: Optional[str] = None,
+    version: Optional[str] = None,
+) -> list[dict]:
+    """Narrow an already-fetched RFT list to one person or one fix version,
+    matching the same grouping used on the Ready for Testing page."""
+    result = issues
+    if member_id:
+        result = [
+            i for i in result
+            if ((i.get("qa_owner") or i.get("assignee") or {}).get("id")) == member_id
+        ]
+    elif member_name:
+        result = [
+            i for i in result
+            if ((i.get("qa_owner") or i.get("assignee") or {}).get("display_name")) == member_name
+        ]
+    if version:
+        result = [
+            i for i in result
+            if version in [v["name"] for v in i.get("fix_versions", [])]
+            or (version == "No Version" and not i.get("fix_versions"))
+        ]
+    return result
+
+
+def _rft_export_filename(base: str, member_name: Optional[str], version: Optional[str], ext: str) -> str:
+    suffix = ""
+    if member_name:
+        suffix = "_" + member_name.lower().replace(" ", "_")
+    elif version:
+        suffix = "_" + version.lower().replace(" ", "_").replace("/", "-")
+    return f"{base}{suffix}.{ext}"
+
+
 @router.get("/ready-for-testing/csv")
 async def export_rft_csv(
     projects: Optional[str] = Query(None),
     assignee_ids: Optional[str] = Query(None),
+    member_id: Optional[str] = Query(None, description="Filter to one QA owner's items"),
+    member_name: Optional[str] = Query(None, description="Filter to one QA owner by display name"),
+    version: Optional[str] = Query(None, description="Filter to one fix version"),
 ):
-    """Export Ready for Testing items as CSV."""
+    """Export Ready for Testing items as CSV — optionally scoped to one person or one version."""
     try:
         filters = {}
         if projects:
@@ -31,11 +71,13 @@ async def export_rft_csv(
 
         svc = get_dashboard_service()
         issues = await svc.get_ready_for_testing(filters=filters or None)
+        issues = _filter_rft_issues(issues, member_id=member_id, member_name=member_name, version=version)
         csv_bytes = issues_to_csv(issues)
+        filename = _rft_export_filename("ready_for_testing", member_name, version, "csv")
         return Response(
             content=csv_bytes,
             media_type="text/csv",
-            headers={"Content-Disposition": "attachment; filename=ready_for_testing.csv"},
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
     except Exception as e:
         logger.error(f"Export RFT CSV error: {e}", exc_info=True)
@@ -46,8 +88,11 @@ async def export_rft_csv(
 async def export_rft_excel(
     projects: Optional[str] = Query(None),
     assignee_ids: Optional[str] = Query(None),
+    member_id: Optional[str] = Query(None, description="Filter to one QA owner's items"),
+    member_name: Optional[str] = Query(None, description="Filter to one QA owner by display name"),
+    version: Optional[str] = Query(None, description="Filter to one fix version"),
 ):
-    """Export Ready for Testing items as Excel (.xlsx)."""
+    """Export Ready for Testing items as Excel (.xlsx) — optionally scoped to one person or one version."""
     try:
         filters = {}
         if projects:
@@ -57,11 +102,14 @@ async def export_rft_excel(
 
         svc = get_dashboard_service()
         issues = await svc.get_ready_for_testing(filters=filters or None)
-        xlsx_bytes = issues_to_excel(issues, sheet_name="Ready for Testing")
+        issues = _filter_rft_issues(issues, member_id=member_id, member_name=member_name, version=version)
+        sheet_name = member_name or version or "Ready for Testing"
+        xlsx_bytes = issues_to_excel(issues, sheet_name=sheet_name)
+        filename = _rft_export_filename("ready_for_testing", member_name, version, "xlsx")
         return Response(
             content=xlsx_bytes,
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={"Content-Disposition": "attachment; filename=ready_for_testing.xlsx"},
+            headers={"Content-Disposition": f"attachment; filename={filename}"},
         )
     except Exception as e:
         logger.error(f"Export RFT Excel error: {e}", exc_info=True)

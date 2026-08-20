@@ -14,6 +14,7 @@ class JQLBuilder:
         mapping = get_field_mapping()
         jira_cfg = mapping["jira"]
         self.rft_status = jira_cfg["ready_for_testing_status"]
+        self.rft_statuses = jira_cfg.get("ready_for_testing_statuses") or [self.rft_status]
         self.team_ids = [m["id"] for m in jira_cfg["team_members"]]
         self.projects = jira_cfg.get("projects", [])
 
@@ -45,10 +46,11 @@ class JQLBuilder:
         projects: list[str] | None = None,
         assignee_ids: list[str] | None = None,
     ) -> str:
-        """All items in Ready for Testing, optionally filtered."""
+        """All items in Ready for Testing (or Ready For Deployment), optionally filtered."""
+        status_list = ", ".join(f'"{s}"' for s in self.rft_statuses)
         clauses = [
             self._project_clause(projects),
-            f'status = "{self.rft_status}"',
+            f'status in ({status_list})',
             self._assignee_clause(assignee_ids),
         ]
         return self._combine(clauses) + " ORDER BY updated DESC"

@@ -49,6 +49,7 @@ class JiraIssue(BaseModel):
     activity: Optional[str] = None
     sprint: Optional[SprintInfo] = None
     story_points: Optional[float] = None
+    qa_estimate_hours: Optional[float] = None
     test_count: Optional[int] = None
     days_in_status: int = 0
     aging_level: str = "ok"  # ok | warning | critical | overdue

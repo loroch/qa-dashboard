@@ -14,6 +14,7 @@ services:
     volumes:
       - ./config:/app/config:ro          # field_mapping.yaml
       - qa_data:/app/data                # SQLite database
+      - qa_automation_runs:/tmp/qa-dashboard-automation-runs   # automation scripts + screenshots — must survive container recreation
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
       interval: 15s
@@ -39,6 +40,7 @@ services:
 
 volumes:
   qa_data:
+  qa_automation_runs:
 
 networks:
   qa-net:

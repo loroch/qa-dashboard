@@ -7,13 +7,19 @@ GET  /api/test-generator/versions
 GET  /api/test-generator/stories?version=<fix-version>
      → Stories in that fix version that have no test case links
 
-POST /api/test-generator/context   { story_key }
-     → Fetch story context and generate a simple AI summary (Step 2)
+GET  /api/test-generator/epics/search?q=<query>
+     → Search Epics by key or summary
+
+GET  /api/test-generator/epics/{epic_key}/children
+     → Story/Task children of an Epic
+
+POST /api/test-generator/context   { story_key, sources?, figma_url? }
+     → Fetch story context (+ optional Confluence/Figma) and an AI summary (Step 2)
 
 POST /api/test-generator/upload-context
      → Upload files/images, extract content for enriching test generation
 
-POST /api/test-generator/generate   { story_key, extra_context? }
+POST /api/test-generator/generate   { story_key, extra_context?, sources?, figma_url? }
      → Call Claude to generate test cases for the story
 
 POST /api/test-generator/create     { story_key, test_cases, fix_version }
@@ -39,14 +45,24 @@ MAX_FILES = 5
 
 # ── Request / Response models ──────────────────────────────────────────────────
 
+class SourceToggles(BaseModel):
+    jira: bool = True
+    confluence: bool = True
+    figma: bool = True
+
+
 class StoryKeyRequest(BaseModel):
     story_key: str
+    sources: SourceToggles = SourceToggles()
+    figma_url: str = ""
 
 
 class GenerateRequest(BaseModel):
     story_key: str
     extra_context: str = ""
     mode: str = "basic"   # "basic" (1-5) or "extended" (1-10)
+    sources: SourceToggles = SourceToggles()
+    figma_url: str = ""
 
 
 class TestCaseItem(BaseModel):
@@ -90,12 +106,38 @@ async def get_stories_without_tests(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/epics/search")
+async def search_epics(q: str = Query(..., min_length=2)):
+    """Search Epics by key or summary."""
+    try:
+        svc = get_test_generator_service()
+        return {"epics": await svc.search_epics(q)}
+    except Exception as exc:
+        logger.error("search_epics failed for %s: %s", q, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/epics/{epic_key}/children")
+async def get_epic_children(epic_key: str):
+    """Return Story/Task children of an Epic."""
+    try:
+        svc = get_test_generator_service()
+        return {"children": await svc.get_epic_children(epic_key)}
+    except Exception as exc:
+        logger.error("get_epic_children failed for %s: %s", epic_key, exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.post("/context")
 async def get_story_context(req: StoryKeyRequest):
     """Fetch story context + AI summary for Step 2 preview."""
     try:
         svc = get_test_generator_service()
-        return await svc.get_story_context(req.story_key)
+        return await svc.get_story_context(
+            req.story_key,
+            sources=req.sources.model_dump(),
+            figma_url=req.figma_url,
+        )
     except Exception as exc:
         logger.error("get_story_context failed for %s: %s", req.story_key, exc, exc_info=True)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -144,10 +186,16 @@ async def upload_context_files(
 
 @router.post("/generate")
 async def generate_test_cases(req: GenerateRequest):
-    """Generate test cases for a story using Jira + Confluence context + Claude."""
+    """Generate test cases for a story using Jira + Confluence + Figma context + Claude."""
     try:
         svc = get_test_generator_service()
-        return await svc.generate_test_cases(req.story_key, req.extra_context, req.mode)
+        return await svc.generate_test_cases(
+            req.story_key,
+            req.extra_context,
+            req.mode,
+            sources=req.sources.model_dump(),
+            figma_url=req.figma_url,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     except Exception as exc:

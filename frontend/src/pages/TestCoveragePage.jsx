@@ -12,10 +12,15 @@ import axios from 'axios'
 
 const api = axios.create({ baseURL: '/api', timeout: 120000 })
 
-const getVersions    = ()        => api.get('/coverage/versions').then(r => r.data)
-const getByVersion   = (v)       => api.get(`/coverage/by-version?version=${encodeURIComponent(v)}`).then(r => r.data)
-const getUnlinked    = ()        => api.get('/coverage/unlinked-tests').then(r => r.data)
-const searchStories  = (q)       => api.get(`/coverage/search-stories?q=${encodeURIComponent(q)}`).then(r => r.data)
+const getVersions        = ()    => api.get('/coverage/versions').then(r => r.data)
+const getByVersion       = (v)   => api.get(`/coverage/by-version?version=${encodeURIComponent(v)}`).then(r => r.data)
+const getByIssue             = (k)    => api.get(`/coverage/by-issue?key=${encodeURIComponent(k)}`).then(r => r.data)
+const getUnlinked            = ()     => api.get('/coverage/unlinked-tests').then(r => r.data)
+const searchStories          = (q)    => api.get(`/coverage/search-stories?q=${encodeURIComponent(q)}`).then(r => r.data)
+const searchIssues           = (q)    => api.get(`/coverage/search-issues?q=${encodeURIComponent(q)}`).then(r => r.data)
+const generateTestPlan       = (body) => api.post('/coverage/generate-test-plan', body, { timeout: 90000 }).then(r => r.data)
+const generateHandoverCrit   = (body) => api.post('/coverage/generate-handover-criteria', body, { timeout: 90000 }).then(r => r.data)
+const addJiraComment         = (body) => api.post('/coverage/add-jira-comment', body).then(r => r.data)
 const assignTest          = (body) => api.post('/coverage/assign-test', body).then(r => r.data)
 const getRegressionTests  = (v)    => api.get(`/coverage/regression-tests${v ? `?version=${encodeURIComponent(v)}` : ''}`).then(r => r.data)
 const generateStoryTests  = (body) => api.post('/coverage/generate-story-tests', body, { timeout: 120000 }).then(r => r.data)
@@ -23,7 +28,7 @@ const createStoryTests    = (body) => api.post('/coverage/create-story-tests', b
 const getTestTransitions  = (k)    => api.get(`/coverage/test-transitions/${k}`).then(r => r.data)
 const postTestTransition  = (body) => api.post('/coverage/test-transition', body).then(r => r.data)
 
-const TABS = ['By Version', 'Unlinked Tests']
+const TABS = ['By Version', 'By Epic / Story', 'Unlinked Tests']
 
 const STATUS_COLORS = {
   'Done':                  'bg-green-100 text-green-700',
@@ -874,6 +879,29 @@ export default function TestCoveragePage() {
   const [generateTarget, setGenerateTarget] = useState(null)
   const [unlinkedSearch, setUnlinkedSearch] = useState('')
 
+  // By Epic / Story tab state
+  const [issueSearch, setIssueSearch] = useState('')
+  const [issueResults, setIssueResults] = useState([])
+  const [issueSearching, setIssueSearching] = useState(false)
+  const [selectedIssue, setSelectedIssue] = useState(null)  // {key, summary, type}
+  const [showIssueDrop, setShowIssueDrop] = useState(false)
+  const issueSearchRef = useRef(null)
+
+  // Test Plan panel state
+  const [testPlanOpen, setTestPlanOpen] = useState(false)
+  const [testPlan, setTestPlan] = useState(null)
+  const [testPlanLoading, setTestPlanLoading] = useState(false)
+  const [testPlanError, setTestPlanError] = useState(null)
+
+  // Handover Criteria panel state
+  const [handoverOpen, setHandoverOpen] = useState(false)
+  const [handoverData, setHandoverData] = useState(null)
+  const [handoverLoading, setHandoverLoading] = useState(false)
+  const [handoverError, setHandoverError] = useState(null)
+  const [handoverCommentKey, setHandoverCommentKey] = useState('')
+  const [handoverPushing, setHandoverPushing] = useState(false)
+  const [handoverPushMsg, setHandoverPushMsg] = useState(null)
+
   const versionsQuery = useQuery({
     queryKey: ['coverage-versions'],
     queryFn: getVersions,
@@ -901,6 +929,32 @@ export default function TestCoveragePage() {
     staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
   })
+
+  const issueQuery = useQuery({
+    queryKey: ['coverage-issue', selectedIssue?.key],
+    queryFn: () => getByIssue(selectedIssue.key),
+    enabled: !!selectedIssue?.key,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  // Debounced search for epic/story autocomplete
+  useEffect(() => {
+    if (issueSearch.length < 2) { setIssueResults([]); return }
+    const t = setTimeout(async () => {
+      setIssueSearching(true)
+      try { setIssueResults(await searchIssues(issueSearch)) }
+      catch { setIssueResults([]) }
+      finally { setIssueSearching(false) }
+    }, 300)
+    return () => clearTimeout(t)
+  }, [issueSearch])
+
+  // Close autocomplete dropdown on outside click
+  useEffect(() => {
+    const handler = (e) => { if (issueSearchRef.current && !issueSearchRef.current.contains(e.target)) setShowIssueDrop(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   const { lastRefresh, isRefreshing, refresh } = useAutoRefresh([
     ['coverage-version', selectedVersion],
@@ -1061,7 +1115,257 @@ export default function TestCoveragePage() {
             </div>
           )}
 
-          {/* ═══ TAB 2: Unlinked Tests ═══ */}
+          {/* ═══ TAB 2: By Epic / Story ═══ */}
+          {tab === 'By Epic / Story' && (
+            <div className="p-5 space-y-4">
+              {/* Autocomplete search */}
+              <div ref={issueSearchRef} className="relative">
+                <label className="block text-sm font-medium text-gray-600 mb-1.5">Search Epic or Story</label>
+                <div className="flex gap-2">
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <input
+                      className="w-full text-sm border border-gray-200 rounded-lg pl-9 pr-3 py-2 bg-white focus:outline-none focus:ring-2 focus:ring-brand-300"
+                      placeholder="Type key (TMT0-100) or keyword…"
+                      value={issueSearch}
+                      onChange={e => { setIssueSearch(e.target.value); setShowIssueDrop(true) }}
+                      onFocus={() => issueSearch.length >= 2 && setShowIssueDrop(true)}
+                    />
+                    {issueSearching && (
+                      <div className="absolute right-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 border-2 border-brand-300 border-t-brand-600 rounded-full animate-spin" />
+                    )}
+                  </div>
+                  {selectedIssue && (
+                    <button onClick={() => { setSelectedIssue(null); setIssueSearch(''); setIssueResults([]); setTestPlan(null); setTestPlanError(null); setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null) }}
+                      className="px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 flex items-center gap-1">
+                      <X className="h-3.5 w-3.5" /> Clear
+                    </button>
+                  )}
+                </div>
+
+                {/* Dropdown */}
+                {showIssueDrop && issueResults.length > 0 && (
+                  <div className="absolute z-30 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-xl max-h-72 overflow-y-auto">
+                    {issueResults.map(r => (
+                      <button key={r.key} onClick={() => { setSelectedIssue(r); setIssueSearch(r.key); setShowIssueDrop(false); setTestPlan(null); setTestPlanError(null); setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null) }}
+                        className="w-full text-left px-4 py-2.5 hover:bg-brand-50 transition-colors border-b border-gray-100 last:border-0">
+                        <div className="flex items-center gap-2">
+                          <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${r.type === 'Epic' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                            {r.type}
+                          </span>
+                          <span className="font-mono text-xs font-semibold text-brand-600">{r.key}</span>
+                          {r.status && <span className="text-xs text-gray-400">{r.status}</span>}
+                        </div>
+                        <p className="text-sm text-gray-700 mt-0.5 line-clamp-1">{r.summary}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+                {showIssueDrop && !issueSearching && issueSearch.length >= 2 && issueResults.length === 0 && (
+                  <div className="absolute z-30 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-xl px-4 py-3 text-sm text-gray-400">
+                    No epics or stories found.
+                  </div>
+                )}
+              </div>
+
+              {/* Selected issue badge */}
+              {selectedIssue && (
+                <div className="flex items-center gap-2 bg-brand-50 border border-brand-200 rounded-lg px-4 py-2.5">
+                  <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${selectedIssue.type === 'Epic' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
+                    {selectedIssue.type}
+                  </span>
+                  <span className="font-mono text-sm font-semibold text-brand-600">{selectedIssue.key}</span>
+                  <span className="text-sm text-gray-700 truncate">{selectedIssue.summary}</span>
+                  <a href={selectedIssue.url} target="_blank" rel="noreferrer" className="ml-auto text-brand-500 hover:text-brand-700 flex-shrink-0">
+                    <ExternalLink className="h-3.5 w-3.5" />
+                  </a>
+                </div>
+              )}
+
+              {/* Loading */}
+              {selectedIssue && issueQuery.isLoading && (
+                <div className="text-center py-12">
+                  <div className="h-8 w-8 border-2 border-brand-200 border-t-brand-600 rounded-full animate-spin mx-auto mb-3" />
+                  <p className="text-sm text-gray-500">Loading coverage for {selectedIssue.key}…</p>
+                </div>
+              )}
+
+              {/* Error */}
+              {selectedIssue && issueQuery.isError && (
+                <ErrorState message={issueQuery.error?.message} onRetry={issueQuery.refetch} />
+              )}
+
+              {/* Results */}
+              {selectedIssue && issueQuery.data && !issueQuery.isLoading && (() => {
+                const d = issueQuery.data
+                const s = d.summary || {}
+                return (
+                  <>
+                    {/* Summary tiles */}
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                      <SummaryTile label="Total Stories" value={s.total_stories} color="blue" />
+                      <SummaryTile label="Covered" value={s.covered_stories} color="green" sub={`${s.coverage_pct}%`} />
+                      <SummaryTile label="Uncovered" value={s.uncovered_stories} color="red" />
+                      <SummaryTile label="Test Cases" value={s.total_tests} color="purple" />
+                    </div>
+
+                    {/* Coverage bar */}
+                    <div className="bg-gray-50 rounded-xl p-4">
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-medium text-gray-600">Coverage</span>
+                        <span className="text-sm font-bold text-brand-600">{s.coverage_pct}%</span>
+                      </div>
+                      <div className="bg-gray-200 rounded-full h-3">
+                        <div className={`h-3 rounded-full transition-all ${s.coverage_pct === 100 ? 'bg-green-500' : s.coverage_pct >= 50 ? 'bg-yellow-400' : 'bg-red-400'}`}
+                          style={{ width: `${s.coverage_pct}%` }} />
+                      </div>
+                    </div>
+
+                    {/* Epic rows */}
+                    <div className="space-y-3">
+                      {(d.by_epic || []).map(epic => (
+                        <EpicRow key={epic.epic_key} epic={epic} search="" version="" onGenerate={setGenerateTarget} />
+                      ))}
+                      {(!d.by_epic || d.by_epic.length === 0) && (
+                        <div className="text-center py-10 text-gray-400 text-sm">
+                          {selectedIssue.type === 'Epic'
+                            ? 'No stories found under this epic.'
+                            : 'No test coverage data found for this story.'}
+                        </div>
+                      )}
+                    </div>
+
+                    {/* ── AI Panels row ─────────────────────────── */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+
+                      {/* ── Test Plan Panel ── */}
+                      <div className="border border-gray-200 rounded-xl overflow-hidden">
+                        <button
+                          onClick={() => setTestPlanOpen(o => !o)}
+                          className="w-full flex items-center justify-between px-4 py-3 bg-indigo-50 hover:bg-indigo-100 transition-colors"
+                        >
+                          <span className="flex items-center gap-2 font-semibold text-indigo-800 text-sm">
+                            <FileText className="h-4 w-4" /> Test Plan
+                          </span>
+                          {testPlanOpen ? <ChevronDown className="h-4 w-4 text-indigo-500" /> : <ChevronRight className="h-4 w-4 text-indigo-500" />}
+                        </button>
+
+                        {testPlanOpen && (
+                          <div className="p-4 space-y-4 bg-white">
+                            {!testPlan && !testPlanLoading && (
+                              <div className="text-center py-4">
+                                <p className="text-sm text-gray-500 mb-3">Generate a macro-level test plan to share with R&D and Product</p>
+                                <button
+                                  onClick={async () => {
+                                    setTestPlanLoading(true); setTestPlanError(null)
+                                    try {
+                                      const stories = (d.by_epic || []).flatMap(e => e.stories || []).map(s => ({ key: s.key, summary: s.summary }))
+                                      const result = await generateTestPlan({ issue_key: selectedIssue.key, issue_summary: selectedIssue.summary, issue_type: selectedIssue.type, stories })
+                                      setTestPlan(result)
+                                    } catch(e) { setTestPlanError(e.message) }
+                                    finally { setTestPlanLoading(false) }
+                                  }}
+                                  className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 flex items-center gap-2 mx-auto"
+                                >
+                                  <Sparkles className="h-4 w-4" /> Generate Test Plan
+                                </button>
+                              </div>
+                            )}
+                            {testPlanLoading && (
+                              <div className="text-center py-6">
+                                <div className="h-6 w-6 border-2 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-2" />
+                                <p className="text-xs text-gray-400">AI is writing your test plan…</p>
+                              </div>
+                            )}
+                            {testPlanError && <p className="text-sm text-red-500 text-center">{testPlanError}</p>}
+                            {testPlan && !testPlanLoading && <TestPlanView plan={testPlan} onRegen={() => { setTestPlan(null); setTestPlanError(null) }} />}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* ── Handover Criteria Panel ── */}
+                      <div className="border border-gray-200 rounded-xl overflow-hidden">
+                        <button
+                          onClick={() => setHandoverOpen(o => !o)}
+                          className="w-full flex items-center justify-between px-4 py-3 bg-amber-50 hover:bg-amber-100 transition-colors"
+                        >
+                          <span className="flex items-center gap-2 font-semibold text-amber-800 text-sm">
+                            <BookOpen className="h-4 w-4" /> Handover Exit Criteria
+                          </span>
+                          {handoverOpen ? <ChevronDown className="h-4 w-4 text-amber-500" /> : <ChevronRight className="h-4 w-4 text-amber-500" />}
+                        </button>
+
+                        {handoverOpen && (
+                          <div className="p-4 space-y-4 bg-white">
+                            {!handoverData && !handoverLoading && (
+                              <div className="text-center py-4">
+                                <p className="text-sm text-gray-500 mb-3">Generate scenarios for R&D to demonstrate during the handover meeting</p>
+                                <button
+                                  onClick={async () => {
+                                    setHandoverLoading(true); setHandoverError(null)
+                                    try {
+                                      const stories = (d.by_epic || []).flatMap(e => e.stories || []).map(s => ({ key: s.key, summary: s.summary }))
+                                      const result = await generateHandoverCrit({ issue_key: selectedIssue.key, issue_summary: selectedIssue.summary, issue_type: selectedIssue.type, stories })
+                                      setHandoverData(result)
+                                      setHandoverCommentKey(selectedIssue.key)
+                                    } catch(e) { setHandoverError(e.message) }
+                                    finally { setHandoverLoading(false) }
+                                  }}
+                                  className="px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 flex items-center gap-2 mx-auto"
+                                >
+                                  <Sparkles className="h-4 w-4" /> Generate Handover Criteria
+                                </button>
+                              </div>
+                            )}
+                            {handoverLoading && (
+                              <div className="text-center py-6">
+                                <div className="h-6 w-6 border-2 border-amber-200 border-t-amber-600 rounded-full animate-spin mx-auto mb-2" />
+                                <p className="text-xs text-gray-400">AI is writing handover criteria…</p>
+                              </div>
+                            )}
+                            {handoverError && <p className="text-sm text-red-500 text-center">{handoverError}</p>}
+                            {handoverData && !handoverLoading && (
+                              <HandoverCriteriaView
+                                data={handoverData}
+                                commentKey={handoverCommentKey}
+                                pushing={handoverPushing}
+                                pushMsg={handoverPushMsg}
+                                onChangeKey={setHandoverCommentKey}
+                                onRegen={() => { setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null) }}
+                                onPush={async () => {
+                                  setHandoverPushing(true); setHandoverPushMsg(null)
+                                  try {
+                                    const text = buildHandoverComment(handoverData, selectedIssue)
+                                    await addJiraComment({ issue_key: handoverCommentKey, comment_text: text })
+                                    setHandoverPushMsg({ ok: true, msg: `Comment added to ${handoverCommentKey}` })
+                                  } catch(e) {
+                                    const detail = e.response?.data?.detail || e.message
+                                    setHandoverPushMsg({ ok: false, msg: detail })
+                                  }
+                                  finally { setHandoverPushing(false) }
+                                }}
+                              />
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </>
+                )
+              })()}
+
+              {/* Empty state before search */}
+              {!selectedIssue && (
+                <div className="text-center py-16 text-gray-400">
+                  <FlaskConical className="h-12 w-12 mx-auto mb-3 text-gray-200" />
+                  <p className="font-medium">Search for an Epic or Story above</p>
+                  <p className="text-sm mt-1 text-gray-300">Type a key like TMT0-100 or any keyword</p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ═══ TAB 3: Unlinked Tests ═══ */}
           {tab === 'Unlinked Tests' && (
             <div className="p-5 space-y-4">
               {unlinkedQuery.isLoading && (
@@ -1176,6 +1480,262 @@ export default function TestCoveragePage() {
           onCreated={() => { setGenerateTarget(null) }}
         />
       )}
+    </div>
+  )
+}
+
+// ── Test Plan & Handover helpers ──────────────────────────────────────────
+
+function buildHandoverComment(data, issue) {
+  const lines = [
+    `📋 Handover Exit Criteria — ${issue?.key}: ${issue?.summary}`,
+    '',
+    data.intro || '',
+    '',
+  ]
+  ;(data.criteria || []).forEach((c, i) => {
+    lines.push(`${i + 1}. [${c.priority === 'must' ? '✅ MUST' : '👍 NICE'}] ${c.title}`)
+    lines.push(`   ${c.description}`)
+    ;(c.steps || []).forEach(s => lines.push(`   • ${s}`))
+    lines.push('')
+  })
+  return lines.join('\n')
+}
+
+const TYPE_COLORS = {
+  Functional:  'bg-blue-100 text-blue-700 border-blue-200',
+  Negative:    'bg-red-100 text-red-700 border-red-200',
+  'Edge Cases':'bg-orange-100 text-orange-700 border-orange-200',
+  Performance: 'bg-purple-100 text-purple-700 border-purple-200',
+}
+const PHASE_COLORS = {
+  Setup:          'bg-gray-100 text-gray-700',
+  'Core Flow':    'bg-blue-100 text-blue-700',
+  'Negative Tests':'bg-red-100 text-red-700',
+  'Edge Cases':   'bg-orange-100 text-orange-700',
+  'Sign-off':     'bg-green-100 text-green-700',
+}
+
+function TestPlanView({ plan, onRegen }) {
+  const [expandedType, setExpandedType] = useState(null)
+  const [expandedArea, setExpandedArea] = useState(null)
+  return (
+    <div className="space-y-4 text-sm">
+      {/* Regen button */}
+      <div className="flex justify-end">
+        <button onClick={onRegen} className="text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1">
+          <Wand2 className="h-3 w-3" /> Regenerate
+        </button>
+      </div>
+
+      {/* Executive Summary */}
+      {plan.executive_summary && (
+        <div className="bg-indigo-50 rounded-lg p-3 text-indigo-900 leading-relaxed">
+          {plan.executive_summary}
+        </div>
+      )}
+
+      {/* Scope */}
+      {plan.scope && (
+        <div className="grid grid-cols-2 gap-3">
+          <div className="bg-green-50 rounded-lg p-3">
+            <p className="font-semibold text-green-700 mb-1.5 text-xs uppercase tracking-wide">In Scope</p>
+            <ul className="space-y-1">
+              {(plan.scope.in_scope || []).map((item, i) => (
+                <li key={i} className="flex gap-1.5 text-green-800"><span className="mt-0.5 text-green-500 flex-shrink-0">✓</span>{item}</li>
+              ))}
+            </ul>
+          </div>
+          <div className="bg-red-50 rounded-lg p-3">
+            <p className="font-semibold text-red-700 mb-1.5 text-xs uppercase tracking-wide">Out of Scope</p>
+            <ul className="space-y-1">
+              {(plan.scope.out_of_scope || []).map((item, i) => (
+                <li key={i} className="flex gap-1.5 text-red-800"><span className="mt-0.5 text-red-400 flex-shrink-0">✗</span>{item}</li>
+              ))}
+            </ul>
+          </div>
+        </div>
+      )}
+
+      {/* Test Types */}
+      {plan.test_types && (
+        <div>
+          <p className="font-semibold text-gray-700 mb-2 text-xs uppercase tracking-wide">Test Types</p>
+          <div className="grid grid-cols-2 gap-2">
+            {plan.test_types.map(tt => (
+              <div key={tt.type}
+                className={`border rounded-lg overflow-hidden cursor-pointer transition-all ${TYPE_COLORS[tt.type] || 'bg-gray-100 text-gray-700 border-gray-200'}`}
+                onClick={() => setExpandedType(expandedType === tt.type ? null : tt.type)}>
+                <div className="px-3 py-2 flex items-center justify-between">
+                  <span className="font-semibold">{tt.type}</span>
+                  {tt.applicable === false
+                    ? <span className="text-xs opacity-60">N/A</span>
+                    : <span className="text-xs opacity-70">{(tt.scenarios || []).length} scenarios</span>}
+                </div>
+                {expandedType === tt.type && tt.applicable !== false && (
+                  <div className="bg-white bg-opacity-60 px-3 py-2 border-t border-current border-opacity-20">
+                    <p className="text-xs opacity-70 mb-1.5">{tt.description}</p>
+                    <ul className="space-y-1">
+                      {(tt.scenarios || []).map((sc, i) => (
+                        <li key={i} className="flex gap-1.5 text-xs"><span className="flex-shrink-0 opacity-50">•</span>{sc}</li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Test Flow */}
+      {plan.test_flow && plan.test_flow.length > 0 && (
+        <div>
+          <p className="font-semibold text-gray-700 mb-2 text-xs uppercase tracking-wide">Test Flow</p>
+          <div className="overflow-x-auto">
+            <div className="flex gap-0 min-w-max">
+              {plan.test_flow.map((step, idx) => (
+                <div key={step.step} className="flex items-center">
+                  <div className="w-36 flex-shrink-0">
+                    <div className={`rounded-lg p-2.5 text-xs ${PHASE_COLORS[step.phase] || 'bg-gray-100 text-gray-700'}`}>
+                      <div className="font-bold mb-0.5 flex items-center gap-1">
+                        <span className="bg-white bg-opacity-50 rounded-full w-4 h-4 flex items-center justify-center text-xs font-bold">{step.step}</span>
+                        {step.phase}
+                      </div>
+                      <p className="opacity-80 leading-tight">{step.action}</p>
+                      <p className="opacity-60 mt-1 text-xs italic">{step.validation}</p>
+                    </div>
+                  </div>
+                  {idx < plan.test_flow.length - 1 && (
+                    <div className="text-gray-300 px-1 flex-shrink-0 text-lg">→</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Coverage Areas */}
+      {plan.coverage_areas && plan.coverage_areas.length > 0 && (
+        <div>
+          <p className="font-semibold text-gray-700 mb-2 text-xs uppercase tracking-wide">Coverage Areas</p>
+          <div className="space-y-1.5">
+            {plan.coverage_areas.map(area => (
+              <div key={area.area} className="border border-gray-200 rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setExpandedArea(expandedArea === area.area ? null : area.area)}
+                  className="w-full flex items-center justify-between px-3 py-2 hover:bg-gray-50"
+                >
+                  <div className="flex items-center gap-2">
+                    <span className={`text-xs px-1.5 py-0.5 rounded font-medium ${area.priority === 'high' ? 'bg-red-100 text-red-600' : area.priority === 'medium' ? 'bg-yellow-100 text-yellow-700' : 'bg-gray-100 text-gray-500'}`}>
+                      {area.priority}
+                    </span>
+                    <span className="font-medium text-gray-800">{area.area}</span>
+                  </div>
+                  <span className="text-xs text-gray-400">~{area.test_count_estimate} TCs</span>
+                </button>
+                {expandedArea === area.area && (
+                  <div className="px-3 pb-2 space-y-1">
+                    {(area.tests || []).map((t, i) => (
+                      <p key={i} className="text-xs text-gray-600 flex gap-1.5"><span className="text-gray-300">•</span>{t}</p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* Risks */}
+      {plan.risks && plan.risks.length > 0 && (
+        <div>
+          <p className="font-semibold text-gray-700 mb-2 text-xs uppercase tracking-wide">Risks & Mitigations</p>
+          <div className="space-y-2">
+            {plan.risks.map((r, i) => (
+              <div key={i} className="bg-yellow-50 border border-yellow-200 rounded-lg p-2.5">
+                <p className="font-medium text-yellow-800 flex gap-1.5"><AlertTriangle className="h-3.5 w-3.5 mt-0.5 flex-shrink-0" />{r.risk}</p>
+                <p className="text-yellow-700 mt-1 ml-5 text-xs">{r.mitigation}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {plan.estimated_test_cases && (
+        <p className="text-center text-xs text-gray-400">Estimated total test cases: <strong>{plan.estimated_test_cases}</strong></p>
+      )}
+    </div>
+  )
+}
+
+function HandoverCriteriaView({ data, commentKey, pushing, pushMsg, onChangeKey, onRegen, onPush }) {
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="flex justify-end">
+        <button onClick={onRegen} className="text-xs text-amber-500 hover:text-amber-700 flex items-center gap-1">
+          <Wand2 className="h-3 w-3" /> Regenerate
+        </button>
+      </div>
+
+      {data.intro && (
+        <div className="bg-amber-50 rounded-lg p-3 text-amber-900 text-xs leading-relaxed">{data.intro}</div>
+      )}
+
+      <div className="space-y-3">
+        {(data.criteria || []).map(c => (
+          <div key={c.id} className={`border rounded-lg overflow-hidden ${c.priority === 'must' ? 'border-amber-300' : 'border-gray-200'}`}>
+            <div className={`px-3 py-2 flex items-start gap-2 ${c.priority === 'must' ? 'bg-amber-50' : 'bg-gray-50'}`}>
+              <span className={`text-xs px-1.5 py-0.5 rounded font-semibold flex-shrink-0 mt-0.5 ${c.priority === 'must' ? 'bg-amber-200 text-amber-800' : 'bg-gray-200 text-gray-600'}`}>
+                {c.priority === 'must' ? '✅ MUST' : '👍 NICE'}
+              </span>
+              <div>
+                <p className="font-semibold text-gray-800">{c.title}</p>
+                <p className="text-xs text-gray-500 mt-0.5">{c.category}</p>
+              </div>
+            </div>
+            <div className="px-3 py-2 space-y-1.5">
+              <p className="text-xs text-gray-600">{c.description}</p>
+              <ol className="space-y-1 mt-2">
+                {(c.steps || []).map((step, i) => (
+                  <li key={i} className="flex gap-2 text-xs text-gray-700">
+                    <span className="bg-amber-100 text-amber-700 rounded-full w-4 h-4 flex items-center justify-center font-bold flex-shrink-0">{i+1}</span>
+                    {step}
+                  </li>
+                ))}
+              </ol>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Push to Jira */}
+      <div className="border-t border-gray-200 pt-3 space-y-2">
+        <p className="text-xs font-medium text-gray-600">Push as Jira comment</p>
+        <div className="flex gap-2">
+          <input
+            className="flex-1 text-xs border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-300"
+            placeholder="Issue key (e.g. TMT0-123)"
+            value={commentKey}
+            onChange={e => onChangeKey(e.target.value)}
+          />
+          <button
+            onClick={onPush}
+            disabled={pushing || !commentKey.trim()}
+            className="px-3 py-1.5 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1.5"
+          >
+            {pushing ? <div className="h-3 w-3 border border-white border-t-transparent rounded-full animate-spin" /> : <Link2 className="h-3 w-3" />}
+            Push to Jira
+          </button>
+        </div>
+        {pushMsg && (
+          <p className={`text-xs flex items-center gap-1 ${pushMsg.ok ? 'text-green-600' : 'text-red-500'}`}>
+            {pushMsg.ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
+            {pushMsg.msg}
+          </p>
+        )}
+      </div>
     </div>
   )
 }

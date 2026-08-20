@@ -5,6 +5,7 @@ All dashboard data endpoints live here.
 import logging
 from typing import Optional
 from fastapi import APIRouter, Query, HTTPException
+from pydantic import BaseModel
 
 from app.services.dashboard_service import get_dashboard_service
 from app.services.cache_service import get_cache
@@ -177,6 +178,94 @@ async def get_bugs_by_epic(
         return data
     except Exception as e:
         logger.error(f"Bugs-by-epic error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/issue/{key}/transitions")
+async def get_issue_transitions(key: str):
+    """Available Jira status transitions for one issue."""
+    try:
+        svc = get_dashboard_service()
+        return {"transitions": await svc.get_issue_transitions(key)}
+    except Exception as e:
+        logger.error(f"Get transitions error for {key}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class TransitionRequest(BaseModel):
+    transition_id: str
+
+
+@router.post("/issue/{key}/transition")
+async def transition_issue(key: str, body: TransitionRequest):
+    """Move an issue to a new status in Jira and invalidate dashboard caches."""
+    try:
+        svc = get_dashboard_service()
+        await svc.transition_issue(key, body.transition_id)
+        return {"status": "ok", "key": key}
+    except Exception as e:
+        logger.error(f"Transition error for {key}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class ReassignRequest(BaseModel):
+    account_id: Optional[str] = None
+
+
+@router.post("/issue/{key}/qa-owner")
+async def reassign_qa_owner(key: str, body: ReassignRequest):
+    """Reassign the QA Owner (dedicated field if configured, else the Jira assignee)."""
+    try:
+        svc = get_dashboard_service()
+        await svc.reassign_qa_owner(key, body.account_id)
+        return {"status": "ok", "key": key}
+    except Exception as e:
+        logger.error(f"Reassign QA owner error for {key}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class QaEstimateRequest(BaseModel):
+    hours: Optional[float] = None
+
+
+@router.post("/issue/{key}/qa-estimate")
+async def set_qa_estimate(key: str, body: QaEstimateRequest):
+    """Set (or clear, with hours=null, to revert to the type-based default) a
+    QA time estimate for one issue. This is dashboard-only state, not a Jira field."""
+    try:
+        svc = get_dashboard_service()
+        await svc.set_qa_estimate(key, body.hours)
+        return {"status": "ok", "key": key, "hours": body.hours}
+    except Exception as e:
+        logger.error(f"Set QA estimate error for {key}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/settings/default-bug-qa-hours")
+async def get_default_bug_qa_hours():
+    """The QA estimate (hours) auto-applied to every Bug with no per-issue override."""
+    try:
+        svc = get_dashboard_service()
+        return {"hours": await svc.get_default_bug_qa_hours()}
+    except Exception as e:
+        logger.error(f"Get default bug QA hours error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class DefaultBugHoursRequest(BaseModel):
+    hours: float
+
+
+@router.post("/settings/default-bug-qa-hours")
+async def set_default_bug_qa_hours(body: DefaultBugHoursRequest):
+    """Change the default Bug QA estimate. Applies retroactively to every Bug
+    that doesn't have its own per-issue override — sums recompute on next load."""
+    try:
+        svc = get_dashboard_service()
+        await svc.set_default_bug_qa_hours(body.hours)
+        return {"status": "ok", "hours": body.hours}
+    except Exception as e:
+        logger.error(f"Set default bug QA hours error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

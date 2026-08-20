@@ -3,7 +3,7 @@ import { RefreshCw, Filter, Download } from 'lucide-react'
 import { format } from 'date-fns'
 import { FilterPanel } from '../filters/FilterPanel'
 
-export function Header({ title, lastRefresh, isRefreshing, onRefresh, onFilter, onExport, exportOptions }) {
+export function Header({ title, lastRefresh, isRefreshing, onRefresh, onFilter, onExport, exportOptions, extraActions }) {
   const [showFilter, setShowFilter] = useState(false)
 
   return (
@@ -19,6 +19,8 @@ export function Header({ title, lastRefresh, isRefreshing, onRefresh, onFilter, 
         </div>
 
         <div className="flex items-center gap-2">
+          {extraActions}
+
           {onFilter && (
             <div className="relative">
               <button

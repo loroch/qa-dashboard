@@ -37,6 +37,27 @@ export const triggerRefresh = () =>
 export const getCacheStatus = () =>
   api.get('/dashboard/cache/status')
 
+export const getIssueTransitions = (key) =>
+  api.get(`/dashboard/issue/${key}/transitions`)
+
+export const transitionIssue = (key, transitionId) =>
+  api.post(`/dashboard/issue/${key}/transition`, { transition_id: transitionId })
+
+export const getTeamMembers = () =>
+  api.get('/jira/team-members')
+
+export const reassignQaOwner = (key, accountId) =>
+  api.post(`/dashboard/issue/${key}/qa-owner`, { account_id: accountId })
+
+export const setQaEstimate = (key, hours) =>
+  api.post(`/dashboard/issue/${key}/qa-estimate`, { hours })
+
+export const getDefaultBugQaHours = () =>
+  api.get('/dashboard/settings/default-bug-qa-hours')
+
+export const setDefaultBugQaHours = (hours) =>
+  api.post('/dashboard/settings/default-bug-qa-hours', { hours })
+
 // --- Jira meta ---
 export const getJiraStatus = () =>
   api.get('/jira/status')

@@ -86,13 +86,22 @@ class JiraClient:
         max_results: int | None = None,
         start_at: int = 0,
     ) -> list[dict]:
-        """Search Jira issues with automatic pagination."""
+        """Search Jira issues with automatic pagination.
+
+        IMPORTANT: /rest/api/3/search/jql (the current Jira Cloud search
+        endpoint) uses cursor-based pagination via `nextPageToken` and does
+        NOT honor `startAt` — it's silently ignored. Sending an incrementing
+        startAt here previously caused every "page" to re-fetch the exact
+        same first batch of issues over and over, duplicating results until
+        max_total was hit (e.g. a real list of ~500 issues would come back
+        as 5000 duplicated rows). `start_at` is kept only for API-compat and
+        no longer used to build the request.
+        """
         # If max_results given, do single page fetch
         if max_results is not None:
             batch_size = min(max_results, self.max_results)
             params = {
                 "jql": jql,
-                "startAt": start_at,
                 "maxResults": batch_size,
                 "fields": ",".join(fields or []),
             }
@@ -100,7 +109,6 @@ class JiraClient:
             return data.get("issues", [])
 
         all_issues: list[dict] = []
-        start_at = 0
         default_fields = [
             "summary", "status", "assignee", "reporter", "created", "updated",
             "priority", "fixVersions", "components", "labels", "issuetype",
@@ -113,31 +121,32 @@ class JiraClient:
         ]
         fields_to_fetch = fields or default_fields
 
+        next_page_token: Optional[str] = None
+        seen_keys: set[str] = set()
         while len(all_issues) < max_total:
             batch_size = min(self.max_results, max_total - len(all_issues))
             params = {
                 "jql": jql,
-                "startAt": start_at,
                 "maxResults": batch_size,
                 "fields": ",".join(fields_to_fetch),
             }
+            if next_page_token:
+                params["nextPageToken"] = next_page_token
             data = await self.get("/search/jql", params)
             issues = data.get("issues", [])
-            all_issues.extend(issues)
 
-            total = data.get("total", 0)
-            logger.debug(f"Fetched {len(all_issues)}/{total} issues for JQL: {jql[:80]}")
+            # Belt-and-suspenders: never let an already-seen issue key back in,
+            # even if a future Jira response ever repeats a page.
+            new_issues = [i for i in issues if i.get("key") not in seen_keys]
+            for i in new_issues:
+                seen_keys.add(i.get("key"))
+            all_issues.extend(new_issues)
 
-            if not issues:
+            logger.debug(f"Fetched {len(all_issues)} issues so far for JQL: {jql[:80]}")
+
+            next_page_token = data.get("nextPageToken")
+            if not issues or not next_page_token:
                 break
-            # When total is accurate, stop once we've fetched everything.
-            # When total=0 (Jira quirk for this project), stop only when
-            # the page is shorter than requested — that signals the last page.
-            if total > 0 and len(all_issues) >= total:
-                break
-            if total == 0 and len(issues) < batch_size:
-                break
-            start_at += len(issues)
 
         return all_issues
 
@@ -157,6 +166,40 @@ class JiraClient:
     async def get_projects(self) -> list[dict]:
         data = await self.get("/project/search", {"maxResults": 200})
         return data.get("values", [])
+
+    async def get_transitions(self, issue_key: str) -> list[dict]:
+        """Available status transitions for an issue (id, name, target status)."""
+        data = await self.get(f"/issue/{issue_key}/transitions")
+        return [
+            {
+                "id": t["id"],
+                "name": t["name"],
+                "to_status": t.get("to", {}).get("name", ""),
+            }
+            for t in data.get("transitions", [])
+        ]
+
+    async def transition_issue(self, issue_key: str, transition_id: str) -> None:
+        """Move an issue to a new status via the given transition id."""
+        await self.post(f"/issue/{issue_key}/transitions", {"transition": {"id": transition_id}})
+
+    async def set_assignee(self, issue_key: str, account_id: Optional[str]) -> None:
+        """Set (or clear, if account_id is None) the standard Jira assignee."""
+        client = await self._get_client()
+        url = f"{self.base_url}/rest/api/3/issue/{issue_key}/assignee"
+        try:
+            response = await client.put(url, json={"accountId": account_id})
+            response.raise_for_status()
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Jira set assignee error {e.response.status_code} for {issue_key}: {e.response.text[:500]}")
+            raise JiraAPIError(f"Jira returned {e.response.status_code}: {e.response.text[:200]}") from e
+        except httpx.RequestError as e:
+            raise JiraConnectionError(f"Cannot connect to Jira: {e}") from e
+
+    async def set_custom_user_field(self, issue_key: str, field_id: str, account_id: Optional[str]) -> None:
+        """Set (or clear) a custom user-picker field (e.g. a dedicated QA Owner field)."""
+        value = {"accountId": account_id} if account_id else None
+        await self.put(f"/issue/{issue_key}", {"fields": {field_id: value}})
 
     async def get_issue_changelog(self, issue_key: str) -> dict:
         return await self.get(f"/issue/{issue_key}/changelog")

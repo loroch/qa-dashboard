@@ -189,3 +189,82 @@ async def search_stories(q: str = Query(..., min_length=2)):
         return await svc.search_stories(q)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/search-issues")
+async def search_issues(q: str = Query(..., min_length=2)):
+    """Search Epics and Stories by key or keyword (for the coverage search tab)."""
+    try:
+        svc = get_coverage_service()
+        return await svc.search_epics_and_stories(q)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/by-issue")
+async def get_by_issue(key: str = Query(..., min_length=2), refresh: bool = Query(False)):
+    """Return test coverage for a specific Epic or Story key."""
+    try:
+        svc = get_coverage_service()
+        return await svc.get_by_epic_or_story(key, force_refresh=refresh)
+    except Exception as e:
+        logger.error(f"Coverage by-issue error for {key}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class TestPlanRequest(BaseModel):
+    issue_key: str
+    issue_summary: str
+    issue_type: str = "Story"
+    stories: list[dict] = []
+
+
+class HandoverCriteriaRequest(BaseModel):
+    issue_key: str
+    issue_summary: str
+    issue_type: str = "Story"
+    stories: list[dict] = []
+
+
+class JiraCommentRequest(BaseModel):
+    issue_key: str
+    comment_text: str
+
+
+@router.post("/generate-test-plan")
+async def generate_test_plan(body: TestPlanRequest):
+    """AI-generate a macro-level test plan for an Epic or Story."""
+    try:
+        svc = get_coverage_service()
+        return await svc.generate_test_plan(
+            body.issue_key, body.issue_summary, body.issue_type, body.stories
+        )
+    except Exception as e:
+        logger.error(f"generate_test_plan error for {body.issue_key}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/generate-handover-criteria")
+async def generate_handover_criteria(body: HandoverCriteriaRequest):
+    """AI-generate handover meeting exit criteria for an Epic or Story."""
+    try:
+        svc = get_coverage_service()
+        return await svc.generate_handover_criteria(
+            body.issue_key, body.issue_summary, body.issue_type, body.stories
+        )
+    except Exception as e:
+        logger.error(f"generate_handover_criteria error for {body.issue_key}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/add-jira-comment")
+async def add_jira_comment(body: JiraCommentRequest):
+    """Add a plain-text comment to a Jira issue."""
+    try:
+        svc = get_coverage_service()
+        return await svc.add_jira_comment(body.issue_key, body.comment_text)
+    except Exception as e:
+        msg = str(e)
+        status = 400 if "404" in msg or "does not exist" in msg or "permission" in msg.lower() else 500
+        logger.error(f"add_jira_comment error for {body.issue_key}: {e}")
+        raise HTTPException(status_code=status, detail=msg)

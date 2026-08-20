@@ -11,9 +11,10 @@ import re
 from typing import Optional
 
 import anthropic
-import httpx
 
 from app.config import get_settings
+from app.confluence.client import get_confluence_client
+from app.figma.client import get_figma_client
 from app.jira.client import get_jira_client
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,63 @@ class TestGeneratorService:
 
     def __init__(self):
         self.jira = get_jira_client()
+        self.confluence = get_confluence_client()
+        self.figma = get_figma_client()
+
+    # ------------------------------------------------------------------
+    # 0. Epic search + children
+    # ------------------------------------------------------------------
+
+    async def search_epics(self, q: str, max_results: int = 20) -> list[dict]:
+        """Search TMT0 Epics by key or summary (same pattern as bug_triage_service)."""
+        if not q or len(q.strip()) < 2:
+            return []
+        q_safe = q.replace('"', "").strip()
+        if q_safe.upper().startswith("TMT0-"):
+            jql = f'project = TMT0 AND issuetype = Epic AND (key = "{q_safe}" OR summary ~ "{q_safe}") ORDER BY updated DESC'
+        else:
+            jql = f'project = TMT0 AND issuetype = Epic AND summary ~ "{q_safe}*" ORDER BY updated DESC'
+        try:
+            issues = await self.jira.search_issues(jql, fields=["summary", "status"], max_total=max_results)
+        except Exception as exc:
+            logger.warning("search_epics failed: %s", exc)
+            return []
+        base_url = get_settings().jira_base_url
+        return [
+            {
+                "key": i["key"],
+                "url": f"{base_url}/browse/{i['key']}",
+                "summary": i.get("fields", {}).get("summary", ""),
+                "status": (i.get("fields", {}).get("status") or {}).get("name", ""),
+            }
+            for i in issues
+        ]
+
+    async def get_epic_children(self, epic_key: str) -> list[dict]:
+        """Return Story/Task children of an Epic (Test/Sub-task noise excluded)."""
+        jql = (
+            f'parent = "{epic_key}" AND issuetype in (Story, Task) '
+            f'ORDER BY issuetype ASC, key ASC'
+        )
+        try:
+            issues = await self.jira.search_issues(
+                jql, fields=["summary", "status", "issuetype", "fixVersions"], max_total=200
+            )
+        except Exception as exc:
+            logger.warning("get_epic_children failed for %s: %s", epic_key, exc)
+            return []
+        base_url = get_settings().jira_base_url
+        return [
+            {
+                "key": i["key"],
+                "url": f"{base_url}/browse/{i['key']}",
+                "summary": i.get("fields", {}).get("summary", ""),
+                "status": (i.get("fields", {}).get("status") or {}).get("name", ""),
+                "issuetype": (i.get("fields", {}).get("issuetype") or {}).get("name", ""),
+                "fix_versions": [v["name"] for v in (i.get("fields", {}).get("fixVersions") or [])],
+            }
+            for i in issues
+        ]
 
     # ------------------------------------------------------------------
     # 1. Stories without tests
@@ -115,9 +173,23 @@ class TestGeneratorService:
     # 2. Story context + AI summary (new Step 2)
     # ------------------------------------------------------------------
 
-    async def get_story_context(self, story_key: str) -> dict:
-        """Fetch story + epic + Confluence context and generate a simple AI summary."""
+    async def get_story_context(
+        self,
+        story_key: str,
+        sources: Optional[dict] = None,
+        figma_url: str = "",
+    ) -> dict:
+        """
+        Fetch story + (optionally) epic + Confluence + Figma context and generate
+        a simple AI summary. `sources` toggles which optional sources are fetched:
+        {"jira": bool, "confluence": bool, "figma": bool} — Jira story itself is
+        always fetched (it's the subject), the rest default to True when omitted
+        so existing callers keep their current behavior.
+        """
         settings = get_settings()
+        sources = sources or {}
+        want_confluence = sources.get("confluence", True)
+        want_figma = sources.get("figma", True)
 
         # --- Story ---
         story = await self.jira.get_issue(
@@ -129,6 +201,7 @@ class TestGeneratorService:
         story_description = self._extract_text(story_fields.get("description"))
         fix_versions = [v["name"] for v in (story_fields.get("fixVersions") or [])]
         story_status = story_fields.get("status", {}).get("name", "")
+        epic_desc = ""
 
         sources_used = []
         sources_used.append({
@@ -174,51 +247,35 @@ class TestGeneratorService:
         # --- Confluence ---
         confluence_pages = []
         confluence_context_for_prompt = ""
-        safe_query = re.sub(r'["\[\]]', '', story_summary)[:60]
-        try:
-            async with httpx.AsyncClient(
-                auth=(settings.jira_user_email, settings.jira_api_token),
-                timeout=20,
-            ) as client:
-                resp = await client.get(
-                    f"{settings.jira_base_url}/wiki/rest/api/content/search",
-                    params={
-                        "cql": f'text ~ "{safe_query}" AND type = page',
-                        "limit": 3,
-                        "expand": "body.storage",
-                    },
-                )
-                if resp.status_code == 200:
-                    for page in (resp.json().get("results") or [])[:3]:
-                        title = page.get("title", "")
-                        raw_html = page.get("body", {}).get("storage", {}).get("value", "")
-                        text = re.sub(r"<[^>]+>", " ", raw_html)
-                        text = re.sub(r"\s+", " ", text).strip()
-                        page_id = page.get("id", "")
-                        space = page.get("space", {})
-                        space_key = space.get("key", "")
-                        page_url = (
-                            f"{settings.jira_base_url}/wiki/spaces/{space_key}/pages/{page_id}"
-                            if page_id else ""
-                        )
-                        confluence_pages.append({
-                            "title": title,
-                            "preview": text[:500],
-                            "char_count": len(text),
-                            "has_content": bool(text),
-                            "url": page_url,
-                        })
-                        confluence_context_for_prompt += f"\n\nConfluence: {title}\n{text[:2000]}"
-                        sources_used.append({
-                            "type": "confluence",
-                            "label": f"Confluence: {title}",
-                            "title": title,
-                            "preview": text[:400],
-                            "has_content": bool(text),
-                            "url": page_url,
-                        })
-        except Exception as exc:
-            logger.warning("Confluence search failed: %s", exc)
+        if want_confluence:
+            for page in await self.confluence.search_pages(story_summary, limit=3):
+                confluence_pages.append({
+                    "title": page["title"],
+                    "preview": page["text"][:500],
+                    "char_count": page["char_count"],
+                    "has_content": bool(page["text"]),
+                    "url": page["url"],
+                })
+                confluence_context_for_prompt += f"\n\nConfluence: {page['title']}\n{page['text'][:2000]}"
+                sources_used.append({
+                    "type": "confluence",
+                    "label": f"Confluence: {page['title']}",
+                    "title": page["title"],
+                    "preview": page["text"][:400],
+                    "has_content": bool(page["text"]),
+                    "url": page["url"],
+                })
+
+        # --- Figma ---
+        # Prefer an explicitly pasted URL; otherwise auto-detect from the Jira text itself
+        # (these tickets commonly embed a "Figma ref:" link right in the description, so
+        # the user shouldn't have to paste a URL Jira already has).
+        figma_context_for_prompt = ""
+        if want_figma:
+            figma_urls = [figma_url] if figma_url else self.figma.extract_urls(story_description, epic_desc)
+            if figma_urls:
+                figma_context_for_prompt, figma_entries = await self._gather_figma(figma_urls)
+                sources_used.extend(figma_entries)
 
         # --- AI Simple Summary ---
         ai_summary = ""
@@ -344,9 +401,19 @@ class TestGeneratorService:
     # 4. Generate test cases (Jira + Confluence → Claude)
     # ------------------------------------------------------------------
 
-    async def generate_test_cases(self, story_key: str, extra_context: str = "", mode: str = "basic") -> dict:
-        """Fetch context from Jira + Confluence, call Claude, return test cases."""
+    async def generate_test_cases(
+        self,
+        story_key: str,
+        extra_context: str = "",
+        mode: str = "basic",
+        sources: Optional[dict] = None,
+        figma_url: str = "",
+    ) -> dict:
+        """Fetch context from Jira + Confluence + Figma, call Claude, return test cases."""
         settings = get_settings()
+        sources = sources or {}
+        want_confluence = sources.get("confluence", True)
+        want_figma = sources.get("figma", True)
 
         # --- Story ---
         story = await self.jira.get_issue(
@@ -357,6 +424,7 @@ class TestGeneratorService:
         story_summary = story_fields.get("summary", "")
         story_description = self._extract_text(story_fields.get("description"))
         fix_versions = [v["name"] for v in (story_fields.get("fixVersions") or [])]
+        epic_desc = ""
 
         # --- Parent Epic ---
         epic_context = ""
@@ -375,7 +443,15 @@ class TestGeneratorService:
                 logger.warning("Could not fetch epic %s: %s", parent_key, exc)
 
         # --- Confluence ---
-        confluence_context = await self._search_confluence(story_summary)
+        confluence_context = await self._search_confluence(story_summary) if want_confluence else ""
+
+        # --- Figma ---
+        # Prefer an explicitly pasted URL; otherwise auto-detect from the Jira text itself.
+        figma_context = ""
+        if want_figma:
+            figma_urls = [figma_url] if figma_url else self.figma.extract_urls(story_description, epic_desc)
+            if figma_urls:
+                figma_context, _ = await self._gather_figma(figma_urls)
 
         # --- Prompt → Claude ---
         prompt = self._build_prompt(
@@ -384,6 +460,7 @@ class TestGeneratorService:
             story_description=story_description,
             epic_context=epic_context,
             confluence_context=confluence_context,
+            figma_context=figma_context,
             extra_context=extra_context,
             mode=mode,
         )
@@ -480,37 +557,43 @@ class TestGeneratorService:
 
     async def _search_confluence(self, query: str) -> str:
         """Search Confluence for pages relevant to the story and return plain text."""
-        settings = get_settings()
-        safe_query = re.sub(r'["\[\]]', '', query)[:60]
-        try:
-            async with httpx.AsyncClient(
-                auth=(settings.jira_user_email, settings.jira_api_token),
-                timeout=20,
-            ) as client:
-                resp = await client.get(
-                    f"{settings.jira_base_url}/wiki/rest/api/content/search",
-                    params={
-                        "cql": f'text ~ "{safe_query}" AND type = page',
-                        "limit": 3,
-                        "expand": "body.storage",
-                    },
+        parts = [
+            f"### Confluence page: {page['title']}\n{page['text'][:2500]}"
+            for page in await self.confluence.search_pages(query, limit=2)
+        ]
+        return "\n\n".join(parts)
+
+    async def _gather_figma(self, figma_urls: list[str]) -> tuple[str, list[dict]]:
+        """Fetch node context for each Figma URL (whether manually pasted or auto-detected
+        from a Jira description's 'Figma ref:' link) and return (prompt context, source cards)."""
+        context_parts = []
+        entries = []
+        for url in figma_urls:
+            try:
+                fig = await self.figma.get_node_context(url)
+                context_parts.append(
+                    f"Figma frame \"{fig['title']}\" — visible text/labels: {fig['text_summary']}\n"
+                    f"Colors used: {', '.join(fig['colors']) or 'none detected'}"
                 )
-                if resp.status_code != 200:
-                    return ""
-
-                parts = []
-                for page in (resp.json().get("results") or [])[:2]:
-                    title = page.get("title", "")
-                    raw_html = page.get("body", {}).get("storage", {}).get("value", "")
-                    text = re.sub(r"<[^>]+>", " ", raw_html)
-                    text = re.sub(r"\s+", " ", text).strip()[:2500]
-                    parts.append(f"### Confluence page: {title}\n{text}")
-
-                return "\n\n".join(parts)
-
-        except Exception as exc:
-            logger.warning("Confluence search failed: %s", exc)
-            return ""
+                entries.append({
+                    "type": "figma",
+                    "label": f"Figma: {fig['title']}",
+                    "title": fig["title"],
+                    "preview": fig["text_summary"][:400],
+                    "has_content": fig["has_content"],
+                    "url": url,
+                })
+            except Exception as exc:
+                logger.warning("Figma context fetch failed for %s: %s", url, exc)
+                entries.append({
+                    "type": "figma",
+                    "label": "Figma",
+                    "title": url,
+                    "preview": f"Could not load: {exc}",
+                    "has_content": False,
+                    "url": url,
+                })
+        return "\n\n".join(context_parts), entries
 
     def _build_prompt(
         self,
@@ -519,6 +602,7 @@ class TestGeneratorService:
         story_description: str,
         epic_context: str,
         confluence_context: str,
+        figma_context: str = "",
         extra_context: str = "",
         mode: str = "basic",
     ) -> str:
@@ -551,6 +635,10 @@ class TestGeneratorService:
             lines += ["", epic_context]
         if confluence_context:
             lines += ["", "## Relevant Confluence Documentation", confluence_context]
+        if figma_context:
+            lines += ["", "## Figma Design Reference", figma_context,
+                      "Use the visible labels/colors above to write UI-accurate steps and expected results "
+                      "(exact field names, button labels, status text) rather than generic descriptions."]
         if extra_context:
             lines += ["", "## Additional Context (from uploaded files)", extra_context]
 
