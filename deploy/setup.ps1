@@ -191,11 +191,12 @@ Write-Header "Step 4/5 - Configure backend and frontend"
 
 # Detect Python executable (winget path varies)
 $tmp = Get-Command python -ErrorAction SilentlyContinue
+$pyFromPath = if ($tmp) { $tmp.Source } else { "" }
 $candidates = @(
     "C:\Python311\python.exe",
     "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
     "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
-    (if ($tmp) { $tmp.Source } else { "" })
+    $pyFromPath
 )
 $pyExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if (-not $pyExe) {
