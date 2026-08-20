@@ -104,7 +104,10 @@ if (Get-Command git -ErrorAction SilentlyContinue) {
 
 # Python 3.11
 $pyExe = "C:\Python311\python.exe"
-if (-not (Test-Path $pyExe)) { $pyExe = (Get-Command python -ErrorAction SilentlyContinue)?.Source }
+if (-not (Test-Path $pyExe)) {
+    $tmp = Get-Command python -ErrorAction SilentlyContinue
+    if ($tmp) { $pyExe = $tmp.Source }
+}
 if ($pyExe -and (Test-Path $pyExe)) {
     $pyVer = & $pyExe --version 2>&1
     Write-OK "Python already installed: $pyVer"
@@ -112,14 +115,18 @@ if ($pyExe -and (Test-Path $pyExe)) {
     Write-INFO "Installing Python 3.11..."
     winget install --id Python.Python.3.11 -e --source winget --silent --accept-package-agreements --accept-source-agreements
     Refresh-Path
-    $pyExe = "C:\Users\$env:USERNAME\AppData\Local\Programs\Python\Python311\python.exe"
+    $pyExe = "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe"
     if (-not (Test-Path $pyExe)) { $pyExe = "C:\Python311\python.exe" }
-    if (-not (Test-Path $pyExe)) { $pyExe = (Get-Command python -ErrorAction SilentlyContinue)?.Source }
+    if (-not (Test-Path $pyExe)) {
+        $tmp = Get-Command python -ErrorAction SilentlyContinue
+        if ($tmp) { $pyExe = $tmp.Source }
+    }
     Write-OK "Python installed"
 }
 
 # Node.js
-$nodeExe = (Get-Command node -ErrorAction SilentlyContinue)?.Source
+$tmp = Get-Command node -ErrorAction SilentlyContinue
+$nodeExe = if ($tmp) { $tmp.Source } else { $null }
 if ($nodeExe) {
     $nodeVer = & $nodeExe --version 2>&1
     Write-OK "Node.js already installed: $nodeVer"
@@ -127,12 +134,14 @@ if ($nodeExe) {
     Write-INFO "Installing Node.js LTS..."
     winget install --id OpenJS.NodeJS.LTS -e --source winget --silent --accept-package-agreements --accept-source-agreements
     Refresh-Path
-    $nodeExe = (Get-Command node -ErrorAction SilentlyContinue)?.Source
+    $tmp = Get-Command node -ErrorAction SilentlyContinue
+    $nodeExe = if ($tmp) { $tmp.Source } else { $null }
     Write-OK "Node.js installed"
 }
 
 # Install serve globally for SPA hosting
-$serveCmd = (Get-Command serve -ErrorAction SilentlyContinue)?.Source
+$tmp = Get-Command serve -ErrorAction SilentlyContinue
+$serveCmd = if ($tmp) { $tmp.Source } else { $null }
 if (-not $serveCmd) {
     Write-INFO "Installing 'serve' (static file server for frontend)..."
     npm install -g serve 2>&1 | Out-Null
@@ -179,11 +188,12 @@ Save-Resume @{
 Write-Header "Step 4/5 - Configure backend and frontend"
 
 # Detect Python executable (winget path varies)
+$tmp = Get-Command python -ErrorAction SilentlyContinue
 $candidates = @(
     "C:\Python311\python.exe",
     "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
     "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
-    (Get-Command python -ErrorAction SilentlyContinue)?.Source
+    (if ($tmp) { $tmp.Source } else { "" })
 )
 $pyExe = $candidates | Where-Object { $_ -and (Test-Path $_) } | Select-Object -First 1
 if (-not $pyExe) {
