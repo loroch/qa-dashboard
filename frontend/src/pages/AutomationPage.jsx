@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Header } from '../components/layout/Header'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 import {
   Wand2, ExternalLink, Trash2, ChevronRight, CheckCircle2,
   Loader2, AlertCircle, RotateCcw, Sparkles, FileText,
@@ -12,8 +13,8 @@ import {
 } from 'lucide-react'
 
 // Local axios with long timeout for Claude generation + automation runs (Playwright can take a while)
-const api = axios.create({ baseURL: '/api', timeout: 120000 })
-const automationApi = axios.create({ baseURL: '/api', timeout: 180000 })
+const api = axios.create({ baseURL: BASE_URL, timeout: 120000 })
+const automationApi = axios.create({ baseURL: BASE_URL, timeout: 180000 })
 
 const fetchVersions   = () => api.get('/test-generator/versions').then(r => r.data)
 const fetchStories    = (v) => api.get(`/test-generator/stories?version=${encodeURIComponent(v)}`).then(r => r.data)

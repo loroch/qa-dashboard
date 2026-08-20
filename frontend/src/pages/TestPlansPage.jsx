@@ -7,8 +7,9 @@ import {
   FlaskConical, Loader2, Search, PlayCircle, ChevronDown, ChevronRight, User
 } from 'lucide-react'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 
-const api = axios.create({ baseURL: '/api', timeout: 300000 })
+const api = axios.create({ baseURL: BASE_URL, timeout: 300000 })
 
 const fetchVersions     = ()     => api.get('/test-plans/versions').then(r => r.data)
 const resolveIds        = (body) => api.post('/test-plans/resolve-ids', body).then(r => r.data)

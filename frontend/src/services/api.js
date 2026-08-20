@@ -1,6 +1,6 @@
 import axios from 'axios'
 
-const BASE_URL = import.meta.env.VITE_API_URL ||
+export const BASE_URL = import.meta.env.VITE_API_URL ||
   (typeof window !== 'undefined'
     ? `http://${window.location.hostname}:8000/api`
     : '/api')
@@ -99,3 +99,5 @@ export const exportUrl = (path, params = {}) => {
   const qs = new URLSearchParams(params).toString()
   return `${BASE_URL}/export/${path}${qs ? '?' + qs : ''}`
 }
+
+export default api

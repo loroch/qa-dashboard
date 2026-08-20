@@ -2,6 +2,7 @@ import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Header } from '../components/layout/Header'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 import {
   Bug, ChevronRight, CheckCircle2, Loader2, AlertCircle,
   RotateCcw, Sparkles, Upload, FileImage, X, XCircle,
@@ -9,7 +10,7 @@ import {
   ChevronDown, Info, Database, Eye, Save, Send
 } from 'lucide-react'
 
-const api = axios.create({ baseURL: '/api', timeout: 120000 })
+const api = axios.create({ baseURL: BASE_URL, timeout: 120000 })
 
 const fetchMeta        = () => api.get('/bug-reporter/meta').then(r => r.data)
 const fetchContext     = (d) => api.post('/bug-reporter/product-context', d).then(r => r.data)

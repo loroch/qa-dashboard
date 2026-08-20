@@ -8,8 +8,9 @@ import {
   X, Check, ArrowRight, MessageSquare, User, Bug
 } from 'lucide-react'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 
-const api = axios.create({ baseURL: '/api', timeout: 120000 })
+const api = axios.create({ baseURL: BASE_URL, timeout: 120000 })
 
 const getTestsWithoutParent = (refresh) =>
   api.get(`/anomaly/tests-without-parent${refresh ? '?refresh=true' : ''}`).then(r => r.data)

@@ -9,8 +9,9 @@ import {
   X, Check, Wand2, Sparkles, FileText, BookOpen, Figma
 } from 'lucide-react'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 
-const api = axios.create({ baseURL: '/api', timeout: 120000 })
+const api = axios.create({ baseURL: BASE_URL, timeout: 120000 })
 
 const getVersions        = ()    => api.get('/coverage/versions').then(r => r.data)
 const getByVersion       = (v)   => api.get(`/coverage/by-version?version=${encodeURIComponent(v)}`).then(r => r.data)

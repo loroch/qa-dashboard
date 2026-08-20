@@ -8,8 +8,9 @@ import { Badge, AgingBadge, PriorityBadge } from '../components/common/Badge'
 import { ExternalLink, Ticket, AlertTriangle, Users, Building2, Calendar } from 'lucide-react'
 import { format, parseISO, subMonths } from 'date-fns'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 
-const api = axios.create({ baseURL: '/api', timeout: 30000 })
+const api = axios.create({ baseURL: BASE_URL, timeout: 30000 })
 const getZohoDashboard = (params) => api.get('/zoho/dashboard', { params }).then(r => r.data)
 
 const TABS = ['By Department', 'By Assignee', 'By Status', 'All Tickets', 'Overdue']

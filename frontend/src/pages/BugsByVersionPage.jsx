@@ -5,14 +5,12 @@ import { IssueTable } from '../components/tables/DataTable'
 import { SummaryCard } from '../components/cards/SummaryCard'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import { Bug, AlertTriangle, CheckCircle2, LayoutList, Layers, Tag, BookOpen } from 'lucide-react'
-import axios from 'axios'
+import api from '../services/api'
 
-const api = axios.create({ baseURL: '/api', timeout: 60000 })
-
-const getVersions  = (refresh)       => api.get('/coverage/versions', { params: refresh ? { refresh: true } : {} }).then(r => r.data)
-const getEpics     = (refresh)       => api.get('/dashboard/epics',   { params: refresh ? { refresh: true } : {} }).then(r => r.data)
-const getByVersion = (v, refresh, sig) => api.get('/dashboard/bugs-by-version', { params: { version: v, ...(refresh ? { refresh: true } : {}) }, signal: sig }).then(r => r.data)
-const getByEpic    = (k, refresh, sig) => api.get('/dashboard/bugs-by-epic',    { params: { epic_key: k, ...(refresh ? { refresh: true } : {}) }, signal: sig }).then(r => r.data)
+const getVersions  = (refresh)         => api.get('/coverage/versions',      { params: refresh ? { refresh: true } : {} })
+const getEpics     = (refresh)         => api.get('/dashboard/epics',         { params: refresh ? { refresh: true } : {} })
+const getByVersion = (v, refresh, sig) => api.get('/dashboard/bugs-by-version', { params: { version: v, ...(refresh ? { refresh: true } : {}) }, signal: sig })
+const getByEpic    = (k, refresh, sig) => api.get('/dashboard/bugs-by-epic',    { params: { epic_key: k, ...(refresh ? { refresh: true } : {}) }, signal: sig })
 
 // Exact Jira status names in workflow order
 const STATUS_CONFIG = [
@@ -349,17 +347,19 @@ export default function BugsByVersionPage() {
   const [lastRefresh, setLastRefresh]         = useState(null)
   const queryClient = useQueryClient()
 
-  const { data: versions = [], isLoading: versionsLoading } = useQuery({
+  const { data: versionsRaw, isLoading: versionsLoading } = useQuery({
     queryKey: ['bug-versions'],
     queryFn: () => getVersions(false),
     staleTime: 10 * 60 * 1000,
   })
+  const versions = Array.isArray(versionsRaw) ? versionsRaw : []
 
-  const { data: epics = [], isLoading: epicsLoading } = useQuery({
+  const { data: epicsRaw, isLoading: epicsLoading } = useQuery({
     queryKey: ['dashboard-epics'],
     queryFn: () => getEpics(false),
     staleTime: 30 * 60 * 1000,
   })
+  const epics = Array.isArray(epicsRaw) ? epicsRaw : []
 
   const versionQuery = useQuery({
     queryKey: ['bugs-by-version', selectedVersion],

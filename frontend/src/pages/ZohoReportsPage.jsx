@@ -7,8 +7,9 @@ import { AgingBadge } from '../components/common/Badge'
 import { ExternalLink, Link, BarChart2, ChevronUp, ChevronDown, X, Calendar, Unlink, Bug, Loader2, CheckCircle, AlertCircle, Paperclip, Sparkles } from 'lucide-react'
 import { format, parseISO, subMonths } from 'date-fns'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 
-const api = axios.create({ baseURL: '/api', timeout: 60000 })
+const api = axios.create({ baseURL: BASE_URL, timeout: 60000 })
 const getProjectReport = () => api.get('/zoho/reports/by-project?refresh=true').then(r => r.data)
 const getLinkedReport  = () => api.get('/zoho/reports/linked?refresh=true').then(r => r.data)
 

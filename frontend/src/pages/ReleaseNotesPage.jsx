@@ -7,8 +7,9 @@ import {
   FileDown, FileCode2, Newspaper,
 } from 'lucide-react'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 
-const api = axios.create({ baseURL: '/api', timeout: 60000 })
+const api = axios.create({ baseURL: BASE_URL, timeout: 60000 })
 
 const getVersions    = () => api.get('/coverage/versions').then(r => r.data)
 const getEpics       = () => api.get('/dashboard/epics').then(r => r.data)
