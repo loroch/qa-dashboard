@@ -128,6 +128,34 @@ function Test-DockerRunning {
 
 Write-Header "Step 3/6 - Docker Desktop"
 
+# Check CPU virtualization before downloading anything
+$virt = (Get-CimInstance Win32_Processor).VirtualizationFirmwareEnabled
+$hyperv = (Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -ErrorAction SilentlyContinue).State
+if ($virt -eq $false) {
+    Write-FAIL "CPU Virtualization is DISABLED in BIOS."
+    Write-Host ""
+    Write-Host "  Fix:" -ForegroundColor Yellow
+    Write-Host "  1. Reboot and enter BIOS (press Del or F2 during boot logo)" -ForegroundColor White
+    Write-Host "  2. Find: Advanced > CPU > Intel Virtualization Technology -> ENABLE" -ForegroundColor White
+    Write-Host "  3. Save & Exit (F10), then re-run this script" -ForegroundColor White
+    Write-Host ""
+    exit 1
+}
+if ($hyperv -ne "Enabled") {
+    Write-INFO "Hyper-V is not enabled - enabling now (requires one more reboot)..."
+    Enable-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V -All -NoRestart | Out-Null
+
+    Save-Resume @{
+        REPO_TOKEN = $REPO_TOKEN; jiraEmail = $jiraEmail; jiraToken = $jiraToken
+        anthropicKey = $anthropicKey; zohoToken = $zohoToken; zohoOrgId = $zohoOrgId
+        nextStep = 3
+    }
+    Write-OK "Hyper-V enabled. A reboot is required."
+    Read-Host "  Press ENTER to reboot"
+    Restart-Computer -Force
+    exit 0
+}
+
 if (Test-DockerRunning) {
     Write-OK "Docker Desktop is already running"
 } else {
