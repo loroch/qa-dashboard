@@ -135,16 +135,18 @@ if (Test-DockerRunning) {
     if (Test-Path $dockerExe) {
         Write-INFO "Docker Desktop found but not running - starting it..."
         Start-Process $dockerExe
-        Write-INFO "Waiting up to 90 seconds for Docker..."
+        Write-INFO "Waiting up to 3 minutes for Docker Engine to be ready..."
         $ok = $false
-        for ($i = 0; $i -lt 18; $i++) {
+        for ($i = 0; $i -lt 36; $i++) {
             Start-Sleep 5
             if (Test-DockerRunning) { $ok = $true; break }
+            if ($i % 6 -eq 5) { Write-INFO "Still waiting... ($([int](($i+1)*5/60))m $([int](($i+1)*5%60))s)" }
         }
         if ($ok) {
             Write-OK "Docker Desktop is running"
         } else {
-            Write-FAIL "Docker did not start in time. Start Docker Desktop manually then re-run."
+            Write-FAIL "Docker did not start in 3 minutes."
+            Write-FAIL "Open Docker Desktop from the Start Menu, wait for the whale icon in the taskbar, then re-run setup.ps1."
             exit 1
         }
     } else {
@@ -161,27 +163,42 @@ if (Test-DockerRunning) {
         Start-Process -FilePath $installer -ArgumentList "install --quiet --accept-license" -Wait
         Write-OK "Docker Desktop installed"
 
-        # Save resume state so after reboot we skip to step 3 (re-check Docker)
-        Save-Resume @{
-            REPO_TOKEN = $REPO_TOKEN; jiraEmail = $jiraEmail; jiraToken = $jiraToken
-            anthropicKey = $anthropicKey; zohoToken = $zohoToken; zohoOrgId = $zohoOrgId
-            nextStep = 3
+        # Resolve script path now (before reboot - MyInvocation works here)
+        $scriptPath = $MyInvocation.MyCommand.Path
+        if (-not $scriptPath) {
+            $scriptPath = $PSCommandPath
+        }
+        if (-not $scriptPath) {
+            $scriptPath = Join-Path (Get-Location) "setup.ps1"
         }
 
-        # Register auto-resume task so script runs automatically after reboot
+        # Save resume state + script path so the scheduled task knows where to find us
+        Save-Resume @{
+            REPO_TOKEN   = $REPO_TOKEN; jiraEmail = $jiraEmail; jiraToken = $jiraToken
+            anthropicKey = $anthropicKey; zohoToken = $zohoToken; zohoOrgId = $zohoOrgId
+            nextStep     = 3
+            scriptPath   = $scriptPath
+        }
+
+        # Write a tiny launcher batch that opens a visible window and runs this script
+        $launcherPath = "$env:TEMP\qa-setup-resume.bat"
+        $batContent = "@echo off`r`npowershell.exe -ExecutionPolicy Bypass -File `"$scriptPath`"`r`npause"
+        [System.IO.File]::WriteAllText($launcherPath, $batContent)
+
+        # Register scheduled task: fire at logon, 90-second delay (lets Docker Desktop start first)
         Remove-ResumeTask
-        $scriptPath = $MyInvocation.MyCommand.Path
-        $action   = New-ScheduledTaskAction -Execute "powershell.exe" `
-            -Argument "-NonInteractive -ExecutionPolicy Bypass -File `"$scriptPath`""
+        $action   = New-ScheduledTaskAction -Execute "cmd.exe" -Argument "/c `"$launcherPath`""
         $trigger  = New-ScheduledTaskTrigger -AtLogOn
-        $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable
+        $trigger.Delay = "PT90S"
+        $settings = New-ScheduledTaskSettingsSet -StartWhenAvailable -ExecutionTimeLimit (New-TimeSpan -Minutes 15)
         Register-ScheduledTask -TaskName $RESUME_TASK -Action $action -Trigger $trigger `
             -Settings $settings -RunLevel Highest -Force | Out-Null
-        Write-OK "Auto-resume task registered - setup will continue after reboot automatically"
+        Write-OK "Auto-resume task registered (fires 90 sec after login)"
 
         Write-Host ""
         Write-Host "  *** REBOOT REQUIRED ***" -ForegroundColor Yellow
-        Write-Host "  The setup will CONTINUE AUTOMATICALLY after you log back in." -ForegroundColor Yellow
+        Write-Host "  Setup will CONTINUE AUTOMATICALLY 90 sec after you log back in." -ForegroundColor Yellow
+        Write-Host "  A CMD window will open - let it run until it says 'QA Dashboard is ready'." -ForegroundColor Yellow
         Write-Host ""
         Read-Host "  Press ENTER to reboot now"
         Restart-Computer -Force
