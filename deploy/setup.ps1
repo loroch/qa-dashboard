@@ -299,9 +299,13 @@ $backendScript -join "`r`n" | Out-File -FilePath "$INSTALL_DIR\deploy\start-back
 Write-OK "start-backend.ps1 written"
 
 # Write start-frontend.ps1
+$npmPath = (Get-Command npm -ErrorAction SilentlyContinue)
+$npmDir  = if ($npmPath) { Split-Path $npmPath.Source } else { "C:\Program Files\nodejs" }
 $frontendScript = @(
+    '$env:PATH = "' + $npmDir + ';' + "$env:APPDATA\npm" + ';$env:PATH"',
     'Set-Location "C:\qa-dashboard\frontend"',
-    '& serve -s dist -l 3000 2>&1 | Tee-Object -FilePath "C:\qa-dashboard\logs\frontend.log" -Append'
+    'New-Item -ItemType Directory -Path "C:\qa-dashboard\logs" -Force | Out-Null',
+    'npx serve -s dist -l 3000 2>&1 | Tee-Object -FilePath "C:\qa-dashboard\logs\frontend.log" -Append'
 )
 $frontendScript -join "`r`n" | Out-File -FilePath "$INSTALL_DIR\deploy\start-frontend.ps1" -Encoding utf8 -Force
 Write-OK "start-frontend.ps1 written"
