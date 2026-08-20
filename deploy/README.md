@@ -1,9 +1,9 @@
 # QA Dashboard — Team Deployment Guide
 
 ## What this does
-Installs Docker Desktop + Git, clones the repo, builds and starts the QA Dashboard,
-opens the Windows Firewall, and registers an auto-start task so the dashboard
-comes back up automatically after every reboot.
+Installs Git, Python 3.11, and Node.js, clones the repo, builds the frontend,
+and starts the backend + frontend as background services.
+No Docker or virtualization required.
 
 ---
 
@@ -16,32 +16,24 @@ comes back up automatically after every reboot.
 
 ### Steps
 
-1. **Copy `setup.ps1`** to the target PC (USB / network share / email)
+1. **Copy `setup.ps1`** to the target PC (USB / network share / email from Loro)
 
-2. **Right-click `setup.ps1` → Run with PowerShell as Administrator**
-   (or open an Admin PowerShell and run `.\setup.ps1`)
+2. **Right-click `setup.ps1` -> Run with PowerShell as Administrator**
 
 3. **Enter credentials when prompted:**
+
    | Prompt | Value |
    |--------|-------|
-   | Jira email | `loroc@kabatone.com` |
-   | Jira API token | *(get from Loro or Jira profile → Security → API tokens)* |
-   | Anthropic API key | *(get from Loro — needed for AI Test Plans / Handover Criteria)* |
-   | Zoho token | *(optional — leave blank to skip)* |
+   | GitHub access token | Get from Loro |
+   | Jira email | `you@kabatone.com` |
+   | Jira API token | Get from Jira profile > Security > API tokens |
+   | Anthropic API key | Get from Loro (needed for AI Test Plans) |
+   | Zoho token | Optional — press ENTER to skip |
 
-4. **If Docker Desktop is being installed for the first time**, the script will
-   reboot the PC automatically. After rebooting, **a scheduled task will
-   continue the setup automatically** — a PowerShell window opens by itself
-   and finishes steps 4-6 without you having to run anything.
+4. **Wait** — setup installs tools, clones the repo, and builds everything.
+   First run takes about 10-15 minutes.
 
-5. **First build takes 5–10 minutes** (downloading base images). Subsequent
-   updates are much faster.
-
-6. When done, the script prints:
-   ```
-   This machine:  http://localhost:3000
-   Other PCs:     http://192.168.X.X:3000
-   ```
+5. When done, the script prints the URL and opens the dashboard.
 
 ---
 
@@ -53,33 +45,55 @@ Once the dashboard PC is running, open a browser on **any PC in the same network
 http://192.168.36.13:3000
 ```
 
-> The dashboard server PC must be **on and not sleeping** for others to connect.
+> The dashboard server PC must be **on and not sleeping**.
 
 ---
 
 ## Update to latest version
 
-When there's a new version pushed to GitHub, run **as Administrator** on the server PC:
+When there is a new version pushed to GitHub, run **as Administrator** on the server PC:
 
 ```powershell
 C:\qa-dashboard\deploy\update.ps1
 ```
 
-This pulls the latest code, rebuilds changed images, and restarts containers.
-The update typically takes 1–3 minutes and the dashboard is briefly unavailable.
+Pulls latest code, updates deps, rebuilds frontend, restarts both services.
+Takes about 2-5 minutes.
 
 ---
 
-## Useful commands (run in `C:\qa-dashboard`)
+## Start / stop manually
 
-| Command | Purpose |
-|---------|---------|
-| `docker-compose ps` | Show running containers |
-| `docker-compose logs -f` | Stream live logs |
-| `docker-compose down` | Stop the dashboard |
-| `docker-compose up -d` | Start the dashboard |
-| `docker-compose restart` | Restart all services |
-| `docker logs qa-dashboard-api --tail 50` | Backend logs only |
+Open **Admin PowerShell** in `C:\qa-dashboard\deploy\`:
+
+```powershell
+# Start
+Start-ScheduledTask -TaskName "QA-Dashboard-Backend"
+Start-ScheduledTask -TaskName "QA-Dashboard-Frontend"
+
+# Stop
+Stop-ScheduledTask -TaskName "QA-Dashboard-Backend"
+Stop-ScheduledTask -TaskName "QA-Dashboard-Frontend"
+```
+
+Or run start scripts directly (visible window, useful for debugging):
+
+```powershell
+# Backend
+powershell -ExecutionPolicy Bypass -File "C:\qa-dashboard\deploy\start-backend.ps1"
+
+# Frontend (open a second Admin PowerShell)
+powershell -ExecutionPolicy Bypass -File "C:\qa-dashboard\deploy\start-frontend.ps1"
+```
+
+---
+
+## Logs
+
+| File | Contents |
+|------|---------|
+| `C:\qa-dashboard\logs\backend.log` | Python API logs |
+| `C:\qa-dashboard\logs\frontend.log` | Frontend server logs |
 
 ---
 
@@ -88,19 +102,22 @@ The update typically takes 1–3 minutes and the dashboard is briefly unavailabl
 | Problem | Fix |
 |---------|-----|
 | "Permission denied" | Run PowerShell as Administrator |
-| Docker won't start | Open Docker Desktop manually; wait for whale icon in tray |
-| Port 3000 already in use | `netstat -ano \| findstr :3000` → kill that PID |
+| Backend not responding | Check `logs\backend.log` — usually a .env credential issue |
+| Frontend shows blank page | Check `logs\frontend.log`; hard-refresh browser (Ctrl+Shift+R) |
+| Port 3000 / 8000 already in use | `netstat -ano \| findstr :3000` then kill that PID |
 | Can't reach from another PC | Check Windows Firewall — port 3000 must allow Inbound TCP |
-| Dashboard loads but API errors | Check `.env` credentials: `notepad C:\qa-dashboard\.env` |
 | After update, page shows old version | Hard-refresh browser (Ctrl+Shift+R) |
+| API errors in dashboard | Check `.env` credentials: `notepad C:\qa-dashboard\.env` |
 
 ---
 
-## File locations on the server PC
+## File locations
 
 | Path | Contents |
 |------|---------|
 | `C:\qa-dashboard\` | Project files |
-| `C:\qa-dashboard\.env` | API keys & config (keep private) |
-| `C:\qa-dashboard\deploy\` | This guide + scripts |
-| Docker volume `qa_data` | SQLite database (persisted across rebuilds) |
+| `C:\qa-dashboard\.env` | API keys and config (keep private) |
+| `C:\qa-dashboard\venv\` | Python virtual environment |
+| `C:\qa-dashboard\frontend\dist\` | Built frontend (served by `serve`) |
+| `C:\qa-dashboard\logs\` | Runtime logs |
+| `C:\qa-dashboard\deploy\` | This guide and scripts |
