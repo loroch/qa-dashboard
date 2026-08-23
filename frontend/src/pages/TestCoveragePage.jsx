@@ -1726,6 +1726,12 @@ function HandoverCriteriaView({ data, commentKey, pushing, pushMsg, onChangeKey,
         <div className="bg-amber-50 rounded-lg p-3 text-amber-900 text-xs leading-relaxed">{data.intro}</div>
       )}
 
+      {(!data.criteria || data.criteria.length === 0) && (
+        <div className="text-center py-4 text-amber-600 text-xs">
+          No criteria were generated. Click <strong>Regenerate</strong> to try again.
+        </div>
+      )}
+
       <div className="space-y-3">
         {(data.criteria || []).map(c => (
           <div key={c.id} className={`border rounded-lg overflow-hidden ${c.priority === 'must' ? 'border-amber-300' : 'border-gray-200'}`}>

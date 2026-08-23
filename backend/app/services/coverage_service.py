@@ -682,15 +682,18 @@ Be concrete — each scenario must be actionable. For Performance, set applicabl
         stories_section = ("Stories/Tasks:\n" + stories_text) if stories_text else ""
 
         prompt = f"""You are a QA Manager preparing a handover meeting with R&D.
-The R&D team will demo this feature to you. Generate exit criteria — specific scenarios they MUST demonstrate.
+The R&D team will demo the completed feature to you live. Your job is to define the specific scenarios they MUST demonstrate for QA to accept the handover.
 
 Issue: {issue_key} ({issue_type})
 Summary: {issue_summary}
 {stories_section}
 
-Call generate_handover_criteria with 4-7 criteria.
-priority "must" = required for acceptance, "nice-to-have" = bonus.
-Each step must be specific and actionable so R&D knows exactly what to demo."""
+IMPORTANT: You MUST generate between 5 and 7 criteria in the criteria array. An empty criteria array is NOT acceptable.
+- "must" priority = QA will not sign off without seeing this demonstrated
+- "nice-to-have" priority = bonus if time allows
+- Each criterion must reference a specific story or scenario from the list above
+- Each step must be a concrete action R&D can perform live (click here, enter this, verify that)
+- Keep the intro to 2 sentences maximum — the criteria are what matter"""
 
         tool_schema = {
             "name": "generate_handover_criteria",
@@ -725,7 +728,7 @@ Each step must be specific and actionable so R&D knows exactly what to demo."""
         )
         message = await client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=2000,
+            max_tokens=4000,
             tools=[tool_schema],
             tool_choice={"type": "tool", "name": "generate_handover_criteria"},
             messages=[{"role": "user", "content": prompt}],
