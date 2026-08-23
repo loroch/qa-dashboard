@@ -5,7 +5,8 @@ import { BASE_URL } from '../services/api'
 import {
   CalendarDays, ChevronDown, RefreshCw, Plus, Trash2, Edit2, Save, X,
   ArrowUp, ArrowDown, ExternalLink, CheckCircle2, Clock, AlertTriangle,
-  Layers, BarChart2, Target, Zap, ChevronRight, PlusCircle, XCircle
+  Layers, BarChart2, Target, Zap, ChevronRight, PlusCircle, XCircle,
+  Search, Bug, BookOpen, Info
 } from 'lucide-react'
 
 const API = `${BASE_URL}/sprint-planning`
@@ -57,6 +58,40 @@ const STATUS_COLORS = {
 const PRIORITY_DOT = {
   Highest: 'bg-red-600', High: 'bg-orange-500', Medium: 'bg-yellow-400',
   Low: 'bg-blue-400', Lowest: 'bg-slate-400',
+}
+
+const JIRA_STATUS_COLORS = {
+  'ToDo':                  'bg-gray-100 text-gray-600',
+  'To Do':                 'bg-gray-100 text-gray-600',
+  'Open':                  'bg-gray-100 text-gray-600',
+  'In Progress':           'bg-blue-100 text-blue-700',
+  'In Review':             'bg-indigo-100 text-indigo-700',
+  'Ready for Testing':     'bg-purple-100 text-purple-700',
+  'Validation':            'bg-violet-100 text-violet-700',
+  'Ready For Deployment':  'bg-teal-100 text-teal-700',
+  'Monitoring':            'bg-cyan-100 text-cyan-700',
+  'DONE':                  'bg-green-100 text-green-700',
+  'Done':                  'bg-green-100 text-green-700',
+  'Reopened':              'bg-orange-100 text-orange-700',
+  'Known Issue':           'bg-yellow-100 text-yellow-700',
+  'Blocked':               'bg-red-100 text-red-700',
+  'Removed':               'bg-gray-100 text-gray-400',
+}
+
+function StatusBadge({ status }) {
+  const cls = JIRA_STATUS_COLORS[status] || 'bg-slate-100 text-slate-600'
+  return <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium whitespace-nowrap ${cls}`}>{status || '—'}</span>
+}
+
+function TypeBadge({ type }) {
+  if (!type) return <span className="text-slate-300 text-xs">—</span>
+  const isBug = type === 'Bug'
+  return (
+    <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${isBug ? 'bg-red-50 text-red-600' : 'bg-blue-50 text-blue-600'}`}>
+      {isBug ? <Bug className="h-3 w-3" /> : <BookOpen className="h-3 w-3" />}
+      {type}
+    </span>
+  )
 }
 
 const SPRINT_HEADER_COLORS = [
@@ -153,19 +188,50 @@ const TAB_ICONS = { stories: Layers, activities: Target, tracking: CalendarDays,
 
 // ── Stories panel (one sprint) ─────────────────────────────────────────────
 
+const TABLE_COLS = (
+  <colgroup>
+    <col style={{ width: 92 }} />
+    <col />
+    <col style={{ width: 44 }} />
+    <col style={{ width: 60 }} />
+    <col style={{ width: 148 }} />
+    <col style={{ width: 144 }} />
+  </colgroup>
+)
+
+const TABLE_HEAD = (
+  <thead className="bg-slate-50/80">
+    <tr className="text-xs text-slate-500 uppercase tracking-wide">
+      <th className="px-3 py-2 text-left font-medium">Key</th>
+      <th className="px-3 py-2 text-left font-medium">Summary</th>
+      <th className="px-3 py-2 text-center font-medium">SP</th>
+      <th className="px-3 py-2 text-center font-medium">Est.h</th>
+      <th className="px-3 py-2 text-left font-medium">Status</th>
+      <th className="px-3 py-2 text-left font-medium">Assignee</th>
+    </tr>
+  </thead>
+)
+
 function StoriesPanel({ storiesData }) {
+  const [search, setSearch] = useState('')
   if (!storiesData) return <div className="p-6 text-slate-400 text-sm text-center">Loading…</div>
   const { stories = [], total_story_points, total_estimated_hours, total_stories } = storiesData
 
+  const filtered = useMemo(() => {
+    if (!search.trim()) return stories
+    const q = search.toLowerCase()
+    return stories.filter(s => s.key.toLowerCase().includes(q) || (s.summary || '').toLowerCase().includes(q) || (s.assignee || '').toLowerCase().includes(q))
+  }, [stories, search])
+
   const grouped = useMemo(() => {
     const map = {}
-    for (const s of stories) {
+    for (const s of filtered) {
       const epic = s.epic_key || s.parent_key || 'No Epic'
       if (!map[epic]) map[epic] = { epic_key: s.epic_key || s.parent_key, parent_summary: s.parent_summary, stories: [] }
       map[epic].stories.push(s)
     }
     return Object.values(map)
-  }, [stories])
+  }, [filtered])
 
   return (
     <div className="space-y-3">
@@ -174,6 +240,21 @@ function StoriesPanel({ storiesData }) {
         <StatCard icon={Zap} label="Story Points" value={total_story_points ? total_story_points.toFixed(0) : '—'} color="text-purple-600" />
         <StatCard icon={Clock} label="Estimated" value={total_estimated_hours ? `${total_estimated_hours.toFixed(0)}h` : '—'} color="text-teal-600" />
       </div>
+
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+        <input
+          value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search by key, summary or assignee…"
+          className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-400"
+        />
+        {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"><X className="h-3.5 w-3.5" /></button>}
+      </div>
+
+      {filtered.length === 0 && search && (
+        <div className="text-center text-slate-400 text-sm py-4">No stories match "{search}"</div>
+      )}
 
       {grouped.map(group => (
         <div key={group.epic_key || 'no-epic'} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
@@ -184,31 +265,23 @@ function StoriesPanel({ storiesData }) {
             </span>
             <Badge className="bg-slate-200 text-slate-600">{group.stories.length}</Badge>
           </div>
-          <table className="w-full text-sm">
-            <thead className="bg-slate-50/60">
-              <tr className="text-xs text-slate-500 uppercase">
-                <th className="px-3 py-2 text-left font-medium">Key</th>
-                <th className="px-3 py-2 text-left font-medium">Summary</th>
-                <th className="px-3 py-2 text-center font-medium">SP</th>
-                <th className="px-3 py-2 text-center font-medium">Est.h</th>
-                <th className="px-3 py-2 text-left font-medium">Status</th>
-                <th className="px-3 py-2 text-left font-medium">Assignee</th>
-              </tr>
-            </thead>
+          <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+            {TABLE_COLS}
+            {TABLE_HEAD}
             <tbody className="divide-y divide-slate-100">
               {group.stories.map(s => (
                 <tr key={s.key} className="hover:bg-slate-50/60">
                   <td className="px-3 py-2">
                     <div className="flex items-center gap-1.5">
-                      {PRIORITY_DOT[s.priority] && <span className={`w-2 h-2 rounded-full ${PRIORITY_DOT[s.priority]}`} title={s.priority} />}
-                      <a href={s.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium text-xs">{s.key}</a>
+                      {PRIORITY_DOT[s.priority] && <span className={`w-2 h-2 rounded-full shrink-0 ${PRIORITY_DOT[s.priority]}`} title={s.priority} />}
+                      <a href={s.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium text-xs truncate">{s.key}</a>
                     </div>
                   </td>
-                  <td className="px-3 py-2 max-w-xs"><span className="text-slate-700 line-clamp-2 text-xs">{s.summary}</span></td>
+                  <td className="px-3 py-2"><span className="text-slate-700 text-xs line-clamp-2">{s.summary}</span></td>
                   <td className="px-3 py-2 text-slate-600 text-xs text-center">{s.story_points != null ? s.story_points : '—'}</td>
                   <td className="px-3 py-2 text-slate-600 text-xs text-center">{s.original_estimate_hours ? `${s.original_estimate_hours}h` : '—'}</td>
-                  <td className="px-3 py-2"><span className="text-xs px-1.5 py-0.5 rounded-full bg-slate-100 text-slate-600">{s.status || '—'}</span></td>
-                  <td className="px-3 py-2 text-slate-500 text-xs">{s.assignee || '—'}</td>
+                  <td className="px-3 py-2"><StatusBadge status={s.status} /></td>
+                  <td className="px-3 py-2 text-slate-500 text-xs truncate" title={s.assignee}>{s.assignee || '—'}</td>
                 </tr>
               ))}
             </tbody>
@@ -398,10 +471,11 @@ function ActivitiesPanel({ sprintId, sprintName, activities = [], storiesData })
 
 // ── Tracking panel (one sprint) ────────────────────────────────────────────
 
-function TrackingPanel({ sprintId, stories = [], tracking = [] }) {
+function TrackingPanel({ sprintId, sprintName = '', stories = [], tracking = [] }) {
   const qc = useQueryClient()
   const [editKey, setEditKey] = useState(null)
   const [editForm, setEditForm] = useState({})
+  const [search, setSearch] = useState('')
 
   const trackingByKey = useMemo(() => {
     const m = {}
@@ -418,53 +492,95 @@ function TrackingPanel({ sprintId, stories = [], tracking = [] }) {
     return rows
   }, [stories, trackingByKey])
 
+  const visible = useMemo(() => {
+    if (!search.trim()) return merged
+    const q = search.toLowerCase()
+    return merged.filter(({ story }) =>
+      story.key.toLowerCase().includes(q) || (story.summary || '').toLowerCase().includes(q)
+    )
+  }, [merged, search])
+
   const upsertMutation = useMutation({
     mutationFn: ({ key, data }) => axios.put(`${API}/sprint/${sprintId}/tracking/${key}`, data).then(r => r.data),
     onSuccess: () => { qc.invalidateQueries(['sprint-plan:tracking', sprintId]); setEditKey(null) },
   })
 
-  const onTimeCount = merged.filter(r => r.tracking?.planned_rft_date && r.tracking?.actual_rft_date && new Date(r.tracking.actual_rft_date) <= new Date(r.tracking.planned_rft_date)).length
-  const delayedCount = merged.filter(r => r.tracking?.planned_rft_date && r.tracking?.actual_rft_date && new Date(r.tracking.actual_rft_date) > new Date(r.tracking.planned_rft_date)).length
+  const onTimeCount    = merged.filter(r => r.tracking?.planned_rft_date && r.tracking?.actual_rft_date && new Date(r.tracking.actual_rft_date) <= new Date(r.tracking.planned_rft_date)).length
+  const delayedCount   = merged.filter(r => r.tracking?.planned_rft_date && r.tracking?.actual_rft_date && new Date(r.tracking.actual_rft_date) > new Date(r.tracking.planned_rft_date)).length
   const untrackedCount = merged.filter(r => !r.tracking?.planned_rft_date).length
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-3 gap-2">
-        <StatCard icon={CheckCircle2} label="On time" value={onTimeCount} color="text-green-600" />
-        <StatCard icon={AlertTriangle} label="Delayed" value={delayedCount} color="text-red-500" />
-        <StatCard icon={Clock} label="Not tracked" value={untrackedCount} color="text-slate-400" />
+      {/* RTF explanation */}
+      <div className="flex items-start gap-2 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2">
+        <Info className="h-3.5 w-3.5 text-blue-400 mt-0.5 shrink-0" />
+        <p className="text-xs text-blue-700">
+          <span className="font-semibold">RFT = Ready For Testing.</span> Track when each story was planned to reach QA vs. when it actually did. Fill in <em>Planned RFT</em> at sprint start; update <em>Actual RFT</em> when the story lands in your queue.
+        </p>
       </div>
 
-      <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-        <table className="w-full text-xs">
+      <div className="grid grid-cols-3 gap-2">
+        <StatCard icon={CheckCircle2} label="On time"    value={onTimeCount}    color="text-green-600" />
+        <StatCard icon={AlertTriangle} label="Delayed"   value={delayedCount}   color="text-red-500" />
+        <StatCard icon={Clock}         label="Not tracked" value={untrackedCount} color="text-slate-400" />
+      </div>
+
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+        <input
+          value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search by key or summary…"
+          className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-400"
+        />
+        {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"><X className="h-3.5 w-3.5" /></button>}
+      </div>
+
+      <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
+        <table className="w-full text-xs" style={{ tableLayout: 'fixed', minWidth: 900 }}>
+          <colgroup>
+            <col style={{ width: 130 }} />
+            <col style={{ width: 80 }} />
+            <col style={{ width: 120 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 90 }} />
+            <col style={{ width: 70 }} />
+            <col style={{ width: 150 }} />
+            <col />
+            <col style={{ width: 40 }} />
+          </colgroup>
           <thead className="bg-slate-50">
             <tr className="text-slate-500 uppercase tracking-wide">
               <th className="px-3 py-2 text-left font-medium">Story</th>
+              <th className="px-3 py-2 text-left font-medium">Type</th>
+              <th className="px-3 py-2 text-left font-medium">Status</th>
+              <th className="px-3 py-2 text-left font-medium">Sprint</th>
               <th className="px-3 py-2 text-left font-medium">Planned RFT</th>
               <th className="px-3 py-2 text-left font-medium">Actual RFT</th>
               <th className="px-3 py-2 text-left font-medium">Delta</th>
               <th className="px-3 py-2 text-left font-medium">Delay Reason</th>
-              <th className="px-3 py-2 text-left font-medium">Notes</th>
               <th className="px-3 py-2 text-right font-medium">Edit</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {merged.map(({ story, tracking: t }) => {
+            {visible.map(({ story, tracking: t }) => {
               const isEditing = editKey === story.key
               const delta = t ? dateDelta(t.planned_rft_date, t.actual_rft_date) : null
               return isEditing ? (
                 <tr key={story.key} className="bg-blue-50">
                   <td className="px-3 py-2"><IssueLink issueKey={story.key} url={story.url} summary={story.summary} /></td>
-                  <td className="px-3 py-2"><input type="date" value={editForm.planned_rft_date ?? (t?.planned_rft_date || '')} onChange={e => setEditForm(f => ({ ...f, planned_rft_date: e.target.value }))} className="border border-blue-300 rounded px-1.5 py-0.5 text-xs focus:outline-none" /></td>
-                  <td className="px-3 py-2"><input type="date" value={editForm.actual_rft_date ?? (t?.actual_rft_date || '')} onChange={e => setEditForm(f => ({ ...f, actual_rft_date: e.target.value }))} className="border border-blue-300 rounded px-1.5 py-0.5 text-xs focus:outline-none" /></td>
+                  <td className="px-3 py-2"><TypeBadge type={story.issue_type} /></td>
+                  <td className="px-3 py-2"><StatusBadge status={story.status} /></td>
+                  <td className="px-3 py-2 text-slate-500 truncate" title={sprintName}>{sprintName || '—'}</td>
+                  <td className="px-3 py-2"><input type="date" value={editForm.planned_rft_date ?? (t?.planned_rft_date || '')} onChange={e => setEditForm(f => ({ ...f, planned_rft_date: e.target.value }))} className="border border-blue-300 rounded px-1.5 py-0.5 text-xs focus:outline-none w-full" /></td>
+                  <td className="px-3 py-2"><input type="date" value={editForm.actual_rft_date ?? (t?.actual_rft_date || '')} onChange={e => setEditForm(f => ({ ...f, actual_rft_date: e.target.value }))} className="border border-blue-300 rounded px-1.5 py-0.5 text-xs focus:outline-none w-full" /></td>
                   <td className="px-3 py-2 text-slate-400">—</td>
                   <td className="px-3 py-2">
-                    <select value={editForm.delay_reason ?? (t?.delay_reason || '')} onChange={e => setEditForm(f => ({ ...f, delay_reason: e.target.value }))} className="border border-blue-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none w-40">
+                    <select value={editForm.delay_reason ?? (t?.delay_reason || '')} onChange={e => setEditForm(f => ({ ...f, delay_reason: e.target.value }))} className="border border-blue-300 rounded px-1.5 py-0.5 text-xs bg-white focus:outline-none w-full">
                       <option value="">— none —</option>
                       {Object.entries(DELAY_REASON_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                   </td>
-                  <td className="px-3 py-2"><input value={editForm.delay_notes ?? (t?.delay_notes || '')} onChange={e => setEditForm(f => ({ ...f, delay_notes: e.target.value }))} placeholder="Notes…" className="border border-blue-300 rounded px-1.5 py-0.5 text-xs w-full focus:outline-none" /></td>
                   <td className="px-3 py-2 text-right">
                     <div className="flex items-center justify-end gap-1">
                       <button onClick={() => upsertMutation.mutate({ key: story.key, data: { ...editForm, story_summary: story.summary } })} className="p-1 text-green-600 hover:bg-green-100 rounded"><Save className="h-3.5 w-3.5" /></button>
@@ -475,18 +591,24 @@ function TrackingPanel({ sprintId, stories = [], tracking = [] }) {
               ) : (
                 <tr key={story.key} className={`hover:bg-slate-50/60 ${delta?.label.includes('late') ? 'bg-red-50/30' : ''}`}>
                   <td className="px-3 py-2"><IssueLink issueKey={story.key} url={story.url} summary={story.summary} /></td>
+                  <td className="px-3 py-2"><TypeBadge type={story.issue_type} /></td>
+                  <td className="px-3 py-2"><StatusBadge status={story.status} /></td>
+                  <td className="px-3 py-2 text-slate-500 truncate text-xs" title={sprintName}>{sprintName || '—'}</td>
                   <td className="px-3 py-2 text-slate-600">{t?.planned_rft_date ? fmtDate(t.planned_rft_date) : <span className="text-slate-300">—</span>}</td>
                   <td className="px-3 py-2 text-slate-600">{t?.actual_rft_date ? fmtDate(t.actual_rft_date) : <span className="text-slate-300">—</span>}</td>
-                  <td className="px-3 py-2">{delta ? <span className={delta.cls}>{delta.label}</span> : <span className="text-slate-300">—</span>}</td>
+                  <td className="px-3 py-2">{delta ? <span className={`font-medium ${delta.cls}`}>{delta.label}</span> : <span className="text-slate-300">—</span>}</td>
                   <td className="px-3 py-2 text-slate-600">{t?.delay_reason ? DELAY_REASON_LABELS[t.delay_reason] || t.delay_reason : <span className="text-slate-300">—</span>}</td>
-                  <td className="px-3 py-2 text-slate-500 max-w-[140px] truncate" title={t?.delay_notes}>{t?.delay_notes || <span className="text-slate-300">—</span>}</td>
                   <td className="px-3 py-2 text-right"><button onClick={() => { setEditKey(story.key); setEditForm({}) }} className="p-1 text-slate-400 hover:bg-slate-100 rounded"><Edit2 className="h-3.5 w-3.5" /></button></td>
                 </tr>
               )
             })}
           </tbody>
         </table>
-        {merged.length === 0 && <div className="p-6 text-center text-slate-400 text-xs">No stories to track.</div>}
+        {visible.length === 0 && (
+          <div className="p-6 text-center text-slate-400 text-xs">
+            {search ? `No stories match "${search}"` : 'No stories to track.'}
+          </div>
+        )}
       </div>
     </div>
   )
@@ -714,7 +836,7 @@ export default function SprintPlanningPage() {
                   {showSprint2 && sprint2 && <SprintSectionHeader sprint={sprint1} colorIdx={0} />}
                   {activeTab === 'stories' && <StoriesPanel storiesData={d1.storiesQ.isLoading ? null : d1.storiesQ.data} />}
                   {activeTab === 'activities' && <ActivitiesPanel sprintId={sprint1Id} sprintName={sprint1.name} activities={d1.activitiesQ.data || []} storiesData={d1.storiesQ.data} />}
-                  {activeTab === 'tracking' && <TrackingPanel sprintId={sprint1Id} stories={d1.storiesQ.data?.stories || []} tracking={d1.trackingQ.data || []} />}
+                  {activeTab === 'tracking' && <TrackingPanel sprintId={sprint1Id} sprintName={sprint1?.name || ''} stories={d1.storiesQ.data?.stories || []} tracking={d1.trackingQ.data || []} />}
                   {activeTab === 'timeline' && <TimelinePanel sprintId={sprint1Id} activities={d1.activitiesQ.data || []} />}
                 </div>
               )}
@@ -725,7 +847,7 @@ export default function SprintPlanningPage() {
                   <SprintSectionHeader sprint={sprint2 || { name: 'Sprint 2', state: '' }} colorIdx={1} />
                   {activeTab === 'stories' && <StoriesPanel storiesData={d2.storiesQ.isLoading ? null : d2.storiesQ.data} />}
                   {activeTab === 'activities' && <ActivitiesPanel sprintId={sprint2Id} sprintName={sprint2?.name || ''} activities={d2.activitiesQ.data || []} storiesData={d2.storiesQ.data} />}
-                  {activeTab === 'tracking' && <TrackingPanel sprintId={sprint2Id} stories={d2.storiesQ.data?.stories || []} tracking={d2.trackingQ.data || []} />}
+                  {activeTab === 'tracking' && <TrackingPanel sprintId={sprint2Id} sprintName={sprint2?.name || ''} stories={d2.storiesQ.data?.stories || []} tracking={d2.trackingQ.data || []} />}
                   {activeTab === 'timeline' && <TimelinePanel sprintId={sprint2Id} activities={d2.activitiesQ.data || []} />}
                 </div>
               )}
