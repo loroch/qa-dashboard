@@ -207,6 +207,18 @@ class SprintStoryTrackingORM(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class AiContentORM(Base):
+    """Persisted AI-generated content (test plans, handover criteria) keyed by Jira issue key.
+    Survives page reloads — one row per (issue_key, content_type) pair."""
+    __tablename__ = "ai_content"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    issue_key = Column(String(50), nullable=False, index=True)
+    content_type = Column(String(50), nullable=False)  # test_plan | handover_criteria
+    content = Column(Text, nullable=False)             # JSON-serialised AI output
+    generated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 # Engine and session factory
 _engine = None
 _session_factory = None

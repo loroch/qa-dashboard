@@ -1,14 +1,18 @@
 """
 Test Coverage API routes.
 """
+import json
 import logging
+from datetime import datetime, timezone
 from fastapi import APIRouter, Query, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+from sqlalchemy import select
 
 from app.services.coverage_service import get_coverage_service
 from app.services.test_generator_service import TestGeneratorService
 from app.jira.client import get_jira_client
+from app.database.db import AiContentORM, get_session_factory
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/coverage", tags=["coverage"])
@@ -268,3 +272,56 @@ async def add_jira_comment(body: JiraCommentRequest):
         status = 400 if "404" in msg or "does not exist" in msg or "permission" in msg.lower() else 500
         logger.error(f"add_jira_comment error for {body.issue_key}: {e}")
         raise HTTPException(status_code=status, detail=msg)
+
+
+# ── AI Content persistence ─────────────────────────────────────────────────
+
+class SaveAiContentRequest(BaseModel):
+    issue_key: str
+    content_type: str   # test_plan | handover_criteria
+    content: dict
+
+
+@router.get("/ai-content/{issue_key}")
+async def get_ai_content(issue_key: str):
+    """Return persisted AI content (test plan + handover criteria) for a Jira issue key."""
+    factory = get_session_factory()
+    async with factory() as session:
+        result = await session.execute(
+            select(AiContentORM).where(AiContentORM.issue_key == issue_key)
+        )
+        rows = result.scalars().all()
+    out = {}
+    for row in rows:
+        out[row.content_type] = {
+            "content": json.loads(row.content),
+            "generated_at": row.generated_at.isoformat() + "Z",
+        }
+    return out
+
+
+@router.post("/ai-content")
+async def save_ai_content(body: SaveAiContentRequest):
+    """Upsert AI-generated content for an issue key + type pair."""
+    factory = get_session_factory()
+    now = datetime.now(timezone.utc)
+    async with factory() as session:
+        result = await session.execute(
+            select(AiContentORM).where(
+                AiContentORM.issue_key == body.issue_key,
+                AiContentORM.content_type == body.content_type,
+            )
+        )
+        row = result.scalar_one_or_none()
+        if row:
+            row.content = json.dumps(body.content)
+            row.generated_at = now
+        else:
+            session.add(AiContentORM(
+                issue_key=body.issue_key,
+                content_type=body.content_type,
+                content=json.dumps(body.content),
+                generated_at=now,
+            ))
+        await session.commit()
+    return {"ok": True, "generated_at": now.isoformat() + "Z"}

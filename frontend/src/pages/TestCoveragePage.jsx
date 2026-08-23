@@ -21,6 +21,8 @@ const searchStories          = (q)    => api.get(`/coverage/search-stories?q=${e
 const searchIssues           = (q)    => api.get(`/coverage/search-issues?q=${encodeURIComponent(q)}`).then(r => r.data)
 const generateTestPlan       = (body) => api.post('/coverage/generate-test-plan', body, { timeout: 90000 }).then(r => r.data)
 const generateHandoverCrit   = (body) => api.post('/coverage/generate-handover-criteria', body, { timeout: 90000 }).then(r => r.data)
+const loadAiContent          = (key)  => api.get(`/coverage/ai-content/${encodeURIComponent(key)}`).then(r => r.data)
+const saveAiContent          = (body) => api.post('/coverage/ai-content', body).then(r => r.data)
 const addJiraComment         = (body) => api.post('/coverage/add-jira-comment', body).then(r => r.data)
 const assignTest          = (body) => api.post('/coverage/assign-test', body).then(r => r.data)
 const getRegressionTests  = (v)    => api.get(`/coverage/regression-tests${v ? `?version=${encodeURIComponent(v)}` : ''}`).then(r => r.data)
@@ -893,6 +895,7 @@ export default function TestCoveragePage() {
   const [testPlan, setTestPlan] = useState(null)
   const [testPlanLoading, setTestPlanLoading] = useState(false)
   const [testPlanError, setTestPlanError] = useState(null)
+  const [testPlanSavedAt, setTestPlanSavedAt] = useState(null)
 
   // Handover Criteria panel state
   const [handoverOpen, setHandoverOpen] = useState(false)
@@ -902,6 +905,7 @@ export default function TestCoveragePage() {
   const [handoverCommentKey, setHandoverCommentKey] = useState('')
   const [handoverPushing, setHandoverPushing] = useState(false)
   const [handoverPushMsg, setHandoverPushMsg] = useState(null)
+  const [handoverSavedAt, setHandoverSavedAt] = useState(null)
 
   const versionsQuery = useQuery({
     queryKey: ['coverage-versions'],
@@ -956,6 +960,24 @@ export default function TestCoveragePage() {
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
+
+  // Load persisted AI content when an issue is selected
+  useEffect(() => {
+    if (!selectedIssue?.key) return
+    loadAiContent(selectedIssue.key).then(data => {
+      if (data.test_plan) {
+        setTestPlan(data.test_plan.content)
+        setTestPlanSavedAt(data.test_plan.generated_at)
+        setTestPlanOpen(true)
+      }
+      if (data.handover_criteria) {
+        setHandoverData(data.handover_criteria.content)
+        setHandoverSavedAt(data.handover_criteria.generated_at)
+        setHandoverCommentKey(selectedIssue.key)
+        setHandoverOpen(true)
+      }
+    }).catch(() => {})
+  }, [selectedIssue?.key])
 
   const { lastRefresh, isRefreshing, refresh } = useAutoRefresh([
     ['coverage-version', selectedVersion],
@@ -1148,7 +1170,7 @@ export default function TestCoveragePage() {
                 {showIssueDrop && issueResults.length > 0 && (
                   <div className="absolute z-30 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-xl max-h-72 overflow-y-auto">
                     {issueResults.map(r => (
-                      <button key={r.key} onClick={() => { setSelectedIssue(r); setIssueSearch(r.key); setShowIssueDrop(false); setTestPlan(null); setTestPlanError(null); setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null) }}
+                      <button key={r.key} onClick={() => { setSelectedIssue(r); setIssueSearch(r.key); setShowIssueDrop(false); setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null); setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null); setHandoverSavedAt(null) }}
                         className="w-full text-left px-4 py-2.5 hover:bg-brand-50 transition-colors border-b border-gray-100 last:border-0">
                         <div className="flex items-center gap-2">
                           <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${r.type === 'Epic' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
@@ -1248,6 +1270,7 @@ export default function TestCoveragePage() {
                         >
                           <span className="flex items-center gap-2 font-semibold text-indigo-800 text-sm">
                             <FileText className="h-4 w-4" /> Test Plan
+                            {testPlanSavedAt && <span className="text-xs font-normal text-green-600">· saved {timeAgo(testPlanSavedAt)}</span>}
                           </span>
                           {testPlanOpen ? <ChevronDown className="h-4 w-4 text-indigo-500" /> : <ChevronRight className="h-4 w-4 text-indigo-500" />}
                         </button>
@@ -1264,6 +1287,8 @@ export default function TestCoveragePage() {
                                       const stories = (d.by_epic || []).flatMap(e => e.stories || []).map(s => ({ key: s.key, summary: s.summary }))
                                       const result = await generateTestPlan({ issue_key: selectedIssue.key, issue_summary: selectedIssue.summary, issue_type: selectedIssue.type, stories })
                                       setTestPlan(result)
+                                      const saved = await saveAiContent({ issue_key: selectedIssue.key, content_type: 'test_plan', content: result })
+                                      setTestPlanSavedAt(saved.generated_at)
                                     } catch(e) { setTestPlanError(e.message) }
                                     finally { setTestPlanLoading(false) }
                                   }}
@@ -1280,7 +1305,7 @@ export default function TestCoveragePage() {
                               </div>
                             )}
                             {testPlanError && <p className="text-sm text-red-500 text-center">{testPlanError}</p>}
-                            {testPlan && !testPlanLoading && <TestPlanView plan={testPlan} onRegen={() => { setTestPlan(null); setTestPlanError(null) }} />}
+                            {testPlan && !testPlanLoading && <TestPlanView plan={testPlan} onRegen={() => { setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null) }} />}
                           </div>
                         )}
                       </div>
@@ -1293,6 +1318,7 @@ export default function TestCoveragePage() {
                         >
                           <span className="flex items-center gap-2 font-semibold text-amber-800 text-sm">
                             <BookOpen className="h-4 w-4" /> Handover Exit Criteria
+                            {handoverSavedAt && <span className="text-xs font-normal text-green-600">· saved {timeAgo(handoverSavedAt)}</span>}
                           </span>
                           {handoverOpen ? <ChevronDown className="h-4 w-4 text-amber-500" /> : <ChevronRight className="h-4 w-4 text-amber-500" />}
                         </button>
@@ -1310,6 +1336,8 @@ export default function TestCoveragePage() {
                                       const result = await generateHandoverCrit({ issue_key: selectedIssue.key, issue_summary: selectedIssue.summary, issue_type: selectedIssue.type, stories })
                                       setHandoverData(result)
                                       setHandoverCommentKey(selectedIssue.key)
+                                      const saved = await saveAiContent({ issue_key: selectedIssue.key, content_type: 'handover_criteria', content: result })
+                                      setHandoverSavedAt(saved.generated_at)
                                     } catch(e) { setHandoverError(e.message) }
                                     finally { setHandoverLoading(false) }
                                   }}
@@ -1333,7 +1361,7 @@ export default function TestCoveragePage() {
                                 pushing={handoverPushing}
                                 pushMsg={handoverPushMsg}
                                 onChangeKey={setHandoverCommentKey}
-                                onRegen={() => { setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null) }}
+                                onRegen={() => { setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null); setHandoverSavedAt(null) }}
                                 onPush={async () => {
                                   setHandoverPushing(true); setHandoverPushMsg(null)
                                   try {
@@ -1484,6 +1512,16 @@ export default function TestCoveragePage() {
       )}
     </div>
   )
+}
+
+// ── Utilities ─────────────────────────────────────────────────────────────
+
+function timeAgo(iso) {
+  const diff = Math.floor((Date.now() - new Date(iso)) / 1000)
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
 }
 
 // ── Test Plan & Handover helpers ──────────────────────────────────────────
