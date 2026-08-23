@@ -38,3 +38,89 @@
 ::-webkit-scrollbar-track { @apply bg-gray-100; }
 ::-webkit-scrollbar-thumb { @apply bg-gray-300 rounded-full; }
 ::-webkit-scrollbar-thumb:hover { @apply bg-gray-400; }
+
+/* ─────────────────────────────────────────────────────────────────
+   Dark Mode — unlayered so these beat @layer utilities naturally
+   ───────────────────────────────────────────────────────────────── */
+
+.dark body { background-color: #0f172a; color: #f1f5f9; }
+
+/* Component classes */
+.dark .card       { background-color: #1e293b; border-color: #334155; }
+.dark .btn-secondary {
+  background-color: #334155; border-color: #475569; color: #f1f5f9;
+}
+.dark .btn-secondary:hover { background-color: #475569; }
+
+/* ── Backgrounds ── */
+.dark .bg-white           { background-color: #1e293b; }
+.dark .bg-gray-50         { background-color: #0f172a; }
+.dark .bg-slate-50        { background-color: #0f172a; }
+.dark .bg-gray-100        { background-color: #334155; }
+.dark .bg-slate-100       { background-color: #334155; }
+.dark .bg-gray-200        { background-color: #475569; }
+.dark .bg-slate-200       { background-color: #475569; }
+/* opacity variants used in hover states / thead */
+.dark .bg-slate-50\/80    { background-color: rgb(15 23 42 / 0.85); }
+.dark .bg-slate-50\/70    { background-color: rgb(15 23 42 / 0.7); }
+.dark .bg-white\/20       { background-color: rgb(255 255 255 / 0.2); }
+/* used for badge / subtle backgrounds that should invert */
+.dark .bg-blue-50         { background-color: rgb(23 37 84 / 0.6); }
+.dark .bg-green-50        { background-color: rgb(5 46 22 / 0.5); }
+.dark .bg-red-50          { background-color: rgb(69 10 10 / 0.5); }
+.dark .bg-yellow-50       { background-color: rgb(66 32 6 / 0.5); }
+.dark .bg-purple-50       { background-color: rgb(46 16 101 / 0.5); }
+.dark .bg-orange-50       { background-color: rgb(67 20 7 / 0.5); }
+.dark .bg-teal-50         { background-color: rgb(4 47 46 / 0.5); }
+.dark .bg-indigo-50       { background-color: rgb(30 27 75 / 0.5); }
+.dark .bg-pink-50         { background-color: rgb(80 7 36 / 0.4); }
+
+/* ── Text ── */
+.dark .text-gray-900,  .dark .text-slate-900  { color: #f1f5f9; }
+.dark .text-gray-800,  .dark .text-slate-800  { color: #e2e8f0; }
+.dark .text-gray-700,  .dark .text-slate-700  { color: #cbd5e1; }
+.dark .text-gray-600,  .dark .text-slate-600  { color: #94a3b8; }
+.dark .text-gray-500,  .dark .text-slate-500  { color: #64748b; }
+.dark .text-gray-400,  .dark .text-slate-400  { color: #475569; }
+.dark .text-gray-300,  .dark .text-slate-300  { color: #334155; }
+
+/* ── Borders ── */
+.dark .border-gray-100,  .dark .border-slate-100  { border-color: #1e293b; }
+.dark .border-gray-200,  .dark .border-slate-200  { border-color: #334155; }
+.dark .border-gray-300,  .dark .border-slate-300  { border-color: #475569; }
+.dark .border-gray-400,  .dark .border-slate-400  { border-color: #64748b; }
+
+/* ── Dividers (divide-* applies border to child rows) ── */
+.dark .divide-gray-100 > * + *, .dark .divide-slate-100 > * + * { border-color: #1e293b; }
+.dark .divide-gray-200 > * + *, .dark .divide-slate-200 > * + * { border-color: #334155; }
+
+/* ── Tables ── */
+.dark table  { color: #e2e8f0; }
+.dark thead  { background-color: #0f172a; }
+.dark thead th { color: #94a3b8; border-color: #334155; }
+.dark tbody tr:hover { background-color: rgb(30 41 59 / 0.5) !important; }
+
+/* ── Form inputs / selects ── */
+.dark input:not([type="checkbox"]):not([type="radio"]):not([type="date"]),
+.dark input[type="date"],
+.dark select,
+.dark textarea {
+  background-color: #1e293b;
+  border-color: #475569;
+  color: #f1f5f9;
+}
+.dark input::placeholder,
+.dark textarea::placeholder { color: #64748b; }
+
+/* ── Dropdown menus / absolute panels ── */
+.dark .shadow-lg { box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.5), 0 4px 6px -4px rgb(0 0 0 / 0.4); }
+
+/* ── Scrollbars ── */
+.dark ::-webkit-scrollbar-track { background-color: #1e293b; }
+.dark ::-webkit-scrollbar-thumb { background-color: #475569; }
+.dark ::-webkit-scrollbar-thumb:hover { background-color: #64748b; }
+
+/* ── Transition for smooth toggle ── */
+html { transition: background-color 0.2s ease, color 0.2s ease; }
+*, *::before, *::after { transition-property: background-color, border-color, color; transition-duration: 0.15s; transition-timing-function: ease; }
+/* Don't transition transforms/opacity to keep animations fast */

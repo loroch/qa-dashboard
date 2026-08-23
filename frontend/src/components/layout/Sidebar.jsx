@@ -1,8 +1,10 @@
 import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, CheckSquare, Users, AlertTriangle,
-  Bug, Clock, TrendingUp, History, Ticket, BarChart2, FlaskConical, PlayCircle, Zap, Layers, ClipboardList, FileText, GitBranch, PenLine, Target, Globe, CalendarDays
+  Bug, Clock, TrendingUp, History, Ticket, BarChart2, FlaskConical, PlayCircle, Zap, Layers, ClipboardList, FileText, GitBranch, PenLine, Target, Globe, CalendarDays,
+  Moon, Sun
 } from 'lucide-react'
+import { useDarkMode } from '../../hooks/useDarkMode'
 
 const nav = [
   { to: '/',               label: 'Overview',         icon: LayoutDashboard },
@@ -30,6 +32,7 @@ const nav = [
 ]
 
 export function Sidebar() {
+  const [isDark, toggleDark] = useDarkMode()
   return (
     <aside className="w-56 bg-brand-600 text-white flex flex-col min-h-screen shrink-0">
       {/* Logo */}
@@ -66,8 +69,15 @@ export function Sidebar() {
         ))}
       </nav>
 
-      <div className="px-3 py-3 border-t border-brand-700">
+      <div className="px-3 py-3 border-t border-brand-700 flex items-center justify-between">
         <p className="text-brand-300 text-xs px-3">v1.0.0</p>
+        <button
+          onClick={toggleDark}
+          title={isDark ? 'Switch to light mode' : 'Switch to dark mode'}
+          className="p-2 rounded-lg text-brand-200 hover:bg-white/10 hover:text-white transition-colors"
+        >
+          {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+        </button>
       </div>
     </aside>
   )
