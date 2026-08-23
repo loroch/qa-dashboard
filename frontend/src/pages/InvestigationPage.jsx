@@ -1,10 +1,11 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 import { Search, X, Plus, GitBranch, Loader2, AlertCircle } from 'lucide-react'
 
 /* ── constants ───────────────────────────────────────────── */
-const API        = '/api/investigation'
+const API        = `${BASE_URL}/investigation`
 const LEFT_W     = 440   // px – issue info column
 const RIGHT_W    = 228   // px – milestone dates column
 const TYPE_ORDER = { Epic: 0, Story: 1, Bug: 2 }

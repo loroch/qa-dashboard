@@ -1,13 +1,14 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 import {
   Search, X, Loader2, AlertCircle, RefreshCw, ChevronDown,
   ChevronRight, Bug, ClipboardList, Calendar, Users, ExternalLink,
   Layers, Languages
 } from 'lucide-react'
 
-const API = '/api/mexico-qa'
+const API = `${BASE_URL}/mexico-qa`
 
 /* ── helpers ──────────────────────────────────────────────── */
 function fmtDate(s) {

@@ -32,7 +32,7 @@ const runBatch         = ({ storyKey, target_url }) => automationApi.post(`/auto
 const fileBugCandidate = (id) => api.post(`/automation/bug-candidates/${id}/file`).then(r => r.data)
 const fetchRun         = (runId) => api.get(`/automation/runs/${runId}`).then(r => r.data)
 const fetchRunResults  = (runId) => api.get(`/automation/runs/${runId}/results`).then(r => r.data.steps)
-const runScreenshotUrl = (runId) => `/api/automation/runs/${runId}/screenshot`
+const runScreenshotUrl = (runId) => `${BASE_URL}/automation/runs/${runId}/screenshot`
 const RUN_IN_PROGRESS = new Set(['pending', 'running'])
 
 const ALLOWED_EXTS = ['.txt', '.md', '.csv', '.json', '.png', '.jpg', '.jpeg', '.gif', '.webp']

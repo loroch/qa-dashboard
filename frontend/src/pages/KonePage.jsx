@@ -8,7 +8,8 @@ import {
   TrendingUp, Clock, Users, AlertOctagon, Filter
 } from 'lucide-react'
 
-const API = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000'
+const API = import.meta.env.VITE_API_BASE_URL ||
+  (typeof window !== 'undefined' ? `http://${window.location.hostname}:8000` : 'http://localhost:8000')
 const api = axios.create({ baseURL: API, timeout: 60000 })
 const MAX_ATT_BYTES = 10 * 1024 * 1024  // 10 MB — larger files cause timeout on transfer
 

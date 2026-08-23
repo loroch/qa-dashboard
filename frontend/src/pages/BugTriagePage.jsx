@@ -1,13 +1,14 @@
 import { useState, useCallback, useRef, useEffect, useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 import {
   Search, X, Loader2, AlertCircle, RefreshCw, ChevronDown,
   Bug, Calendar, Users, Tag, AlertTriangle, CheckCircle2, LayoutList,
 } from 'lucide-react'
 import { SummaryCard } from '../components/cards/SummaryCard'
 
-const API = '/api/bug-triage'
+const API = `${BASE_URL}/bug-triage`
 
 /* ── helpers ─────────────────────────────────────────────── */
 function fmtDate(s) {

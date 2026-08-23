@@ -717,9 +717,9 @@ export default function ZohoReportsPage() {
         isRefreshing={isRefreshing}
         onRefresh={() => refresh(true)}
         exportOptions={[
-          { label: 'Linked CSV',   href: '/api/zoho/reports/linked/export/csv' },
-          { label: 'Linked Excel', href: '/api/zoho/reports/linked/export/excel' },
-          { label: 'All Tickets CSV', href: '/api/zoho/tickets/export/csv' },
+          { label: 'Linked CSV',   href: `${BASE_URL}/zoho/reports/linked/export/csv` },
+          { label: 'Linked Excel', href: `${BASE_URL}/zoho/reports/linked/export/excel` },
+          { label: 'All Tickets CSV', href: `${BASE_URL}/zoho/tickets/export/csv` },
         ]}
       />
 

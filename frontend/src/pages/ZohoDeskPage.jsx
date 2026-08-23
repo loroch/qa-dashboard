@@ -177,7 +177,7 @@ export default function ZohoDeskPage() {
         isRefreshing={isRefreshing}
         onRefresh={() => refresh(true)}
         exportOptions={[
-          { label: 'Export CSV', href: '/api/zoho/tickets/export/csv' },
+          { label: 'Export CSV', href: `${BASE_URL}/zoho/tickets/export/csv` },
         ]}
       />
       <div className="flex-1 p-6 space-y-5 overflow-auto">

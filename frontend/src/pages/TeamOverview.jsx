@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
-import { getDashboard } from '../services/api'
+import { getDashboard, BASE_URL } from '../services/api'
 import { useAutoRefresh } from '../hooks/useAutoRefresh'
 import { Header } from '../components/layout/Header'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
@@ -68,7 +68,7 @@ function MemberWorkTable({ memberId, memberName, days, onDaysChange }) {
   const { data, isFetching, error } = useQuery({
     queryKey: ['member-work', memberId, days],
     queryFn: ({ signal }) =>
-      axios.get(`/api/dashboard/member-work`, { params: { member_id: memberId, days }, signal })
+      axios.get(`${BASE_URL}/dashboard/member-work`, { params: { member_id: memberId, days }, signal })
            .then(r => r.data.issues),
     enabled: !!memberId,
     staleTime: 120_000,

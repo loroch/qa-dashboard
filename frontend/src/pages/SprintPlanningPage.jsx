@@ -1,13 +1,14 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
+import { BASE_URL } from '../services/api'
 import {
   CalendarDays, ChevronDown, RefreshCw, Plus, Trash2, Edit2, Save, X,
   ArrowUp, ArrowDown, ExternalLink, CheckCircle2, Clock, AlertTriangle,
   Layers, BarChart2, Target, Zap, ChevronRight, PlusCircle, XCircle
 } from 'lucide-react'
 
-const API = '/api/sprint-planning'
+const API = `${BASE_URL}/sprint-planning`
 
 // ── Constants ─────────────────────────────────────────────────────────────
 
