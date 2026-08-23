@@ -214,8 +214,8 @@ const TABLE_HEAD = (
 
 function StoriesPanel({ storiesData }) {
   const [search, setSearch] = useState('')
-  if (!storiesData) return <div className="p-6 text-slate-400 text-sm text-center">Loading…</div>
-  const { stories = [], total_story_points, total_estimated_hours, total_stories } = storiesData
+  const stories = storiesData?.stories || []
+  const { total_story_points, total_estimated_hours, total_stories } = storiesData || {}
 
   const filtered = useMemo(() => {
     if (!search.trim()) return stories
@@ -232,6 +232,8 @@ function StoriesPanel({ storiesData }) {
     }
     return Object.values(map)
   }, [filtered])
+
+  if (!storiesData) return <div className="p-6 text-slate-400 text-sm text-center">Loading…</div>
 
   return (
     <div className="space-y-3">
