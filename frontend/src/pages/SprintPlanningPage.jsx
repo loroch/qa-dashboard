@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, Fragment } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { BASE_URL } from '../services/api'
@@ -6,7 +6,7 @@ import {
   CalendarDays, ChevronDown, RefreshCw, Plus, Trash2, Edit2, Save, X,
   ArrowUp, ArrowDown, ExternalLink, CheckCircle2, Clock, AlertTriangle,
   Layers, BarChart2, Target, Zap, ChevronRight, PlusCircle, XCircle,
-  Search, Bug, BookOpen, Info
+  Search, Bug, BookOpen, Info, Filter
 } from 'lucide-react'
 
 const API = `${BASE_URL}/sprint-planning`
@@ -180,48 +180,56 @@ function SprintSectionHeader({ sprint, colorIdx }) {
   )
 }
 
+// Status filter pill bar (shared by Stories and Bugs panels)
+function StatusFilterBar({ statuses, active, onChange }) {
+  if (!statuses.length) return null
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <Filter className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+      <button
+        onClick={() => onChange(null)}
+        className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${!active ? 'bg-brand-600 text-white border-transparent' : 'bg-white text-slate-600 border-slate-200 hover:border-brand-300'}`}
+      >All</button>
+      {statuses.map(s => (
+        <button key={s} onClick={() => onChange(active === s ? null : s)}
+          className={`px-2.5 py-1 rounded-full text-xs font-medium border transition-colors ${active === s ? (JIRA_STATUS_COLORS[s] ? JIRA_STATUS_COLORS[s] + ' border-transparent' : 'bg-brand-100 text-brand-700 border-transparent') : 'bg-white text-slate-600 border-slate-200 hover:border-brand-300'}`}>
+          {s}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ── Tabs ───────────────────────────────────────────────────────────────────
 
-const TABS = ['stories', 'activities', 'tracking', 'timeline']
-const TAB_LABELS = { stories: 'Stories', activities: 'QA Activities', tracking: 'RTF Tracking', timeline: 'Timeline' }
-const TAB_ICONS = { stories: Layers, activities: Target, tracking: CalendarDays, timeline: BarChart2 }
+const TABS = ['stories', 'bugs', 'activities', 'tracking', 'timeline']
+const TAB_LABELS = { stories: 'Stories', bugs: 'Bugs', activities: 'QA Activities', tracking: 'RTF Tracking', timeline: 'Timeline' }
+const TAB_ICONS = { stories: Layers, bugs: Bug, activities: Target, tracking: CalendarDays, timeline: BarChart2 }
 
-// ── Stories panel (one sprint) ─────────────────────────────────────────────
-
-const TABLE_COLS = (
-  <colgroup>
-    <col style={{ width: 92 }} />
-    <col />
-    <col style={{ width: 44 }} />
-    <col style={{ width: 60 }} />
-    <col style={{ width: 148 }} />
-    <col style={{ width: 144 }} />
-  </colgroup>
-)
-
-const TABLE_HEAD = (
-  <thead className="bg-slate-50/80">
-    <tr className="text-xs text-slate-500 uppercase tracking-wide">
-      <th className="px-3 py-2 text-left font-medium">Key</th>
-      <th className="px-3 py-2 text-left font-medium">Summary</th>
-      <th className="px-3 py-2 text-center font-medium">SP</th>
-      <th className="px-3 py-2 text-center font-medium">Est.h</th>
-      <th className="px-3 py-2 text-left font-medium">Status</th>
-      <th className="px-3 py-2 text-left font-medium">Assignee</th>
-    </tr>
-  </thead>
-)
+// ── Stories panel ─────────────────────────────────────────────────────────
 
 function StoriesPanel({ storiesData }) {
   const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState(null)
+
   const stories = storiesData?.stories || []
   const { total_story_points, total_estimated_hours, total_stories } = storiesData || {}
 
+  const statuses = useMemo(() =>
+    [...new Set(stories.map(s => s.status).filter(Boolean))].sort(), [stories])
+
   const filtered = useMemo(() => {
-    if (!search.trim()) return stories
-    const q = search.toLowerCase()
-    return stories.filter(s => s.key.toLowerCase().includes(q) || (s.summary || '').toLowerCase().includes(q) || (s.assignee || '').toLowerCase().includes(q))
-  }, [stories, search])
+    let list = statusFilter ? stories.filter(s => s.status === statusFilter) : stories
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter(s =>
+        s.key.toLowerCase().includes(q) ||
+        (s.summary || '').toLowerCase().includes(q) ||
+        (s.assignee || '').toLowerCase().includes(q)
+      )
+    }
+    return list
+  }, [stories, search, statusFilter])
 
   const grouped = useMemo(() => {
     const map = {}
@@ -246,51 +254,219 @@ function StoriesPanel({ storiesData }) {
       {/* Search */}
       <div className="relative">
         <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
-        <input
-          value={search} onChange={e => setSearch(e.target.value)}
+        <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search by key, summary or assignee…"
-          className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-400"
-        />
+          className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-400" />
         {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"><X className="h-3.5 w-3.5" /></button>}
       </div>
 
-      {filtered.length === 0 && search && (
-        <div className="text-center text-slate-400 text-sm py-4">No stories match "{search}"</div>
-      )}
+      {/* Status filter */}
+      <StatusFilterBar statuses={statuses} active={statusFilter} onChange={setStatusFilter} />
 
-      {grouped.map(group => (
-        <div key={group.epic_key || 'no-epic'} className="bg-white rounded-xl border border-slate-200 overflow-hidden">
-          <div className="bg-slate-50 px-3 py-2 border-b border-slate-200 flex items-center gap-2">
-            <ChevronRight className="h-3 w-3 text-slate-400" />
-            <span className="text-xs font-semibold text-slate-600">
-              {group.epic_key ? `${group.epic_key}${group.parent_summary ? ' – ' + group.parent_summary : ''}` : 'No Epic'}
-            </span>
-            <Badge className="bg-slate-200 text-slate-600">{group.stories.length}</Badge>
-          </div>
+      {stories.length === 0 ? (
+        <div className="text-center text-slate-400 text-sm py-6">No stories found in this sprint.</div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center text-slate-400 text-sm py-4">No stories match the current filter.</div>
+      ) : (
+        /* Single unified table — guarantees column alignment across all epic groups */
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
           <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
-            {TABLE_COLS}
-            {TABLE_HEAD}
+            <colgroup>
+              <col style={{ width: 125 }} />
+              <col />
+              <col style={{ width: 44 }} />
+              <col style={{ width: 60 }} />
+              <col style={{ width: 148 }} />
+              <col style={{ width: 144 }} />
+            </colgroup>
+            <thead className="bg-slate-50/80 border-b border-slate-200">
+              <tr className="text-xs text-slate-500 uppercase tracking-wide">
+                <th className="px-3 py-2 text-left font-medium">Key</th>
+                <th className="px-3 py-2 text-left font-medium">Summary</th>
+                <th className="px-3 py-2 text-center font-medium">SP</th>
+                <th className="px-3 py-2 text-center font-medium">Est.h</th>
+                <th className="px-3 py-2 text-left font-medium">Status</th>
+                <th className="px-3 py-2 text-left font-medium">Assignee</th>
+              </tr>
+            </thead>
             <tbody className="divide-y divide-slate-100">
-              {group.stories.map(s => (
-                <tr key={s.key} className="hover:bg-slate-50/60">
-                  <td className="px-3 py-2">
+              {grouped.map(group => (
+                <Fragment key={group.epic_key || 'no-epic'}>
+                  {/* Epic group header row */}
+                  <tr className="bg-slate-50/70 border-b border-slate-200">
+                    <td colSpan={6} className="px-3 py-2">
+                      <div className="flex items-center gap-2">
+                        <ChevronRight className="h-3 w-3 text-slate-400 shrink-0" />
+                        <span className="text-xs font-semibold text-slate-600">
+                          {group.epic_key
+                            ? `${group.epic_key}${group.parent_summary ? ' – ' + group.parent_summary : ''}`
+                            : 'No Epic'}
+                        </span>
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded-full text-xs font-medium bg-slate-200 text-slate-600">
+                          {group.stories.length}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                  {group.stories.map(s => (
+                    <tr key={s.key} className="hover:bg-slate-50/60">
+                      <td className="px-3 py-2.5">
+                        <div className="flex items-center gap-1.5">
+                          {PRIORITY_DOT[s.priority] && (
+                            <span className={`w-2 h-2 rounded-full shrink-0 ${PRIORITY_DOT[s.priority]}`} title={s.priority} />
+                          )}
+                          <a href={s.url} target="_blank" rel="noreferrer"
+                            className="text-blue-600 hover:underline font-medium text-xs whitespace-nowrap">
+                            {s.key}
+                          </a>
+                        </div>
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className="text-slate-700 text-xs line-clamp-2">{s.summary}</span>
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-600 text-xs text-center">
+                        {s.story_points != null ? s.story_points : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-slate-600 text-xs text-center">
+                        {s.original_estimate_hours ? `${s.original_estimate_hours}h` : '—'}
+                      </td>
+                      <td className="px-3 py-2.5"><StatusBadge status={s.status} /></td>
+                      <td className="px-3 py-2.5 text-slate-500 text-xs truncate" title={s.assignee}>
+                        {s.assignee || '—'}
+                      </td>
+                    </tr>
+                  ))}
+                </Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Bugs panel ────────────────────────────────────────────────────────────
+
+function BugsPanel({ bugsData }) {
+  const [search, setSearch] = useState('')
+  const [statusFilter, setStatusFilter] = useState(null)
+
+  const bugs = bugsData?.bugs || []
+
+  const statuses = useMemo(() =>
+    [...new Set(bugs.map(b => b.status).filter(Boolean))].sort(), [bugs])
+
+  const filtered = useMemo(() => {
+    let list = statusFilter ? bugs.filter(b => b.status === statusFilter) : bugs
+    if (search.trim()) {
+      const q = search.toLowerCase()
+      list = list.filter(b =>
+        b.key.toLowerCase().includes(q) ||
+        (b.summary || '').toLowerCase().includes(q) ||
+        (b.assignee || '').toLowerCase().includes(q) ||
+        (b.parent_key || '').toLowerCase().includes(q)
+      )
+    }
+    return list
+  }, [bugs, search, statusFilter])
+
+  if (!bugsData) return <div className="p-6 text-slate-400 text-sm text-center">Loading…</div>
+
+  return (
+    <div className="space-y-3">
+      <div className="grid grid-cols-2 gap-2">
+        <StatCard icon={Bug} label="Open Bugs" value={bugs.length} color="text-red-500" />
+        <StatCard icon={AlertTriangle} label="Showing" value={filtered.length} color="text-orange-500" />
+      </div>
+
+      {/* Search */}
+      <div className="relative">
+        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400 pointer-events-none" />
+        <input value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Search by key, summary, assignee or parent…"
+          className="w-full pl-8 pr-3 py-2 text-sm border border-slate-200 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-brand-400" />
+        {search && <button onClick={() => setSearch('')} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-300 hover:text-slate-500"><X className="h-3.5 w-3.5" /></button>}
+      </div>
+
+      {/* Status filter */}
+      <StatusFilterBar statuses={statuses} active={statusFilter} onChange={setStatusFilter} />
+
+      {bugs.length === 0 ? (
+        <div className="bg-white rounded-xl border border-slate-200 p-10 text-center">
+          <CheckCircle2 className="h-8 w-8 text-green-300 mx-auto mb-2" />
+          <p className="text-slate-500 font-medium text-sm">No open bugs in this sprint!</p>
+        </div>
+      ) : filtered.length === 0 ? (
+        <div className="text-center text-slate-400 text-sm py-4">No bugs match the current filter.</div>
+      ) : (
+        <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
+          <table className="w-full text-sm" style={{ tableLayout: 'fixed' }}>
+            <colgroup>
+              <col style={{ width: 125 }} />
+              <col />
+              <col style={{ width: 148 }} />
+              <col style={{ width: 90 }} />
+              <col style={{ width: 130 }} />
+              <col style={{ width: 170 }} />
+            </colgroup>
+            <thead className="bg-slate-50/80 border-b border-slate-200">
+              <tr className="text-xs text-slate-500 uppercase tracking-wide">
+                <th className="px-3 py-2 text-left font-medium">Key</th>
+                <th className="px-3 py-2 text-left font-medium">Summary</th>
+                <th className="px-3 py-2 text-left font-medium">Status</th>
+                <th className="px-3 py-2 text-left font-medium">Priority</th>
+                <th className="px-3 py-2 text-left font-medium">Assignee</th>
+                <th className="px-3 py-2 text-left font-medium">Parent (Story / Epic)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {filtered.map(b => (
+                <tr key={b.key} className="hover:bg-slate-50/60">
+                  <td className="px-3 py-2.5">
                     <div className="flex items-center gap-1.5">
-                      {PRIORITY_DOT[s.priority] && <span className={`w-2 h-2 rounded-full shrink-0 ${PRIORITY_DOT[s.priority]}`} title={s.priority} />}
-                      <a href={s.url} target="_blank" rel="noreferrer" className="text-blue-600 hover:underline font-medium text-xs truncate">{s.key}</a>
+                      {PRIORITY_DOT[b.priority] && (
+                        <span className={`w-2 h-2 rounded-full shrink-0 ${PRIORITY_DOT[b.priority]}`} title={b.priority} />
+                      )}
+                      <a href={b.url} target="_blank" rel="noreferrer"
+                        className="text-red-600 hover:underline font-medium text-xs whitespace-nowrap">
+                        {b.key}
+                      </a>
                     </div>
                   </td>
-                  <td className="px-3 py-2"><span className="text-slate-700 text-xs line-clamp-2">{s.summary}</span></td>
-                  <td className="px-3 py-2 text-slate-600 text-xs text-center">{s.story_points != null ? s.story_points : '—'}</td>
-                  <td className="px-3 py-2 text-slate-600 text-xs text-center">{s.original_estimate_hours ? `${s.original_estimate_hours}h` : '—'}</td>
-                  <td className="px-3 py-2"><StatusBadge status={s.status} /></td>
-                  <td className="px-3 py-2 text-slate-500 text-xs truncate" title={s.assignee}>{s.assignee || '—'}</td>
+                  <td className="px-3 py-2.5">
+                    <span className="text-slate-700 text-xs line-clamp-2">{b.summary}</span>
+                  </td>
+                  <td className="px-3 py-2.5"><StatusBadge status={b.status} /></td>
+                  <td className="px-3 py-2.5">
+                    <span className="text-xs text-slate-600">{b.priority || '—'}</span>
+                  </td>
+                  <td className="px-3 py-2.5 text-slate-500 text-xs truncate" title={b.assignee}>
+                    {b.assignee || '—'}
+                  </td>
+                  <td className="px-3 py-2.5">
+                    {b.parent_key ? (
+                      <div className="flex items-center gap-1 min-w-0">
+                        <a href={`https://avite.atlassian.net/browse/${b.parent_key}`} target="_blank" rel="noreferrer"
+                          className="text-blue-600 hover:underline text-xs font-medium whitespace-nowrap shrink-0">
+                          {b.parent_key}
+                        </a>
+                        {b.parent_summary && (
+                          <span className="text-slate-400 text-xs truncate" title={b.parent_summary}>
+                            – {b.parent_summary}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="text-slate-300 text-xs">—</span>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      ))}
-      {stories.length === 0 && <div className="text-center text-slate-400 text-sm py-6">No stories found in this sprint.</div>}
+      )}
     </div>
   )
 }
@@ -703,6 +879,11 @@ function useSprintData(sprintId) {
     queryFn: () => axios.get(`${API}/sprint/${sprintId}/stories`).then(r => r.data),
     enabled: !!sprintId, staleTime: 180_000,
   })
+  const bugsQ = useQuery({
+    queryKey: ['sprint-plan:bugs', sprintId],
+    queryFn: () => axios.get(`${API}/sprint/${sprintId}/bugs`).then(r => r.data),
+    enabled: !!sprintId, staleTime: 180_000,
+  })
   const activitiesQ = useQuery({
     queryKey: ['sprint-plan:activities', sprintId],
     queryFn: () => axios.get(`${API}/sprint/${sprintId}/activities`).then(r => r.data.activities),
@@ -713,7 +894,7 @@ function useSprintData(sprintId) {
     queryFn: () => axios.get(`${API}/sprint/${sprintId}/tracking`).then(r => r.data.tracking),
     enabled: !!sprintId, staleTime: 60_000,
   })
-  return { storiesQ, activitiesQ, trackingQ }
+  return { storiesQ, bugsQ, activitiesQ, trackingQ }
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────
@@ -794,7 +975,7 @@ export default function SprintPlanningPage() {
             <CalendarDays className="h-6 w-6 text-brand-600" />
             <h1 className="text-xl font-bold text-slate-800">Sprint Planning</h1>
           </div>
-          <button onClick={() => { sprintsQ.refetch(); d1.storiesQ.refetch(); d1.activitiesQ.refetch(); d1.trackingQ.refetch(); if (sprint2Id) { d2.storiesQ.refetch(); d2.activitiesQ.refetch(); d2.trackingQ.refetch() } }}
+          <button onClick={() => { sprintsQ.refetch(); d1.storiesQ.refetch(); d1.bugsQ.refetch(); d1.activitiesQ.refetch(); d1.trackingQ.refetch(); if (sprint2Id) { d2.storiesQ.refetch(); d2.bugsQ.refetch(); d2.activitiesQ.refetch(); d2.trackingQ.refetch() } }}
             className="flex items-center gap-2 text-slate-500 hover:text-slate-700 text-sm px-3 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50">
             <RefreshCw className={`h-4 w-4 ${isFetching ? 'animate-spin' : ''}`} /> Refresh
           </button>
@@ -821,10 +1002,17 @@ export default function SprintPlanningPage() {
             <div className="flex gap-1 bg-white rounded-xl border border-slate-200 p-1">
               {TABS.map(tab => {
                 const Icon = TAB_ICONS[tab]
+                const bugCount = tab === 'bugs' && d1.bugsQ.data?.total
                 return (
                   <button key={tab} onClick={() => setActiveTab(tab)}
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors flex-1 justify-center ${activeTab === tab ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-100'}`}>
-                    <Icon className="h-4 w-4" />{TAB_LABELS[tab]}
+                    <Icon className="h-4 w-4" />
+                    {TAB_LABELS[tab]}
+                    {bugCount > 0 && (
+                      <span className={`text-xs rounded-full px-1.5 py-0.5 ${activeTab === tab ? 'bg-white/20 text-white' : 'bg-red-100 text-red-600'}`}>
+                        {bugCount}
+                      </span>
+                    )}
                   </button>
                 )
               })}
@@ -836,10 +1024,11 @@ export default function SprintPlanningPage() {
               {sprint1 && (
                 <div>
                   {showSprint2 && sprint2 && <SprintSectionHeader sprint={sprint1} colorIdx={0} />}
-                  {activeTab === 'stories' && <StoriesPanel storiesData={d1.storiesQ.isLoading ? null : d1.storiesQ.data} />}
+                  {activeTab === 'stories'    && <StoriesPanel storiesData={d1.storiesQ.isLoading ? null : d1.storiesQ.data} />}
+                  {activeTab === 'bugs'       && <BugsPanel bugsData={d1.bugsQ.isLoading ? null : d1.bugsQ.data} />}
                   {activeTab === 'activities' && <ActivitiesPanel sprintId={sprint1Id} sprintName={sprint1.name} activities={d1.activitiesQ.data || []} storiesData={d1.storiesQ.data} />}
-                  {activeTab === 'tracking' && <TrackingPanel sprintId={sprint1Id} sprintName={sprint1?.name || ''} stories={d1.storiesQ.data?.stories || []} tracking={d1.trackingQ.data || []} />}
-                  {activeTab === 'timeline' && <TimelinePanel sprintId={sprint1Id} activities={d1.activitiesQ.data || []} />}
+                  {activeTab === 'tracking'   && <TrackingPanel sprintId={sprint1Id} sprintName={sprint1?.name || ''} stories={d1.storiesQ.data?.stories || []} tracking={d1.trackingQ.data || []} />}
+                  {activeTab === 'timeline'   && <TimelinePanel sprintId={sprint1Id} activities={d1.activitiesQ.data || []} />}
                 </div>
               )}
 
@@ -847,10 +1036,11 @@ export default function SprintPlanningPage() {
               {showSprint2 && sprint2Id && (
                 <div>
                   <SprintSectionHeader sprint={sprint2 || { name: 'Sprint 2', state: '' }} colorIdx={1} />
-                  {activeTab === 'stories' && <StoriesPanel storiesData={d2.storiesQ.isLoading ? null : d2.storiesQ.data} />}
+                  {activeTab === 'stories'    && <StoriesPanel storiesData={d2.storiesQ.isLoading ? null : d2.storiesQ.data} />}
+                  {activeTab === 'bugs'       && <BugsPanel bugsData={d2.bugsQ.isLoading ? null : d2.bugsQ.data} />}
                   {activeTab === 'activities' && <ActivitiesPanel sprintId={sprint2Id} sprintName={sprint2?.name || ''} activities={d2.activitiesQ.data || []} storiesData={d2.storiesQ.data} />}
-                  {activeTab === 'tracking' && <TrackingPanel sprintId={sprint2Id} sprintName={sprint2?.name || ''} stories={d2.storiesQ.data?.stories || []} tracking={d2.trackingQ.data || []} />}
-                  {activeTab === 'timeline' && <TimelinePanel sprintId={sprint2Id} activities={d2.activitiesQ.data || []} />}
+                  {activeTab === 'tracking'   && <TrackingPanel sprintId={sprint2Id} sprintName={sprint2?.name || ''} stories={d2.storiesQ.data?.stories || []} tracking={d2.trackingQ.data || []} />}
+                  {activeTab === 'timeline'   && <TimelinePanel sprintId={sprint2Id} activities={d2.activitiesQ.data || []} />}
                 </div>
               )}
 

@@ -50,6 +50,15 @@ async def get_sprints(refresh: bool = Query(False)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/sprint/{sprint_id}/bugs")
+async def get_sprint_bugs(sprint_id: int, refresh: bool = Query(False)):
+    svc = get_sprint_planning_service()
+    try:
+        return await svc.get_sprint_bugs(sprint_id, force_refresh=refresh)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/sprint/{sprint_id}/stories")
 async def get_sprint_stories(sprint_id: int, refresh: bool = Query(False)):
     svc = get_sprint_planning_service()

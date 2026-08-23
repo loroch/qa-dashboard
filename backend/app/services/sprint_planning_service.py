@@ -117,6 +117,41 @@ class SprintPlanningService:
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
 
+    async def get_sprint_bugs(self, sprint_id: int, force_refresh: bool = False) -> dict:
+        cache_key = f"sprint_plan:bugs:{sprint_id}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                f'project = TMT0 AND sprint = {sprint_id} '
+                f'AND issuetype = Bug '
+                f'AND status not in (Done, DONE, Removed) '
+                f'ORDER BY priority ASC, created DESC'
+            )
+            raw = await self.jira.search_issues(jql, fields=STORY_FIELDS, max_total=500)
+            bugs = []
+            for i in raw:
+                f = i.get("fields", {})
+                parent_raw = f.get("parent") or {}
+                parent_f = parent_raw.get("fields") or {}
+                bugs.append({
+                    "key": i["key"],
+                    "url": f"{self.jira_base_url}/browse/{i['key']}",
+                    "summary": f.get("summary", ""),
+                    "status": (f.get("status") or {}).get("name", ""),
+                    "assignee": (f.get("assignee") or {}).get("displayName", ""),
+                    "priority": (f.get("priority") or {}).get("name", ""),
+                    "issue_type": (f.get("issuetype") or {}).get("name", "Bug"),
+                    "parent_key": parent_raw.get("key", ""),
+                    "parent_summary": parent_f.get("summary", ""),
+                    "parent_type": (parent_f.get("issuetype") or {}).get("name", ""),
+                })
+            return bugs
+
+        bugs = await self.cache.get_or_fetch(cache_key, fetch, ttl=180)
+        return {"bugs": bugs, "total": len(bugs)}
+
     async def get_sprint_stories(self, sprint_id: int, force_refresh: bool = False) -> dict:
         cache_key = f"sprint_plan:stories:{sprint_id}"
         if force_refresh:
