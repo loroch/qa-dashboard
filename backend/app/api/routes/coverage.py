@@ -295,7 +295,7 @@ async def get_ai_content(issue_key: str):
     for row in rows:
         out[row.content_type] = {
             "content": json.loads(row.content),
-            "generated_at": row.generated_at.isoformat() + "Z",
+            "generated_at": row.generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         }
     return out
 
@@ -324,4 +324,4 @@ async def save_ai_content(body: SaveAiContentRequest):
                 generated_at=now,
             ))
         await session.commit()
-    return {"ok": True, "generated_at": now.isoformat() + "Z"}
+    return {"ok": True, "generated_at": now.strftime("%Y-%m-%dT%H:%M:%SZ")}
