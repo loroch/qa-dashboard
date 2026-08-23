@@ -6,7 +6,7 @@ import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import {
   ExternalLink, ChevronDown, ChevronRight, Search,
   Link2, CheckCircle2, XCircle, AlertTriangle, FlaskConical,
-  X, Check, Wand2, Sparkles, FileText, BookOpen, Figma
+  X, Check, Wand2, Sparkles, FileText, Figma, BookOpen
 } from 'lucide-react'
 import axios from 'axios'
 import { BASE_URL } from '../services/api'
@@ -20,7 +20,6 @@ const getUnlinked            = ()     => api.get('/coverage/unlinked-tests').the
 const searchStories          = (q)    => api.get(`/coverage/search-stories?q=${encodeURIComponent(q)}`).then(r => r.data)
 const searchIssues           = (q)    => api.get(`/coverage/search-issues?q=${encodeURIComponent(q)}`).then(r => r.data)
 const generateTestPlan       = (body) => api.post('/coverage/generate-test-plan', body, { timeout: 90000 }).then(r => r.data)
-const generateHandoverCrit   = (body) => api.post('/coverage/generate-handover-criteria', body, { timeout: 90000 }).then(r => r.data)
 const addJiraComment         = (body) => api.post('/coverage/add-jira-comment', body).then(r => r.data)
 const assignTest          = (body) => api.post('/coverage/assign-test', body).then(r => r.data)
 const getRegressionTests  = (v)    => api.get(`/coverage/regression-tests${v ? `?version=${encodeURIComponent(v)}` : ''}`).then(r => r.data)
@@ -894,15 +893,6 @@ export default function TestCoveragePage() {
   const [testPlanLoading, setTestPlanLoading] = useState(false)
   const [testPlanError, setTestPlanError] = useState(null)
 
-  // Handover Criteria panel state
-  const [handoverOpen, setHandoverOpen] = useState(false)
-  const [handoverData, setHandoverData] = useState(null)
-  const [handoverLoading, setHandoverLoading] = useState(false)
-  const [handoverError, setHandoverError] = useState(null)
-  const [handoverCommentKey, setHandoverCommentKey] = useState('')
-  const [handoverPushing, setHandoverPushing] = useState(false)
-  const [handoverPushMsg, setHandoverPushMsg] = useState(null)
-
   const versionsQuery = useQuery({
     queryKey: ['coverage-versions'],
     queryFn: getVersions,
@@ -1137,7 +1127,7 @@ export default function TestCoveragePage() {
                     )}
                   </div>
                   {selectedIssue && (
-                    <button onClick={() => { setSelectedIssue(null); setIssueSearch(''); setIssueResults([]); setTestPlan(null); setTestPlanError(null); setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null) }}
+                    <button onClick={() => { setSelectedIssue(null); setIssueSearch(''); setIssueResults([]); setTestPlan(null); setTestPlanError(null) }}
                       className="px-3 py-2 text-sm border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 flex items-center gap-1">
                       <X className="h-3.5 w-3.5" /> Clear
                     </button>
@@ -1148,7 +1138,7 @@ export default function TestCoveragePage() {
                 {showIssueDrop && issueResults.length > 0 && (
                   <div className="absolute z-30 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-xl max-h-72 overflow-y-auto">
                     {issueResults.map(r => (
-                      <button key={r.key} onClick={() => { setSelectedIssue(r); setIssueSearch(r.key); setShowIssueDrop(false); setTestPlan(null); setTestPlanError(null); setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null) }}
+                      <button key={r.key} onClick={() => { setSelectedIssue(r); setIssueSearch(r.key); setShowIssueDrop(false); setTestPlan(null); setTestPlanError(null) }}
                         className="w-full text-left px-4 py-2.5 hover:bg-brand-50 transition-colors border-b border-gray-100 last:border-0">
                         <div className="flex items-center gap-2">
                           <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${r.type === 'Epic' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
@@ -1182,6 +1172,7 @@ export default function TestCoveragePage() {
                   </a>
                 </div>
               )}
+
 
               {/* Loading */}
               {selectedIssue && issueQuery.isLoading && (
@@ -1237,7 +1228,7 @@ export default function TestCoveragePage() {
                     </div>
 
                     {/* ── AI Panels row ─────────────────────────── */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2">
+                    <div className="pt-2">
 
                       {/* ── Test Plan Panel ── */}
                       <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -1280,73 +1271,6 @@ export default function TestCoveragePage() {
                             )}
                             {testPlanError && <p className="text-sm text-red-500 text-center">{testPlanError}</p>}
                             {testPlan && !testPlanLoading && <TestPlanView plan={testPlan} onRegen={() => { setTestPlan(null); setTestPlanError(null) }} />}
-                          </div>
-                        )}
-                      </div>
-
-                      {/* ── Handover Criteria Panel ── */}
-                      <div className="border border-gray-200 rounded-xl overflow-hidden">
-                        <button
-                          onClick={() => setHandoverOpen(o => !o)}
-                          className="w-full flex items-center justify-between px-4 py-3 bg-amber-50 hover:bg-amber-100 transition-colors"
-                        >
-                          <span className="flex items-center gap-2 font-semibold text-amber-800 text-sm">
-                            <BookOpen className="h-4 w-4" /> Handover Exit Criteria
-                          </span>
-                          {handoverOpen ? <ChevronDown className="h-4 w-4 text-amber-500" /> : <ChevronRight className="h-4 w-4 text-amber-500" />}
-                        </button>
-
-                        {handoverOpen && (
-                          <div className="p-4 space-y-4 bg-white">
-                            {!handoverData && !handoverLoading && (
-                              <div className="text-center py-4">
-                                <p className="text-sm text-gray-500 mb-3">Generate scenarios for R&D to demonstrate during the handover meeting</p>
-                                <button
-                                  onClick={async () => {
-                                    setHandoverLoading(true); setHandoverError(null)
-                                    try {
-                                      const stories = (d.by_epic || []).flatMap(e => e.stories || []).map(s => ({ key: s.key, summary: s.summary }))
-                                      const result = await generateHandoverCrit({ issue_key: selectedIssue.key, issue_summary: selectedIssue.summary, issue_type: selectedIssue.type, stories })
-                                      setHandoverData(result)
-                                      setHandoverCommentKey(selectedIssue.key)
-                                    } catch(e) { setHandoverError(e.message) }
-                                    finally { setHandoverLoading(false) }
-                                  }}
-                                  className="px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 flex items-center gap-2 mx-auto"
-                                >
-                                  <Sparkles className="h-4 w-4" /> Generate Handover Criteria
-                                </button>
-                              </div>
-                            )}
-                            {handoverLoading && (
-                              <div className="text-center py-6">
-                                <div className="h-6 w-6 border-2 border-amber-200 border-t-amber-600 rounded-full animate-spin mx-auto mb-2" />
-                                <p className="text-xs text-gray-400">AI is writing handover criteria…</p>
-                              </div>
-                            )}
-                            {handoverError && <p className="text-sm text-red-500 text-center">{handoverError}</p>}
-                            {handoverData && !handoverLoading && (
-                              <HandoverCriteriaView
-                                data={handoverData}
-                                commentKey={handoverCommentKey}
-                                pushing={handoverPushing}
-                                pushMsg={handoverPushMsg}
-                                onChangeKey={setHandoverCommentKey}
-                                onRegen={() => { setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null) }}
-                                onPush={async () => {
-                                  setHandoverPushing(true); setHandoverPushMsg(null)
-                                  try {
-                                    const text = buildHandoverComment(handoverData, selectedIssue)
-                                    await addJiraComment({ issue_key: handoverCommentKey, comment_text: text })
-                                    setHandoverPushMsg({ ok: true, msg: `Comment added to ${handoverCommentKey}` })
-                                  } catch(e) {
-                                    const detail = e.response?.data?.detail || e.message
-                                    setHandoverPushMsg({ ok: false, msg: detail })
-                                  }
-                                  finally { setHandoverPushing(false) }
-                                }}
-                              />
-                            )}
                           </div>
                         )}
                       </div>
@@ -1485,23 +1409,7 @@ export default function TestCoveragePage() {
   )
 }
 
-// ── Test Plan & Handover helpers ──────────────────────────────────────────
-
-function buildHandoverComment(data, issue) {
-  const lines = [
-    `📋 Handover Exit Criteria — ${issue?.key}: ${issue?.summary}`,
-    '',
-    data.intro || '',
-    '',
-  ]
-  ;(data.criteria || []).forEach((c, i) => {
-    lines.push(`${i + 1}. [${c.priority === 'must' ? '✅ MUST' : '👍 NICE'}] ${c.title}`)
-    lines.push(`   ${c.description}`)
-    ;(c.steps || []).forEach(s => lines.push(`   • ${s}`))
-    lines.push('')
-  })
-  return lines.join('\n')
-}
+// ── Test Plan helpers ──────────────────────────────────────────
 
 const TYPE_COLORS = {
   Functional:  'bg-blue-100 text-blue-700 border-blue-200',
@@ -1667,76 +1575,6 @@ function TestPlanView({ plan, onRegen }) {
       {plan.estimated_test_cases && (
         <p className="text-center text-xs text-gray-400">Estimated total test cases: <strong>{plan.estimated_test_cases}</strong></p>
       )}
-    </div>
-  )
-}
-
-function HandoverCriteriaView({ data, commentKey, pushing, pushMsg, onChangeKey, onRegen, onPush }) {
-  return (
-    <div className="space-y-3 text-sm">
-      <div className="flex justify-end">
-        <button onClick={onRegen} className="text-xs text-amber-500 hover:text-amber-700 flex items-center gap-1">
-          <Wand2 className="h-3 w-3" /> Regenerate
-        </button>
-      </div>
-
-      {data.intro && (
-        <div className="bg-amber-50 rounded-lg p-3 text-amber-900 text-xs leading-relaxed">{data.intro}</div>
-      )}
-
-      <div className="space-y-3">
-        {(data.criteria || []).map(c => (
-          <div key={c.id} className={`border rounded-lg overflow-hidden ${c.priority === 'must' ? 'border-amber-300' : 'border-gray-200'}`}>
-            <div className={`px-3 py-2 flex items-start gap-2 ${c.priority === 'must' ? 'bg-amber-50' : 'bg-gray-50'}`}>
-              <span className={`text-xs px-1.5 py-0.5 rounded font-semibold flex-shrink-0 mt-0.5 ${c.priority === 'must' ? 'bg-amber-200 text-amber-800' : 'bg-gray-200 text-gray-600'}`}>
-                {c.priority === 'must' ? '✅ MUST' : '👍 NICE'}
-              </span>
-              <div>
-                <p className="font-semibold text-gray-800">{c.title}</p>
-                <p className="text-xs text-gray-500 mt-0.5">{c.category}</p>
-              </div>
-            </div>
-            <div className="px-3 py-2 space-y-1.5">
-              <p className="text-xs text-gray-600">{c.description}</p>
-              <ol className="space-y-1 mt-2">
-                {(c.steps || []).map((step, i) => (
-                  <li key={i} className="flex gap-2 text-xs text-gray-700">
-                    <span className="bg-amber-100 text-amber-700 rounded-full w-4 h-4 flex items-center justify-center font-bold flex-shrink-0">{i+1}</span>
-                    {step}
-                  </li>
-                ))}
-              </ol>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Push to Jira */}
-      <div className="border-t border-gray-200 pt-3 space-y-2">
-        <p className="text-xs font-medium text-gray-600">Push as Jira comment</p>
-        <div className="flex gap-2">
-          <input
-            className="flex-1 text-xs border border-gray-200 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-amber-300"
-            placeholder="Issue key (e.g. TMT0-123)"
-            value={commentKey}
-            onChange={e => onChangeKey(e.target.value)}
-          />
-          <button
-            onClick={onPush}
-            disabled={pushing || !commentKey.trim()}
-            className="px-3 py-1.5 bg-amber-600 text-white text-xs rounded-lg hover:bg-amber-700 disabled:opacity-50 flex items-center gap-1.5"
-          >
-            {pushing ? <div className="h-3 w-3 border border-white border-t-transparent rounded-full animate-spin" /> : <Link2 className="h-3 w-3" />}
-            Push to Jira
-          </button>
-        </div>
-        {pushMsg && (
-          <p className={`text-xs flex items-center gap-1 ${pushMsg.ok ? 'text-green-600' : 'text-red-500'}`}>
-            {pushMsg.ok ? <CheckCircle2 className="h-3.5 w-3.5" /> : <XCircle className="h-3.5 w-3.5" />}
-            {pushMsg.msg}
-          </p>
-        )}
-      </div>
     </div>
   )
 }
