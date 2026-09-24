@@ -228,6 +228,7 @@ class HandoverCriteriaRequest(BaseModel):
     issue_summary: str
     issue_type: str = "Story"
     stories: list[dict] = []
+    notes: str = ""
 
 
 class JiraCommentRequest(BaseModel):
@@ -254,7 +255,7 @@ async def generate_handover_criteria(body: HandoverCriteriaRequest):
     try:
         svc = get_coverage_service()
         return await svc.generate_handover_criteria(
-            body.issue_key, body.issue_summary, body.issue_type, body.stories
+            body.issue_key, body.issue_summary, body.issue_type, body.stories, body.notes
         )
     except Exception as e:
         logger.error(f"generate_handover_criteria error for {body.issue_key}: {e}", exc_info=True)

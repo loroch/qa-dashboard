@@ -187,6 +187,8 @@ class SprintQAActivityORM(Base):
     order_index = Column(Integer, default=0)
     activity_type = Column(String(50), default="qa_testing")  # qa_testing|regression|smoke_test|review|exploratory|other
     status = Column(String(30), default="planned")  # planned|in_progress|done|blocked
+    epic_key = Column(String(50), nullable=True)
+    epic_summary = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -269,6 +271,8 @@ _NEW_COLUMNS = [
     ("automation_runs", "log_output", "TEXT"),
     ("automation_runs", "screenshot_path", "TEXT"),
     ("automation_run_results", "element_box", "TEXT"),
+    ("sprint_qa_activities", "epic_key", "TEXT"),
+    ("sprint_qa_activities", "epic_summary", "TEXT"),
 ]
 
 

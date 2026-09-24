@@ -110,6 +110,7 @@ class KoneCreateBugRequest(BaseModel):
     priority_name: Optional[str] = None
     sprint_id: Optional[int] = None
     assignee_id: Optional[str] = None
+    label: Optional[str] = None
     attachments: List[dict] = []
     comment: Optional[str] = None
 
@@ -135,12 +136,98 @@ async def create_kone_bug(body: KoneCreateBugRequest):
             priority_name=body.priority_name,
             sprint_id=body.sprint_id,
             assignee_id=body.assignee_id,
+            label=body.label,
             attachment_ids=body.attachments,
             comment=body.comment,
         )
         return result
     except Exception as e:
         logger.error(f"KONE create-bug error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+class KoneLinkBugRequest(BaseModel):
+    kone_key: str
+    jira_key: str
+
+
+@router.post("/link-bug")
+async def link_kone_bug(body: KoneLinkBugRequest):
+    """Manually link an existing TMT0 Jira issue to a KONE ticket."""
+    from app.jira.client import get_jira_client
+    jira_key = body.jira_key.strip().upper()
+    if not jira_key:
+        raise HTTPException(status_code=422, detail="jira_key is required")
+    try:
+        jira = get_jira_client()
+        issue = await jira.get_issue(jira_key, fields=["summary", "status", "fixVersions"])
+    except Exception as e:
+        raise HTTPException(status_code=404, detail=f"Jira issue {jira_key} not found: {e}")
+
+    fields = issue.get("fields", {})
+    summary = fields.get("summary", "")
+    status = (fields.get("status") or {}).get("name", "")
+    fix_versions = [v.get("name") for v in (fields.get("fixVersions") or []) if v.get("name")]
+    jira_url = f"https://kabatone-ops-it.atlassian.net/browse/{jira_key}"
+
+    svc = get_kone_service()
+    await svc.save_bug_link(body.kone_key, jira_key, jira_url, summary)
+    await svc.write_bug_id_to_kone(body.kone_key, jira_key)
+
+    return {
+        "kone_key": body.kone_key,
+        "jira_key": jira_key,
+        "jira_url": jira_url,
+        "jira_status": status,
+        "jira_fix_versions": fix_versions,
+        "summary": summary,
+    }
+
+
+@router.post("/write-bug-id/{kone_key}")
+async def write_single_bug_id(kone_key: str):
+    """Write the linked TMT0 bug key into a single KONE ticket's Bug ID field."""
+    svc = get_kone_service()
+    try:
+        bug_links = await svc.get_bug_links()
+        link = bug_links.get(kone_key)
+        if not link:
+            raise HTTPException(status_code=404, detail=f"No bug link found for {kone_key}")
+        jira_key = link.get("jira_key") if isinstance(link, dict) else str(link)
+        if not jira_key:
+            raise HTTPException(status_code=404, detail=f"No jira_key in link for {kone_key}")
+        ok = await svc.write_bug_id_to_kone(kone_key, jira_key)
+        if not ok:
+            raise HTTPException(status_code=500, detail=f"Failed to write Bug ID to {kone_key}")
+        return {"kone_key": kone_key, "jira_key": jira_key, "ok": True}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Write single bug ID error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/retro-sync-bug-ids")
+async def retro_sync_bug_ids():
+    """Write TMT0 bug keys back into all KONE tickets that are missing the Bug ID field."""
+    svc = get_kone_service()
+    try:
+        result = await svc.retro_sync_bug_ids()
+        return result
+    except Exception as e:
+        logger.error(f"Retro sync Bug IDs error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/sync-from-jira")
+async def sync_from_jira():
+    """Scan TMT0 bugs for a Ticket # field and link them back to KONE tickets in the DB."""
+    svc = get_kone_service()
+    try:
+        result = await svc.sync_from_jira()
+        return result
+    except Exception as e:
+        logger.error(f"Sync from Jira error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

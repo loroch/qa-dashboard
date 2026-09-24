@@ -5,7 +5,7 @@ import axios from 'axios'
 import {
   RefreshCw, ExternalLink, ChevronDown, ChevronRight,
   Bug, X, Loader2, CheckCircle, AlertCircle, Paperclip, Sparkles, Languages,
-  TrendingUp, Clock, Users, AlertOctagon, Filter
+  TrendingUp, Clock, Users, AlertOctagon, Filter, ArrowDownToLine
 } from 'lucide-react'
 
 const API = import.meta.env.VITE_API_BASE_URL ||
@@ -140,8 +140,102 @@ function TooltipCell({ text, className, children }) {
   )
 }
 
+// ── Inline manual-link input ──────────────────────────────────────────────────
+function LinkBugInline({ ticketKey, onLinked }) {
+  const [open, setOpen] = useState(false)
+  const [value, setValue] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [err, setErr] = useState(null)
+  const inputRef = useRef(null)
+
+  const open_ = () => { setOpen(true); setErr(null); setValue(''); setTimeout(() => inputRef.current?.focus(), 0) }
+  const cancel = () => { setOpen(false); setErr(null) }
+
+  const submit = async () => {
+    const key = value.trim().toUpperCase()
+    if (!key) return
+    setSaving(true); setErr(null)
+    try {
+      await api.post('/api/kone/link-bug', { kone_key: ticketKey, jira_key: key })
+      setOpen(false)
+      onLinked?.()
+    } catch (e) {
+      setErr(e.response?.data?.detail || 'Not found')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  if (!open) {
+    return (
+      <button onClick={open_}
+        className="inline-flex items-center gap-1 text-xs text-gray-400 hover:text-indigo-600 border border-dashed border-gray-300 hover:border-indigo-400 rounded px-2 py-1 transition-colors"
+        title="Link existing Jira bug">
+        <Paperclip className="h-3 w-3" /> Link
+      </button>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-1">
+      <input
+        ref={inputRef}
+        value={value}
+        onChange={e => { setValue(e.target.value); setErr(null) }}
+        onKeyDown={e => { if (e.key === 'Enter') submit(); if (e.key === 'Escape') cancel() }}
+        placeholder="TMT0-####"
+        className={`w-24 text-xs border rounded px-2 py-1 font-mono focus:outline-none focus:ring-1 ${err ? 'border-red-400 focus:ring-red-300' : 'border-gray-300 focus:ring-indigo-400'}`}
+      />
+      {saving
+        ? <Loader2 className="h-3.5 w-3.5 text-indigo-500 animate-spin" />
+        : <button onClick={submit} className="text-xs text-indigo-600 hover:text-indigo-800 font-medium">Save</button>}
+      <button onClick={cancel} className="text-gray-400 hover:text-gray-600"><X className="h-3 w-3" /></button>
+      {err && <span className="text-xs text-red-500 ml-1">{err}</span>}
+    </div>
+  )
+}
+
+// ── Bug ID cell — shows KONE's customfield_10193, with a write button when link exists but field is empty ───
+function BugIdCell({ ticket, link }) {
+  const [state, setState] = useState('idle') // idle | writing | done | error
+
+  const write = async () => {
+    setState('writing')
+    try {
+      await api.post(`/api/kone/write-bug-id/${ticket.key}`)
+      setState('done')
+      setTimeout(() => setState('idle'), 5000)
+    } catch {
+      setState('error')
+      setTimeout(() => setState('idle'), 5000)
+    }
+  }
+
+  const bugId = state === 'done' ? (link?.jira_key || '?') : ticket.bug_id
+
+  return (
+    <td className="px-3 py-2 whitespace-nowrap">
+      {bugId ? (
+        <span className="font-mono text-xs text-green-700 font-semibold">{bugId}</span>
+      ) : link?.jira_key ? (
+        <button
+          onClick={write}
+          disabled={state === 'writing'}
+          title={`Write ${link.jira_key} to KONE Bug ID field`}
+          className="flex items-center gap-1 px-1.5 py-0.5 rounded text-xs border border-amber-300 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50"
+        >
+          {state === 'writing' ? <Loader2 className="h-3 w-3 animate-spin" /> : state === 'error' ? '✗' : '↑'}
+          {state === 'error' ? 'Failed' : 'Write'}
+        </button>
+      ) : (
+        <span className="text-gray-300">—</span>
+      )}
+    </td>
+  )
+}
+
 // ── Jira Bug / Status / Fix Version cells (shared across all ticket tables) ───
-function JiraBugCells({ link, ticket, onCreateBug }) {
+function JiraBugCells({ link, ticket, onCreateBug, onLinked }) {
   return (
     <>
       <td className="px-3 py-2 whitespace-nowrap">
@@ -149,10 +243,13 @@ function JiraBugCells({ link, ticket, onCreateBug }) {
           <a href={link.jira_url} target="_blank" rel="noopener noreferrer"
             className="text-indigo-600 font-mono hover:underline text-xs font-medium">{link.jira_key} ↗</a>
         ) : (
-          <button onClick={() => onCreateBug(ticket)}
-            className="inline-flex items-center gap-1 text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded px-2 py-1 font-medium">
-            <Bug className="h-3 w-3" />Create
-          </button>
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <button onClick={() => onCreateBug(ticket)}
+              className="inline-flex items-center gap-1 text-xs text-red-600 border border-red-200 bg-red-50 hover:bg-red-100 rounded px-2 py-1 font-medium">
+              <Bug className="h-3 w-3" />Create
+            </button>
+            <LinkBugInline ticketKey={ticket.key} onLinked={onLinked} />
+          </div>
         )}
       </td>
       <td className="px-3 py-2 whitespace-nowrap">
@@ -236,9 +333,10 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
   const [form, setForm] = useState({
     summary: '', description: '', steps_to_reproduce: '',
     actual_result: '', expected_result: '',
-    severity: 'Medium', environments: '',
+    severity: 'Medium', environments: 'PROD',
     found_in_version_id: '', epic_key: '', fix_version_id: '',
     priority_name: '', sprint_id: '', assignee_id: '',
+    label: 'FROM_SITE',
     attachments: [], comment: '',
   })
   const [submitting, setSubmitting] = useState(false)
@@ -267,9 +365,11 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
 
   useEffect(() => {
     if (detail) {
+      const rawSummary = detail.summary || ticket.summary || ''
+      const quotedSummary = rawSummary ? `"${rawSummary}"` : ''
       setForm(f => ({
         ...f,
-        summary:     f.summary     || detail.summary    || ticket.summary || '',
+        summary:     f.summary     || quotedSummary,
         description: f.description || detail.description || '',
         attachments: (detail.attachments || []).filter(a => a.size <= MAX_ATT_BYTES),
       }))
@@ -284,9 +384,16 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
   })
   const isAtt = (att) => form.attachments.some(a => a.name === att.name)
 
-  // ── Sync filteredEpics when meta loads ──
+  // ── Sync filteredEpics + default assignee when meta loads ──
   useEffect(() => {
     setFilteredEpics(meta?.epics || [])
+    if (meta?.assignees) {
+      setForm(f => {
+        if (f.assignee_id) return f   // already set by user
+        const michal = meta.assignees.find(u => u.name.toLowerCase().includes('michal'))
+        return michal ? { ...f, assignee_id: michal.id } : f
+      })
+    }
   }, [meta])
 
   const epicQ = epicSearch.trim().toLowerCase()
@@ -328,6 +435,7 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
         priority_name: form.priority_name || null,
         sprint_id: form.sprint_id ? Number(form.sprint_id) : null,
         assignee_id: form.assignee_id || null,
+        label: form.label || null,
         attachments: form.attachments,
         comment: form.comment || null,
       }, { timeout: 300000 })
@@ -341,12 +449,24 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
   const generateWithAI = async () => {
     setAiGenerating(true); setError(null)
     try {
+      const originalDescription = form.description.trim()
       const res = await api.post('/api/kone/ai-generate-bug-fields', {
-        summary: form.summary, description: form.description,
+        summary: form.summary, description: originalDescription,
       })
+      const aiSummary = res.data.summary ? `"${res.data.summary}"` : form.summary
+      // Compose description: original customer complaint + AI structured section
+      let newDescription = originalDescription
+      if (res.data.ai_description) {
+        const divider = '\n\n── AI Analysis ──────────────────────────────\n'
+        const aiSection = res.data.ai_description
+        newDescription = originalDescription
+          ? `${originalDescription}${divider}${aiSection}`
+          : aiSection
+      }
       setForm(f => ({
         ...f,
-        summary:            res.data.summary            || f.summary,
+        summary:            aiSummary,
+        description:        newDescription,
         steps_to_reproduce: res.data.steps_to_reproduce || f.steps_to_reproduce,
         actual_result:      res.data.actual_result      || f.actual_result,
         expected_result:    res.data.expected_result    || f.expected_result,
@@ -582,6 +702,18 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
                   </select>
                 </F>
 
+                <F label="Label">
+                  <select className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
+                    value={form.label} onChange={e => set('label', e.target.value)}>
+                    <option value="">— No label —</option>
+                    <option value="FROM_SITE">FROM_SITE</option>
+                    <option value="FROM_CLIENT">FROM_CLIENT</option>
+                    <option value="FROM_INTERNAL">FROM_INTERNAL</option>
+                    <option value="REGRESSION">REGRESSION</option>
+                    <option value="UAT">UAT</option>
+                  </select>
+                </F>
+
                 <div className="col-span-2">
                   <F label="Sprint">
                     <select className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 bg-white"
@@ -667,7 +799,7 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
 }
 
 // ── Dashboard Tab ─────────────────────────────────────────────────────────────
-function DashboardTab({ tickets, bugLinks, onCreateBug }) {
+function DashboardTab({ tickets, bugLinks, onCreateBug, onLinked }) {
   const [days, setDays] = useState(7)
 
   const clienteData = useMemo(() => {
@@ -799,7 +931,7 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
                         ? <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${supportValColor(t.support_validation)}`}>{t.support_validation}</span>
                         : <span className="text-gray-300">—</span>}
                     </td>
-                    <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
+                    <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} onLinked={onLinked} />
                   </tr>
                 )
               })}
@@ -855,7 +987,7 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
                           ? <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${supportValColor(t.support_validation)}`}>{t.support_validation}</span>
                           : <span className="text-gray-300">—</span>}
                       </td>
-                      <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
+                      <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} onLinked={onLinked} />
                     </tr>
                   )
                 })}
@@ -869,7 +1001,7 @@ function DashboardTab({ tickets, bugLinks, onCreateBug }) {
 }
 
 // ── By Cliente Tab ────────────────────────────────────────────────────────────
-function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
+function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug, onLinked }) {
   const [selectedCliente, setSelectedCliente] = useState(null)
   const [statusFilter, setStatusFilter] = useState(new Set())
   const [priorityFilter, setPriorityFilter] = useState(new Set())
@@ -881,6 +1013,7 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
   const [supportValFilter, setSupportValFilter] = useState(new Set())
   const [sortCol, setSortCol] = useState('created')
   const [sortDir, setSortDir] = useState('desc')
+  const [search, setSearch]   = useState('')
 
   const jiraStatusOf = t => bugLinks?.[t.key]?.jira_status || ''
   const fixVersionsOf = t => bugLinks?.[t.key]?.jira_fix_versions || []
@@ -899,6 +1032,12 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
   const filteredTickets = useMemo(() => {
     let list = tickets
     if (selectedCliente)       list = list.filter(t => t.cliente === selectedCliente)
+    if (search.trim()) {
+      const q = search.trim().toLowerCase()
+      list = list.filter(t =>
+        t.key.toLowerCase().includes(q) || t.summary.toLowerCase().includes(q)
+      )
+    }
     if (statusFilter.size)     list = list.filter(t => statusFilter.has(t.status))
     if (priorityFilter.size)   list = list.filter(t => priorityFilter.has(t.priority))
     if (cuentaFilter.size)     list = list.filter(t => cuentaFilter.has(t.cuenta))
@@ -917,7 +1056,7 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
       const cmp = typeof av === 'number' ? av - bv : av < bv ? -1 : av > bv ? 1 : 0
       return sortDir === 'asc' ? cmp : -cmp
     })
-  }, [tickets, selectedCliente, statusFilter, priorityFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter, sortCol, sortDir, bugLinks])
+  }, [tickets, selectedCliente, search, statusFilter, priorityFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter, sortCol, sortDir, bugLinks])
 
   const toggleSort = col => { if (sortCol === col) setSortDir(d => d === 'asc' ? 'desc' : 'asc'); else { setSortCol(col); setSortDir('desc') } }
   const si = col => sortCol === col ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ''
@@ -930,8 +1069,9 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
     </th>
   )
 
-  const anyFilterActive = [statusFilter, priorityFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter, supportValFilter].some(s => s.size > 0)
+  const anyFilterActive = search.trim() !== '' || [statusFilter, priorityFilter, cuentaFilter, productoFilter, assigneeFilter, jiraStatusFilter, fixVersionFilter, supportValFilter].some(s => s.size > 0)
   const clearAllFilters = () => {
+    setSearch('')
     setStatusFilter(new Set()); setPriorityFilter(new Set()); setCuentaFilter(new Set())
     setProductoFilter(new Set()); setAssigneeFilter(new Set()); setJiraStatusFilter(new Set())
     setFixVersionFilter(new Set()); setSupportValFilter(new Set())
@@ -969,13 +1109,30 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
       </div>
 
       <div className="bg-white rounded-xl shadow-sm border border-gray-200">
-        <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
-          <span className="text-sm font-medium text-gray-700">
+        <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-gray-100">
+          <span className="text-sm font-medium text-gray-700 shrink-0">
             {selectedCliente ? `${selectedCliente} — ` : 'All — '}{filteredTickets.length} ticket{filteredTickets.length !== 1 ? 's' : ''}
           </span>
-          <div className="flex items-center gap-2">
-            {anyFilterActive && <button onClick={clearAllFilters} className="text-xs text-blue-500 hover:underline">Clear filters</button>}
-            {selectedCliente && <button onClick={() => setSelectedCliente(null)} className="text-xs text-blue-500 hover:underline">Clear cliente</button>}
+          <div className="flex items-center gap-2 flex-1 justify-end">
+            <div className="relative">
+              <input
+                type="text"
+                value={search}
+                onChange={e => setSearch(e.target.value)}
+                placeholder="Search key or summary…"
+                className="text-xs border border-gray-200 rounded-lg pl-7 pr-3 py-1.5 w-56 focus:outline-none focus:border-blue-400 focus:ring-1 focus:ring-blue-200"
+              />
+              <svg className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M21 21l-4.35-4.35M17 11A6 6 0 1 1 5 11a6 6 0 0 1 12 0z" />
+              </svg>
+              {search && (
+                <button onClick={() => setSearch('')} className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-400 hover:text-gray-600">
+                  <X className="h-3 w-3" />
+                </button>
+              )}
+            </div>
+            {anyFilterActive && <button onClick={clearAllFilters} className="text-xs text-blue-500 hover:underline shrink-0">Clear filters</button>}
+            {selectedCliente && <button onClick={() => setSelectedCliente(null)} className="text-xs text-blue-500 hover:underline shrink-0">Clear cliente</button>}
           </div>
         </div>
         <div className="overflow-x-auto">
@@ -992,6 +1149,7 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
                 {th('Assignee', 'assignee', { options: options.assignees, selected: assigneeFilter, onChange: setAssigneeFilter })}
                 {th('Days Open', 'days_open')}
                 {th('Support Validation', 'support_validation', { options: options.supportVals, selected: supportValFilter, onChange: setSupportValFilter })}
+                {th('Bug ID', 'bug_id')}
                 {th('Jira Bug', 'jira_key')}
                 {th('Jira Status', 'jira_status', { options: options.jiraStatuses, selected: jiraStatusFilter, onChange: setJiraStatusFilter })}
                 {th('Fix Version', 'fix_version', { options: options.fixVersions, selected: fixVersionFilter, onChange: setFixVersionFilter })}
@@ -1024,11 +1182,12 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
                         ? <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${supportValColor(t.support_validation)}`}>{t.support_validation}</span>
                         : <span className="text-gray-300">—</span>}
                     </td>
-                    <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
+                    <BugIdCell ticket={t} link={link} />
+                    <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} onLinked={onLinked} />
                   </tr>
                 )
               })}
-              {filteredTickets.length === 0 && <tr><td colSpan={13} className="text-center py-8 text-gray-400">No tickets</td></tr>}
+              {filteredTickets.length === 0 && <tr><td colSpan={14} className="text-center py-8 text-gray-400">No tickets</td></tr>}
             </tbody>
           </table>
         </div>
@@ -1038,7 +1197,7 @@ function ByClienteTab({ tickets, clienteGroups, bugLinks, onCreateBug }) {
 }
 
 // ── All Tickets Tab ───────────────────────────────────────────────────────────
-function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTranslating, translateOn }) {
+function AllTicketsTab({ tickets, bugLinks, onCreateBug, onLinked, translations, isTranslating, translateOn }) {
   const [search, setSearch]                 = useState('')
   const [statusFilter, setStatusFilter]     = useState(new Set())
   const [priorityFilter, setPriorityFilter] = useState(new Set())
@@ -1146,6 +1305,7 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
               {th('Days Open', 'days_open')}
               {th('Created', 'created')}
               {th('Support Validation', 'support_validation', { options: options.supportVals, selected: supportValFilter, onChange: wrapFilter(setSupportValFilter) })}
+              {th('Bug ID', 'bug_id')}
               {th('Jira Bug', 'jira_key')}
               {th('Jira Status', 'jira_status', { options: options.jiraStatuses, selected: jiraStatusFilter, onChange: setJiraStatusFilter })}
               {th('Fix Version', 'fix_version', { options: options.fixVersions, selected: fixVersionFilter, onChange: setFixVersionFilter })}
@@ -1187,11 +1347,12 @@ function AllTicketsTab({ tickets, bugLinks, onCreateBug, translations, isTransla
                       ? <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${supportValColor(t.support_validation)}`}>{t.support_validation}</span>
                       : <span className="text-gray-300">—</span>}
                   </td>
+                  <BugIdCell ticket={t} link={link} />
                   <JiraBugCells link={link} ticket={t} onCreateBug={onCreateBug} />
                 </tr>
               )
             })}
-            {paged.length === 0 && <tr><td colSpan={18} className="text-center py-8 text-gray-400">No tickets match filters</td></tr>}
+            {paged.length === 0 && <tr><td colSpan={19} className="text-center py-8 text-gray-400">No tickets match filters</td></tr>}
           </tbody>
         </table>
       </div>
@@ -1213,6 +1374,10 @@ export default function KonePage() {
   const [tab, setTab] = useState('dashboard')
   const [refreshKey, setRefreshKey] = useState(0)
   const [createBugTicket, setCreateBugTicket] = useState(null)
+  const [syncState,  setSyncState]  = useState('idle')  // idle | syncing | done | error
+  const [syncResult, setSyncResult] = useState(null)
+  const [retroState,  setRetroState]  = useState('idle')
+  const [retroResult, setRetroResult] = useState(null)
   const [translateOn, setTranslateOn] = useState(false)
   const [translations, setTranslations] = useState({})
   const [isTranslating, setIsTranslating] = useState(false)
@@ -1252,6 +1417,37 @@ export default function KonePage() {
 
   const handleBugCreated = () => refetchBugLinks()
 
+  const handleSyncFromJira = async () => {
+    setSyncState('syncing')
+    setSyncResult(null)
+    try {
+      const { data } = await axios.post(`${API}/api/kone/sync-from-jira`)
+      setSyncResult(data)
+      setSyncState('done')
+      refetchBugLinks()
+      setTimeout(() => setSyncState('idle'), 8000)
+    } catch (e) {
+      setSyncResult({ error: e?.response?.data?.detail || e.message })
+      setSyncState('error')
+      setTimeout(() => setSyncState('idle'), 8000)
+    }
+  }
+
+  const handleRetroSyncBugIds = async () => {
+    setRetroState('syncing')
+    setRetroResult(null)
+    try {
+      const { data } = await axios.post(`${API}/api/kone/retro-sync-bug-ids`)
+      setRetroResult(data)
+      setRetroState('done')
+      setTimeout(() => setRetroState('idle'), 10000)
+    } catch (e) {
+      setRetroResult({ error: e?.response?.data?.detail || e.message })
+      setRetroState('error')
+      setTimeout(() => setRetroState('idle'), 8000)
+    }
+  }
+
   const tickets       = ticketsData?.tickets || []
   const clienteGroups = clienteData?.groups  || []
   const isLoading     = loadingTickets || loadingCliente
@@ -1287,6 +1483,28 @@ export default function KonePage() {
             <Languages className="h-4 w-4" />
             {translateOn ? 'ES→EN On' : 'ES→EN'}
           </button>
+          <button
+            onClick={handleSyncFromJira}
+            disabled={syncState === 'syncing'}
+            title="Scan TMT0 bugs for Ticket # field and link them to KONE tickets"
+            className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-50 transition-colors"
+          >
+            {syncState === 'syncing'
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <ArrowDownToLine className="h-4 w-4" />}
+            {syncState === 'syncing' ? 'Syncing…' : 'Sync from Jira'}
+          </button>
+          <button
+            onClick={handleRetroSyncBugIds}
+            disabled={retroState === 'syncing'}
+            title="Write TMT0 bug key into KONE ticket's Bug ID field for all linked tickets"
+            className="flex items-center gap-1.5 px-3 py-2 text-sm rounded-lg border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 disabled:opacity-50 transition-colors"
+          >
+            {retroState === 'syncing'
+              ? <Loader2 className="h-4 w-4 animate-spin" />
+              : <ArrowDownToLine className="h-4 w-4" />}
+            {retroState === 'syncing' ? 'Writing…' : 'Write Bug IDs to KONE'}
+          </button>
           <button onClick={handleRefresh} disabled={isLoading}
             className="flex items-center gap-2 px-3 py-2 text-sm bg-white border border-gray-200 rounded-lg hover:bg-gray-50 disabled:opacity-40">
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
@@ -1294,6 +1512,69 @@ export default function KonePage() {
           </button>
         </div>
       </div>
+
+      {/* Sync result banner */}
+      {syncState !== 'idle' && syncState !== 'syncing' && syncResult && (
+        <div className={`flex items-start gap-3 rounded-lg px-4 py-3 text-sm border ${
+          syncState === 'done' ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800'
+        }`}>
+          {syncState === 'done'
+            ? <CheckCircle className="h-4 w-4 shrink-0 mt-0.5 text-green-600" />
+            : <AlertCircle className="h-4 w-4 shrink-0 mt-0.5 text-red-600" />}
+          <div className="flex-1">
+            {syncState === 'done' ? (
+              <>
+                <span className="font-semibold">Sync complete.</span>
+                {' '}Scanned <strong>{syncResult.total_scanned}</strong> bugs —
+                {' '}<strong>{syncResult.created}</strong> new links created,
+                {' '}<strong>{syncResult.updated}</strong> updated,
+                {' '}<strong>{syncResult.skipped}</strong> skipped (no ticket number).
+                {syncResult.links?.length > 0 && (
+                  <div className="mt-1.5 flex flex-wrap gap-1.5">
+                    {syncResult.links.map(l => (
+                      <span key={l.jira_key} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-mono font-medium border ${
+                        l.new ? 'bg-green-100 border-green-300 text-green-800' : 'bg-gray-100 border-gray-300 text-gray-600'
+                      }`}>
+                        {l.kone_key} → {l.jira_key}{l.new && ' ✓'}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <><span className="font-semibold">Sync failed:</span> {syncResult.error}</>
+            )}
+          </div>
+          <button onClick={() => { setSyncState('idle'); setSyncResult(null) }}>
+            <X className="h-4 w-4 opacity-50 hover:opacity-80" />
+          </button>
+        </div>
+      )}
+
+      {/* Retro sync Bug IDs result banner */}
+      {retroState !== 'idle' && retroState !== 'syncing' && retroResult && (
+        <div className={`flex items-center gap-3 rounded-lg px-4 py-3 text-sm border ${
+          retroState === 'done' ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-red-50 border-red-200 text-red-800'
+        }`}>
+          {retroState === 'done'
+            ? <CheckCircle className="h-4 w-4 shrink-0 text-amber-600" />
+            : <AlertCircle className="h-4 w-4 shrink-0 text-red-600" />}
+          <div className="flex-1">
+            {retroState === 'done' && !retroResult.error ? (
+              <span>
+                <span className="font-semibold">Bug IDs written to KONE:</span>{' '}
+                {retroResult.updated} updated, {retroResult.skipped} already set, {retroResult.failed} failed
+                {' '}(of {retroResult.total} total)
+              </span>
+            ) : (
+              <><span className="font-semibold">Retro sync failed:</span> {retroResult.error}</>
+            )}
+          </div>
+          <button onClick={() => { setRetroState('idle'); setRetroResult(null) }}>
+            <X className="h-4 w-4 opacity-50 hover:opacity-80" />
+          </button>
+        </div>
+      )}
 
       {/* Summary cards */}
       <div className="grid grid-cols-3 md:grid-cols-6 gap-3">
@@ -1334,9 +1615,9 @@ export default function KonePage() {
         </div>
       ) : (
         <>
-          {tab === 'dashboard' && <DashboardTab tickets={tickets} bugLinks={bugLinks || {}} onCreateBug={setCreateBugTicket} />}
-          {tab === 'cliente'   && <ByClienteTab tickets={tickets} clienteGroups={clienteGroups} bugLinks={bugLinks || {}} onCreateBug={setCreateBugTicket} />}
-          {tab === 'all'       && <AllTicketsTab tickets={tickets} bugLinks={bugLinks || {}} onCreateBug={setCreateBugTicket} translations={translations} isTranslating={isTranslating} translateOn={translateOn} />}
+          {tab === 'dashboard' && <DashboardTab tickets={tickets} bugLinks={bugLinks || {}} onCreateBug={setCreateBugTicket} onLinked={handleBugCreated} />}
+          {tab === 'cliente'   && <ByClienteTab tickets={tickets} clienteGroups={clienteGroups} bugLinks={bugLinks || {}} onCreateBug={setCreateBugTicket} onLinked={handleBugCreated} />}
+          {tab === 'all'       && <AllTicketsTab tickets={tickets} bugLinks={bugLinks || {}} onCreateBug={setCreateBugTicket} onLinked={handleBugCreated} translations={translations} isTranslating={isTranslating} translateOn={translateOn} />}
         </>
       )}
     </div>

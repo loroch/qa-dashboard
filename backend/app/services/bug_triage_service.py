@@ -46,6 +46,7 @@ def _fmt_bug(issue: dict, jira_base_url: str) -> dict:
         "url":          f"{jira_base_url}/browse/{issue['key']}",
         "summary":      f.get("summary", ""),
         "status":       (f.get("status") or {}).get("name", ""),
+        "issue_type":   (f.get("issuetype") or {}).get("name", ""),
         "priority":     (f.get("priority") or {}).get("name", ""),
         "assignee":     (f.get("assignee") or {}).get("displayName", ""),
         "assignee_id":  (f.get("assignee") or {}).get("accountId", ""),
@@ -188,6 +189,65 @@ class BugTriageService:
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=180)
 
+    async def get_qa_assignments(self, assignee_ids: list[str], force_refresh: bool = False) -> list[dict]:
+        """All TMT0 issues (any type) assigned to QA team members."""
+        if not assignee_ids:
+            return []
+        ids_slug = hashlib.md5(",".join(sorted(assignee_ids)).encode()).hexdigest()[:12]
+        cache_key = f"triage:qa_assignments:{ids_slug}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            ids_clause = ", ".join(assignee_ids)
+            jql = (
+                f'project = TMT0 AND assignee in ({ids_clause}) '
+                f'ORDER BY updated DESC'
+            )
+            raw = await self.jira.search_issues(jql, fields=BUG_FIELDS, max_total=1000)
+            return [_fmt_bug(i, self.jira_base_url) for i in raw]
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=120)
+
+    async def get_qa_misassigned(self, assignee_ids: list[str], force_refresh: bool = False) -> list[dict]:
+        """Issues in TMT0 assigned to QA team members but in a non-QA status."""
+        if not assignee_ids:
+            return []
+        ids_slug = hashlib.md5(",".join(sorted(assignee_ids)).encode()).hexdigest()[:12]
+        cache_key = f"triage:qa_misassigned:{ids_slug}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            ids_clause = ", ".join(assignee_ids)
+            # Statuses that are fine for QA to own — everything else is wrong
+            ok_statuses = '"Ready for Testing","Done","Removed","QA Monitoring","Monitoring","Closed"'
+            jql = (
+                f'project = TMT0 AND assignee in ({ids_clause}) '
+                f'AND status NOT IN ({ok_statuses}) '
+                f'ORDER BY priority ASC, created ASC'
+            )
+            raw = await self.jira.search_issues(jql, fields=BUG_FIELDS, max_total=500)
+            return [_fmt_bug(i, self.jira_base_url) for i in raw]
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=120)
+
+    async def get_todo_bugs(self, force_refresh: bool = False) -> list[dict]:
+        """Fetch all TMT0 bugs in statusCategory 'To Do', ordered by priority then age."""
+        cache_key = "triage:todo_bugs"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                'project = TMT0 AND issuetype = Bug AND statusCategory = "To Do" '
+                'ORDER BY priority ASC, created ASC'
+            )
+            raw = await self.jira.search_issues(jql, fields=BUG_FIELDS, max_total=500)
+            return [_fmt_bug(i, self.jira_base_url) for i in raw]
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=120)
+
     async def get_creators(self, days: int = 30) -> list[dict]:
         """Return unique reporters for bugs opened in last N days."""
         cache_key = f"triage:creators:{days}"
@@ -283,6 +343,21 @@ class BugTriageService:
 
         elif field == "parent":
             payload = {"parent": {"key": value} if value else None}
+
+        elif field == "status":
+            transitions = await self.jira.get_transitions(key)
+            match = next(
+                (t for t in transitions if t.get("to_status", "").lower() == (value or "").lower()),
+                None
+            )
+            if not match:
+                available = [t.get("to_status") for t in transitions]
+                raise ValueError(f"Status '{value}' not available for {key}. Available transitions to: {available}")
+            await self.jira.post(f"/issue/{key}/transitions", json={"transition": {"id": match["id"]}})
+            for k in list(self.cache._store.keys()):
+                if k.startswith("triage:"):
+                    self.cache.invalidate(k)
+            return {"ok": True, "key": key, "field": field}
 
         else:
             raise ValueError(f"Unknown field: {field}")

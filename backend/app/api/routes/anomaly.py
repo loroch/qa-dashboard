@@ -107,6 +107,17 @@ async def get_duplicate_bugs(
         raise HTTPException(status_code=500, detail=str(exc))
 
 
+@router.get("/qa-bugs-in-progress")
+async def get_qa_bugs_in_progress(refresh: bool = Query(False)):
+    """Bugs assigned to QA team members not yet in Done / Ready for Testing / Reopened."""
+    try:
+        svc = get_anomaly_service()
+        return await svc.get_qa_bugs_in_progress(force_refresh=refresh)
+    except Exception as exc:
+        logger.error("get_qa_bugs_in_progress failed: %s", exc, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
 @router.get("/team-activity")
 async def get_team_activity(
     days: int = Query(7, description="Time window: 1, 3, 7, or 30 days"),

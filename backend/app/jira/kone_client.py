@@ -105,6 +105,20 @@ class KoneClient:
         results = await asyncio.gather(*[_fetch(k) for k in keys])
         return [r for r in results if r]
 
+    async def update_issue(self, key: str, fields: dict) -> bool:
+        """Update fields on a KONE issue via PUT /rest/api/3/issue/{key}."""
+        client = self._get_client()
+        url = f"{self.base_url}/rest/api/3/issue/{key}"
+        try:
+            resp = await client.put(url, json={"fields": fields})
+            if resp.status_code in (200, 204):
+                return True
+            logger.warning(f"KONE update {key}: {resp.status_code} {resp.text[:200]}")
+            return False
+        except Exception as e:
+            logger.warning(f"KONE update {key} error: {e}")
+            return False
+
     # ── Queues meta ──────────────────────────────────────────────────────
 
     async def get_queues(self) -> list[dict]:

@@ -41,8 +41,12 @@ class Settings(BaseSettings):
     log_level: str = Field("INFO")
     environment: str = Field("development")
 
-    # CORS
-    cors_origins: str = Field("http://localhost:5173,http://localhost:3000")
+    # CORS — "*" allows access from any machine on the office network
+    cors_origins: str = Field("*")
+
+    # Auth — webclient login credentials (override in .env)
+    auth_admin_password: str = Field("Admin@2026")
+    auth_qa_password: str = Field("Qa@2026")
 
     # Security
     secret_key: str = Field("change-me-in-production")

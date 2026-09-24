@@ -1,4 +1,5 @@
-import { useState, useMemo, Fragment } from 'react'
+import { useState, useMemo, Fragment, useRef, useEffect } from 'react'
+import { createPortal } from 'react-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
 import { BASE_URL } from '../services/api'
@@ -6,7 +7,7 @@ import {
   CalendarDays, ChevronDown, RefreshCw, Plus, Trash2, Edit2, Save, X,
   ArrowUp, ArrowDown, ExternalLink, CheckCircle2, Clock, AlertTriangle,
   Layers, BarChart2, Target, Zap, ChevronRight, PlusCircle, XCircle,
-  Search, Bug, BookOpen, Info, Filter
+  Search, Bug, BookOpen, Info, Filter, Copy, ArrowRightLeft
 } from 'lucide-react'
 
 const API = `${BASE_URL}/sprint-planning`
@@ -23,10 +24,12 @@ const ACTIVITY_TYPE_LABELS = {
 }
 
 const ACTIVITY_STATUS_LABELS = {
-  planned: 'Planned',
-  in_progress: 'In Progress',
-  done: 'Done',
-  blocked: 'Blocked',
+  planned:              'Planning',
+  in_progress:          'In Progress',
+  done:                 'Done',
+  deleted:              'Deleted',
+  rd_not_ready:         'R&D Not Ready',
+  move_to_next_sprint:  'Move to Next Sprint',
 }
 
 const DELAY_REASON_LABELS = {
@@ -49,10 +52,12 @@ const TYPE_COLORS = {
 }
 
 const STATUS_COLORS = {
-  planned: 'bg-slate-100 text-slate-600',
-  in_progress: 'bg-blue-100 text-blue-700',
-  done: 'bg-green-100 text-green-700',
-  blocked: 'bg-red-100 text-red-700',
+  planned:             'bg-slate-100 text-slate-600',
+  in_progress:         'bg-blue-100 text-blue-700',
+  done:                'bg-green-100 text-green-700',
+  deleted:             'bg-red-100 text-red-600',
+  rd_not_ready:        'bg-orange-100 text-orange-700',
+  move_to_next_sprint: 'bg-purple-100 text-purple-700',
 }
 
 const PRIORITY_DOT = {
@@ -155,12 +160,14 @@ function StatCard({ icon: Icon, label, value, color = 'text-slate-700' }) {
 function IssueLink({ issueKey, url, summary }) {
   if (!issueKey) return <span className="text-slate-400 text-xs italic">No story</span>
   return (
-    <a href={url || `https://avite.atlassian.net/browse/${issueKey}`} target="_blank" rel="noreferrer"
-       className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium">
-      {issueKey}
-      {summary && <span className="text-slate-500 font-normal truncate max-w-[160px]"> – {summary}</span>}
-      <ExternalLink className="h-3 w-3 shrink-0" />
-    </a>
+    <div>
+      <a href={url || `https://kabatone-ops-it.atlassian.net/browse/${issueKey}`} target="_blank" rel="noreferrer"
+         className="inline-flex items-center gap-1 text-blue-600 hover:text-blue-800 text-xs font-medium">
+        {issueKey}
+        <ExternalLink className="h-3 w-3 shrink-0" />
+      </a>
+      {summary && <p className="text-slate-500 text-xs mt-0.5 leading-tight">{summary}</p>}
+    </div>
   )
 }
 
@@ -471,21 +478,248 @@ function BugsPanel({ bugsData }) {
   )
 }
 
+// ── Searchable Select ───────────────────────────────────────────────────────
+function SearchableSelect({ value, options, placeholder, onChange, className = '' }) {
+  const [open, setOpen] = useState(false)
+  const [search, setSearch] = useState('')
+  const [pos, setPos]   = useState(null)
+  const triggerRef = useRef(null)
+  const dropRef    = useRef(null)
+  const inputRef   = useRef(null)
+
+  const selected = options.find(o => o.value === value)
+  const filtered = search.trim()
+    ? options.filter(o => o.label.toLowerCase().includes(search.toLowerCase()) || o.value.toLowerCase().includes(search.toLowerCase()))
+    : options
+
+  useEffect(() => {
+    if (!open) return
+    const h = e => {
+      if (triggerRef.current?.contains(e.target) || dropRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+
+  const openDrop = () => {
+    const r = triggerRef.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 4, left: r.left, width: r.width })
+    setSearch('')
+    setOpen(true)
+    setTimeout(() => inputRef.current?.focus(), 0)
+  }
+
+  const pick = opt => {
+    onChange(opt)
+    setOpen(false)
+    setSearch('')
+  }
+
+  const clear = e => { e.stopPropagation(); onChange(null) }
+
+  return (
+    <>
+      <button ref={triggerRef} type="button" onClick={openDrop}
+        className={`flex items-center justify-between gap-1 text-left border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white hover:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-300 w-full ${className}`}>
+        <span className={selected ? 'text-slate-800 truncate' : 'text-slate-400'}>
+          {selected ? `${selected.value}: ${selected.label}` : placeholder}
+        </span>
+        <span className="flex items-center gap-0.5 shrink-0">
+          {value && <span onMouseDown={clear} className="text-slate-300 hover:text-red-400 cursor-pointer text-xs px-0.5">✕</span>}
+          <ChevronDown className="h-3 w-3 text-slate-400" />
+        </span>
+      </button>
+      {open && pos && createPortal(
+        <div ref={dropRef} className="fixed z-[9999] bg-white border border-slate-200 rounded-xl shadow-2xl flex flex-col"
+          style={{ top: pos.top, left: pos.left, width: Math.max(pos.width, 320), maxHeight: 320 }}>
+          <div className="p-2 border-b border-slate-100">
+            <input ref={inputRef} value={search} onChange={e => setSearch(e.target.value)}
+              placeholder="Search…"
+              className="w-full border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300" />
+          </div>
+          <div className="overflow-y-auto flex-1">
+            <div onMouseDown={() => pick(null)}
+              className="px-3 py-2 text-xs text-slate-400 hover:bg-slate-50 cursor-pointer italic">{placeholder}</div>
+            {filtered.length === 0 && (
+              /^[A-Z]+-\d+$/i.test(search.trim()) ? (
+                <div onMouseDown={() => pick({ value: search.trim().toUpperCase(), label: search.trim().toUpperCase() })}
+                  className="px-3 py-2 text-xs cursor-pointer hover:bg-blue-50 text-blue-700 font-medium">
+                  Use "{search.trim().toUpperCase()}" directly
+                </div>
+              ) : (
+                <div className="px-3 py-2 text-xs text-slate-400">No results — try typing a key like TMT0-1234</div>
+              )
+            )}
+            {(() => {
+              const inSprint = filtered.filter(o => o.inSprint !== false)
+              const outSprint = filtered.filter(o => o.inSprint === false)
+              const renderOpt = opt => (
+                <div key={opt.value} onMouseDown={() => pick(opt)}
+                  className={`px-3 py-2 text-xs cursor-pointer hover:bg-blue-50 flex items-start justify-between gap-2 ${opt.value === value ? 'bg-blue-50 font-semibold' : ''}`}>
+                  <div>
+                    <span className="text-blue-600 font-medium font-mono">{opt.value}</span>
+                    <span className="text-slate-500 ml-1">{opt.label}</span>
+                  </div>
+                  {opt.inSprint && <span className="shrink-0 text-[10px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded font-medium">sprint</span>}
+                </div>
+              )
+              return (
+                <>
+                  {inSprint.map(renderOpt)}
+                  {outSprint.length > 0 && (
+                    <>
+                      {inSprint.length > 0 && <div className="px-3 py-1 text-[10px] font-semibold text-slate-400 uppercase tracking-wide border-t border-slate-100 mt-1 pt-1">Other Issues</div>}
+                      {outSprint.map(renderOpt)}
+                    </>
+                  )}
+                </>
+              )
+            })()}
+          </div>
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
+// ── Move-to-Sprint Popover ─────────────────────────────────────────────────
+
+function MoveToSprintPopover({ activity, currentSprintId, allSprints, onMove, onCopy, isPending }) {
+  const [open, setOpen] = useState(false)
+  const [pos, setPos]   = useState(null)
+  const btnRef  = useRef(null)
+  const dropRef = useRef(null)
+
+  useEffect(() => {
+    if (!open) return
+    const h = e => {
+      if (btnRef.current?.contains(e.target) || dropRef.current?.contains(e.target)) return
+      setOpen(false)
+    }
+    document.addEventListener('mousedown', h)
+    return () => document.removeEventListener('mousedown', h)
+  }, [open])
+
+  const toggle = () => {
+    const r = btnRef.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 4, right: window.innerWidth - r.right })
+    setOpen(v => !v)
+  }
+
+  const otherSprints = allSprints.filter(s => s.id !== currentSprintId)
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        onClick={toggle}
+        disabled={isPending}
+        title="Move / Copy to sprint"
+        className="p-1 text-indigo-400 hover:bg-indigo-50 rounded disabled:opacity-40"
+      >
+        <ArrowRightLeft className="h-3.5 w-3.5" />
+      </button>
+
+      {open && pos && createPortal(
+        <div
+          ref={dropRef}
+          className="fixed z-[9999] bg-white border border-slate-200 rounded-xl shadow-2xl min-w-[260px]"
+          style={{ top: pos.top, right: pos.right }}
+        >
+          <div className="px-3 py-2 border-b border-slate-100">
+            <p className="text-xs font-semibold text-slate-700 truncate max-w-[220px]">{activity.activity_name}</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">Move or copy to another sprint</p>
+          </div>
+          {otherSprints.length === 0 ? (
+            <div className="px-3 py-3 text-xs text-slate-400 text-center">No other sprints available.</div>
+          ) : (
+            <div className="py-1">
+              {otherSprints.map(s => {
+                const stateColor = s.state === 'active' ? 'text-green-600' : s.state === 'future' ? 'text-blue-500' : 'text-slate-400'
+                return (
+                  <div key={s.id} className="px-3 py-2 hover:bg-slate-50 flex items-center justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="text-xs font-medium text-slate-700 truncate">{s.name}</p>
+                      <p className={`text-[10px] font-medium ${stateColor}`}>{s.state}</p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button
+                        onClick={() => { onMove(activity, s.id); setOpen(false) }}
+                        className="px-2 py-0.5 bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-semibold rounded"
+                        title="Move (remove from this sprint)"
+                      >Move</button>
+                      <button
+                        onClick={() => { onCopy(activity, s.id); setOpen(false) }}
+                        className="px-2 py-0.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-semibold rounded"
+                        title="Copy (keep in this sprint too)"
+                      >Copy</button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>,
+        document.body
+      )}
+    </>
+  )
+}
+
 // ── Activities panel (one sprint) ──────────────────────────────────────────
 
-const BLANK_ACTIVITY = { activity_name: '', activity_type: 'qa_testing', story_key: '', story_summary: '', estimation_hours: '', status: 'planned', description: '' }
+const BLANK_ACTIVITY = { activity_name: '', activity_type: 'qa_testing', story_key: '', story_summary: '', epic_key: '', epic_summary: '', estimation_hours: '', status: 'planned', description: '' }
 
-function ActivitiesPanel({ sprintId, sprintName, activities = [], storiesData }) {
+const DEFAULT_SPRINT_ACTIVITIES = [
+  { activity_name: 'Bug Validation Webclient',  activity_type: 'qa_testing', estimation_hours: 5, status: 'planned' },
+  { activity_name: 'Bug Validation C-Insight',  activity_type: 'qa_testing', estimation_hours: 5, status: 'planned' },
+]
+
+function ActivitiesPanel({ sprintId, sprintName, activities = [], storiesData, projectIssues = [], allSprints = [] }) {
   const qc = useQueryClient()
   const [showAdd, setShowAdd] = useState(false)
   const [form, setForm] = useState({ ...BLANK_ACTIVITY })
   const [editId, setEditId] = useState(null)
   const [editForm, setEditForm] = useState({})
-  const stories = storiesData?.stories || []
+  const sprintStories = storiesData?.stories || []
+
+  // Merge sprint stories with project-wide stories; sprint items appear first, marked inSprint=true
+  const stories = useMemo(() => {
+    const sprintKeys = new Set(sprintStories.map(s => s.key))
+    const projectStories = projectIssues
+      .filter(i => i.issue_type !== 'Epic' && !sprintKeys.has(i.key))
+      .map(i => ({ ...i, inSprint: false }))
+    return [
+      ...sprintStories.map(s => ({ ...s, inSprint: true })),
+      ...projectStories,
+    ]
+  }, [sprintStories, projectIssues])
+
+  const epics = useMemo(() => {
+    // Sprint epics from stories' epic_key field
+    const sprintEpicKeys = new Set()
+    const sprintEpics = sprintStories
+      .filter(s => s.epic_key && !sprintEpicKeys.has(s.epic_key) && sprintEpicKeys.add(s.epic_key))
+      .map(s => ({ key: s.epic_key, summary: s.parent_summary || s.epic_key, inSprint: true }))
+    // Project epics from projectIssues
+    const projectEpics = projectIssues
+      .filter(i => i.issue_type === 'Epic' && !sprintEpicKeys.has(i.key))
+      .map(i => ({ key: i.key, summary: i.summary, inSprint: false }))
+    return [...sprintEpics, ...projectEpics]
+  }, [sprintStories, projectIssues])
 
   const addMutation = useMutation({
     mutationFn: (data) => axios.post(`${API}/sprint/${sprintId}/activities`, data).then(r => r.data),
     onSuccess: () => { qc.invalidateQueries(['sprint-plan:activities', sprintId]); setShowAdd(false); setForm({ ...BLANK_ACTIVITY }) },
+  })
+
+  const addDefaultsMutation = useMutation({
+    mutationFn: () => Promise.all(
+      DEFAULT_SPRINT_ACTIVITIES.map(d => axios.post(`${API}/sprint/${sprintId}/activities`, { ...d, sprint_name: sprintName }).then(r => r.data))
+    ),
+    onSuccess: () => qc.invalidateQueries(['sprint-plan:activities', sprintId]),
   })
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => axios.patch(`${API}/activity/${id}`, data).then(r => r.data),
@@ -495,10 +729,54 @@ function ActivitiesPanel({ sprintId, sprintName, activities = [], storiesData })
     mutationFn: (id) => axios.delete(`${API}/activity/${id}`).then(r => r.data),
     onSuccess: () => qc.invalidateQueries(['sprint-plan:activities', sprintId]),
   })
+  const duplicateMutation = useMutation({
+    mutationFn: (a) => axios.post(`${API}/sprint/${sprintId}/activities`, {
+      activity_name:    `${a.activity_name} (copy)`,
+      activity_type:    a.activity_type,
+      story_key:        a.story_key   || null,
+      story_summary:    a.story_summary || null,
+      epic_key:         a.epic_key    || null,
+      epic_summary:     a.epic_summary || null,
+      description:      a.description  || null,
+      estimation_hours: a.estimation_hours ?? null,
+      status:           'planned',
+      sprint_name:      sprintName,
+    }).then(r => r.data),
+    onSuccess: () => qc.invalidateQueries(['sprint-plan:activities', sprintId]),
+  })
   const pushJiraMutation = useMutation({
     mutationFn: (id) => axios.post(`${API}/activity/${id}/push-to-jira`).then(r => r.data),
     onSuccess: (data) => alert(`Created Jira task: ${data.jira_key}\n${data.jira_url}`),
     onError: (err) => alert(`Error: ${err.response?.data?.detail || err.message}`),
+  })
+
+  const moveToSprintMutation = useMutation({
+    mutationFn: ({ id, targetSprintId }) =>
+      axios.patch(`${API}/activity/${id}`, { sprint_id: targetSprintId }).then(r => r.data),
+    onSuccess: (_, { targetSprintId }) => {
+      qc.invalidateQueries(['sprint-plan:activities', sprintId])
+      qc.invalidateQueries(['sprint-plan:activities', targetSprintId])
+    },
+  })
+
+  const copyToSprintMutation = useMutation({
+    mutationFn: ({ activity, targetSprintId }) => {
+      const targetSprint = allSprints.find(s => s.id === targetSprintId)
+      return axios.post(`${API}/sprint/${targetSprintId}/activities`, {
+        activity_name:    activity.activity_name,
+        activity_type:    activity.activity_type,
+        story_key:        activity.story_key   || null,
+        story_summary:    activity.story_summary || null,
+        epic_key:         activity.epic_key    || null,
+        epic_summary:     activity.epic_summary || null,
+        description:      activity.description  || null,
+        estimation_hours: activity.estimation_hours ?? null,
+        status:           'planned',
+        sprint_name:      targetSprint?.name || '',
+      }).then(r => r.data)
+    },
+    onSuccess: (_, { targetSprintId }) =>
+      qc.invalidateQueries(['sprint-plan:activities', targetSprintId]),
   })
 
   const totalHours = activities.reduce((s, a) => s + (a.estimation_hours || 0), 0)
@@ -510,10 +788,19 @@ function ActivitiesPanel({ sprintId, sprintName, activities = [], storiesData })
           <span className="font-semibold text-slate-800">{activities.length}</span> activities
           {totalHours > 0 && <> · <span className="font-semibold text-teal-700">{totalHours.toFixed(1)}h</span></>}
         </span>
-        <button onClick={() => setShowAdd(v => !v)}
-          className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium">
-          <Plus className="h-3.5 w-3.5" /> Add Activity
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => addDefaultsMutation.mutate()}
+            disabled={addDefaultsMutation.isPending}
+            title="Add: Bug Validation Webclient + C-Insight"
+            className="flex items-center gap-1.5 border border-slate-200 bg-white hover:bg-slate-50 text-slate-600 px-3 py-1.5 rounded-lg text-xs font-medium disabled:opacity-50">
+            {addDefaultsMutation.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />} Defaults
+          </button>
+          <button onClick={() => setShowAdd(v => !v)}
+            className="flex items-center gap-1.5 bg-blue-600 hover:bg-blue-700 text-white px-3 py-1.5 rounded-lg text-xs font-medium">
+            <Plus className="h-3.5 w-3.5" /> Add Activity
+          </button>
+        </div>
       </div>
 
       {showAdd && (
@@ -533,12 +820,24 @@ function ActivitiesPanel({ sprintId, sprintName, activities = [], storiesData })
               onChange={e => setForm(f => ({ ...f, estimation_hours: e.target.value }))}
               placeholder="Hours (e.g. 4)"
               className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-blue-300" />
-            <select value={form.story_key}
-              onChange={e => { const s = stories.find(x => x.key === e.target.value); setForm(f => ({ ...f, story_key: e.target.value, story_summary: s?.summary || '' })) }}
-              className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
-              <option value="">— story (optional) —</option>
-              {stories.map(s => <option key={s.key} value={s.key}>{s.key}: {s.summary}</option>)}
-            </select>
+            <SearchableSelect
+              value={form.story_key}
+              placeholder="— story (optional) —"
+              options={stories.map(s => ({ value: s.key, label: s.summary, inSprint: s.inSprint }))}
+              onChange={opt => {
+                const s = opt ? stories.find(x => x.key === opt.value) : null
+                setForm(f => ({ ...f, story_key: opt?.value || '', story_summary: s?.summary || '', epic_key: '', epic_summary: '', activity_name: s?.summary || f.activity_name }))
+              }}
+            />
+            <SearchableSelect
+              value={form.epic_key}
+              placeholder="— epic (optional) —"
+              options={epics.map(ep => ({ value: ep.key, label: ep.summary, inSprint: ep.inSprint }))}
+              onChange={opt => {
+                const ep = opt ? epics.find(x => x.key === opt.value) : null
+                setForm(f => ({ ...f, epic_key: opt?.value || '', epic_summary: ep?.summary || '', story_key: '', story_summary: '', activity_name: ep?.summary || f.activity_name }))
+              }}
+            />
             <select value={form.status} onChange={e => setForm(f => ({ ...f, status: e.target.value }))}
               className="border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs bg-white focus:outline-none focus:ring-2 focus:ring-blue-300">
               {Object.entries(ACTIVITY_STATUS_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
@@ -563,7 +862,7 @@ function ActivitiesPanel({ sprintId, sprintName, activities = [], storiesData })
                 <th className="px-3 py-2 text-left font-medium w-6">#</th>
                 <th className="px-3 py-2 text-left font-medium">Activity</th>
                 <th className="px-3 py-2 text-left font-medium">Type</th>
-                <th className="px-3 py-2 text-left font-medium">Story</th>
+                <th className="px-3 py-2 text-left font-medium">Linked Issue</th>
                 <th className="px-3 py-2 text-center font-medium">Hours</th>
                 <th className="px-3 py-2 text-left font-medium">Status</th>
                 <th className="px-3 py-2 text-right font-medium">Actions</th>
@@ -585,12 +884,18 @@ function ActivitiesPanel({ sprintId, sprintName, activities = [], storiesData })
                       {Object.entries(ACTIVITY_TYPE_LABELS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
                     </select>
                   </td>
-                  <td className="px-3 py-2">
+                  <td className="px-3 py-2 space-y-1">
                     <select value={editForm.story_key ?? a.story_key}
-                      onChange={e => { const s = stories.find(x => x.key === e.target.value); setEditForm(f => ({ ...f, story_key: e.target.value, story_summary: s?.summary || '' })) }}
-                      className="border border-blue-300 rounded px-1.5 py-1 text-xs bg-white focus:outline-none w-28">
-                      <option value="">— none —</option>
+                      onChange={e => { const s = stories.find(x => x.key === e.target.value); setEditForm(f => ({ ...f, story_key: e.target.value, story_summary: s?.summary || '', epic_key: '', epic_summary: '' })) }}
+                      className="border border-blue-300 rounded px-1.5 py-1 text-xs bg-white focus:outline-none w-32 block">
+                      <option value="">— story —</option>
                       {stories.map(s => <option key={s.key} value={s.key}>{s.key}</option>)}
+                    </select>
+                    <select value={editForm.epic_key ?? a.epic_key}
+                      onChange={e => { const ep = epics.find(x => x.key === e.target.value); setEditForm(f => ({ ...f, epic_key: e.target.value, epic_summary: ep?.summary || '', story_key: '', story_summary: '' })) }}
+                      className="border border-blue-300 rounded px-1.5 py-1 text-xs bg-white focus:outline-none w-32 block">
+                      <option value="">— epic —</option>
+                      {epics.map(ep => <option key={ep.key} value={ep.key}>{ep.key}</option>)}
                     </select>
                   </td>
                   <td className="px-3 py-2">
@@ -615,17 +920,33 @@ function ActivitiesPanel({ sprintId, sprintName, activities = [], storiesData })
               ) : (
                 <tr key={a.id} className="hover:bg-slate-50/60">
                   <td className="px-3 py-2 text-slate-400">{idx + 1}</td>
-                  <td className="px-3 py-2">
-                    <p className="font-medium text-slate-800">{a.activity_name}</p>
+                  <td className="px-3 py-2 cursor-pointer group" onClick={() => { setEditId(a.id); setEditForm({}) }}>
+                    <p className="font-medium text-slate-800 group-hover:text-blue-600 transition-colors">{a.activity_name}</p>
                     {a.description && <p className="text-slate-400 text-xs mt-0.5">{a.description}</p>}
+                    <p className="text-blue-400 text-xs mt-0.5 opacity-0 group-hover:opacity-100 transition-opacity">click to edit</p>
                   </td>
                   <td className="px-3 py-2"><Badge className={TYPE_COLORS[a.activity_type] || 'bg-slate-100 text-slate-600'}>{ACTIVITY_TYPE_LABELS[a.activity_type] || a.activity_type}</Badge></td>
-                  <td className="px-3 py-2"><IssueLink issueKey={a.story_key} summary={a.story_summary} /></td>
+                  <td className="px-3 py-2">
+                    {a.story_key
+                      ? <IssueLink issueKey={a.story_key} summary={a.story_summary} />
+                      : a.epic_key
+                        ? <span className="inline-flex items-center gap-1"><span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded text-xs font-medium">Epic</span><IssueLink issueKey={a.epic_key} summary={a.epic_summary} /></span>
+                        : <span className="text-slate-300">—</span>}
+                  </td>
                   <td className="px-3 py-2 text-center font-medium text-slate-700">{a.estimation_hours != null ? `${a.estimation_hours}h` : '—'}</td>
                   <td className="px-3 py-2"><Badge className={STATUS_COLORS[a.status] || 'bg-slate-100 text-slate-500'}>{ACTIVITY_STATUS_LABELS[a.status] || a.status}</Badge></td>
                   <td className="px-3 py-2">
                     <div className="flex items-center justify-end gap-1">
                       {a.story_key && <button onClick={() => pushJiraMutation.mutate(a.id)} disabled={pushJiraMutation.isPending} className="px-1.5 py-0.5 text-blue-500 hover:bg-blue-50 rounded font-medium">Jira</button>}
+                      <MoveToSprintPopover
+                        activity={a}
+                        currentSprintId={sprintId}
+                        allSprints={allSprints}
+                        onMove={(act, targetId) => moveToSprintMutation.mutate({ id: act.id, targetSprintId: targetId })}
+                        onCopy={(act, targetId) => copyToSprintMutation.mutate({ activity: act, targetSprintId: targetId })}
+                        isPending={moveToSprintMutation.isPending || copyToSprintMutation.isPending}
+                      />
+                      <button title="Duplicate" onClick={() => duplicateMutation.mutate(a)} disabled={duplicateMutation.isPending} className="p-1 text-slate-400 hover:bg-slate-100 rounded"><Copy className="h-3.5 w-3.5" /></button>
                       <button onClick={() => { setEditId(a.id); setEditForm({}) }} className="p-1 text-slate-400 hover:bg-slate-100 rounded"><Edit2 className="h-3.5 w-3.5" /></button>
                       <button onClick={() => { if (confirm('Delete?')) deleteMutation.mutate(a.id) }} className="p-1 text-red-400 hover:bg-red-50 rounded"><Trash2 className="h-3.5 w-3.5" /></button>
                     </div>
@@ -715,16 +1036,16 @@ function TrackingPanel({ sprintId, sprintName = '', stories = [], tracking = [] 
       </div>
 
       <div className="bg-white rounded-xl border border-slate-200 overflow-x-auto">
-        <table className="w-full text-xs" style={{ tableLayout: 'fixed', minWidth: 900 }}>
+        <table className="w-full text-xs" style={{ minWidth: 900 }}>
           <colgroup>
-            <col style={{ width: 130 }} />
+            <col style={{ width: 260 }} />
             <col style={{ width: 80 }} />
-            <col style={{ width: 120 }} />
+            <col style={{ width: 110 }} />
             <col style={{ width: 90 }} />
-            <col style={{ width: 90 }} />
+            <col style={{ width: 95 }} />
+            <col style={{ width: 95 }} />
             <col style={{ width: 70 }} />
             <col style={{ width: 150 }} />
-            <col />
             <col style={{ width: 40 }} />
           </colgroup>
           <thead className="bg-slate-50">
@@ -824,7 +1145,7 @@ function TimelinePanel({ sprintId, activities = [] }) {
       <div className="bg-white rounded-xl border border-slate-200 divide-y divide-slate-100">
         {activities.map((a, idx) => {
           const pct = Math.max(2, (a.estimation_hours || 0) / maxHours * 100)
-          const dot = { planned: 'bg-slate-400', in_progress: 'bg-blue-500', done: 'bg-green-500', blocked: 'bg-red-500' }[a.status] || 'bg-slate-400'
+          const dot = { planned: 'bg-slate-400', in_progress: 'bg-blue-500', done: 'bg-green-500', deleted: 'bg-red-500', rd_not_ready: 'bg-orange-500', move_to_next_sprint: 'bg-purple-500' }[a.status] || 'bg-slate-400'
           return (
             <div key={a.id} className="flex items-center gap-3 px-3 py-2.5 hover:bg-slate-50">
               <span className="text-slate-300 text-xs w-4 text-right shrink-0">{idx + 1}</span>
@@ -879,6 +1200,11 @@ function useSprintData(sprintId) {
     queryFn: () => axios.get(`${API}/sprint/${sprintId}/stories`).then(r => r.data),
     enabled: !!sprintId, staleTime: 180_000,
   })
+  const projectIssuesQ = useQuery({
+    queryKey: ['sprint-plan:project-issues'],
+    queryFn: () => axios.get(`${API}/project-issues`).then(r => r.data.issues),
+    staleTime: 600_000,
+  })
   const bugsQ = useQuery({
     queryKey: ['sprint-plan:bugs', sprintId],
     queryFn: () => axios.get(`${API}/sprint/${sprintId}/bugs`).then(r => r.data),
@@ -894,7 +1220,7 @@ function useSprintData(sprintId) {
     queryFn: () => axios.get(`${API}/sprint/${sprintId}/tracking`).then(r => r.data.tracking),
     enabled: !!sprintId, staleTime: 60_000,
   })
-  return { storiesQ, bugsQ, activitiesQ, trackingQ }
+  return { storiesQ, bugsQ, activitiesQ, trackingQ, projectIssuesQ }
 }
 
 // ── Main page ──────────────────────────────────────────────────────────────
@@ -1026,7 +1352,7 @@ export default function SprintPlanningPage() {
                   {showSprint2 && sprint2 && <SprintSectionHeader sprint={sprint1} colorIdx={0} />}
                   {activeTab === 'stories'    && <StoriesPanel storiesData={d1.storiesQ.isLoading ? null : d1.storiesQ.data} />}
                   {activeTab === 'bugs'       && <BugsPanel bugsData={d1.bugsQ.isLoading ? null : d1.bugsQ.data} />}
-                  {activeTab === 'activities' && <ActivitiesPanel sprintId={sprint1Id} sprintName={sprint1.name} activities={d1.activitiesQ.data || []} storiesData={d1.storiesQ.data} />}
+                  {activeTab === 'activities' && <ActivitiesPanel sprintId={sprint1Id} sprintName={sprint1.name} activities={d1.activitiesQ.data || []} storiesData={d1.storiesQ.data} projectIssues={d1.projectIssuesQ.data || []} allSprints={sprints} />}
                   {activeTab === 'tracking'   && <TrackingPanel sprintId={sprint1Id} sprintName={sprint1?.name || ''} stories={d1.storiesQ.data?.stories || []} tracking={d1.trackingQ.data || []} />}
                   {activeTab === 'timeline'   && <TimelinePanel sprintId={sprint1Id} activities={d1.activitiesQ.data || []} />}
                 </div>
@@ -1038,7 +1364,7 @@ export default function SprintPlanningPage() {
                   <SprintSectionHeader sprint={sprint2 || { name: 'Sprint 2', state: '' }} colorIdx={1} />
                   {activeTab === 'stories'    && <StoriesPanel storiesData={d2.storiesQ.isLoading ? null : d2.storiesQ.data} />}
                   {activeTab === 'bugs'       && <BugsPanel bugsData={d2.bugsQ.isLoading ? null : d2.bugsQ.data} />}
-                  {activeTab === 'activities' && <ActivitiesPanel sprintId={sprint2Id} sprintName={sprint2?.name || ''} activities={d2.activitiesQ.data || []} storiesData={d2.storiesQ.data} />}
+                  {activeTab === 'activities' && <ActivitiesPanel sprintId={sprint2Id} sprintName={sprint2?.name || ''} activities={d2.activitiesQ.data || []} storiesData={d2.storiesQ.data} projectIssues={d2.projectIssuesQ.data || []} allSprints={sprints} />}
                   {activeTab === 'tracking'   && <TrackingPanel sprintId={sprint2Id} sprintName={sprint2?.name || ''} stories={d2.storiesQ.data?.stories || []} tracking={d2.trackingQ.data || []} />}
                   {activeTab === 'timeline'   && <TimelinePanel sprintId={sprint2Id} activities={d2.activitiesQ.data || []} />}
                 </div>

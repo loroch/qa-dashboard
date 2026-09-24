@@ -4,7 +4,7 @@ import { Header } from '../components/layout/Header'
 import { IssueTable } from '../components/tables/DataTable'
 import { SummaryCard } from '../components/cards/SummaryCard'
 import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
-import { Bug, AlertTriangle, CheckCircle2, LayoutList, Layers, Tag, BookOpen } from 'lucide-react'
+import { Bug, AlertTriangle, CheckCircle2, LayoutList, Layers, Tag, BookOpen, Download } from 'lucide-react'
 import api from '../services/api'
 
 const getVersions  = (refresh)         => api.get('/coverage/versions',      { params: refresh ? { refresh: true } : {} })
@@ -20,7 +20,7 @@ const STATUS_CONFIG = [
   { key: 'Ready for Testing',    label: 'Ready for Testing',     bg: 'bg-purple-50',   border: 'border-purple-300', text: 'text-purple-700',  activeBg: 'bg-purple-600',  activeText: 'text-white' },
   { key: 'Validation',           label: 'Validation',            bg: 'bg-violet-50',   border: 'border-violet-300', text: 'text-violet-700',  activeBg: 'bg-violet-600',  activeText: 'text-white' },
   { key: 'Ready For Deployment', label: 'Ready for Deployment',  bg: 'bg-teal-50',     border: 'border-teal-300',   text: 'text-teal-700',    activeBg: 'bg-teal-600',    activeText: 'text-white' },
-  { key: 'Monitoring',           label: 'Monitoring',            bg: 'bg-cyan-50',     border: 'border-cyan-300',   text: 'text-cyan-700',    activeBg: 'bg-cyan-600',    activeText: 'text-white' },
+  { key: 'QA Monitoring',        label: 'QA Monitoring',         bg: 'bg-cyan-50',     border: 'border-cyan-300',   text: 'text-cyan-700',    activeBg: 'bg-cyan-600',    activeText: 'text-white' },
   { key: 'DONE',                 label: 'Done',                  bg: 'bg-green-50',    border: 'border-green-300',  text: 'text-green-700',   activeBg: 'bg-green-600',   activeText: 'text-white' },
   { key: 'Reopened',             label: 'Reopened',              bg: 'bg-orange-50',   border: 'border-orange-300', text: 'text-orange-700',  activeBg: 'bg-orange-500',  activeText: 'text-white' },
   { key: 'Known Issue',          label: 'Known Issue',           bg: 'bg-yellow-50',   border: 'border-yellow-300', text: 'text-yellow-700',  activeBg: 'bg-yellow-500',  activeText: 'text-white' },
@@ -70,6 +70,7 @@ const STORY_STATUS_COLOR = {
   'Validation':           'bg-violet-100 text-violet-800 border-violet-200',
   'Ready For Deployment': 'bg-teal-100 text-teal-800 border-teal-200',
   'Monitoring':           'bg-cyan-100 text-cyan-800 border-cyan-200',
+  'QA Monitoring':        'bg-cyan-100 text-cyan-800 border-cyan-200',
   'Blocked':              'bg-red-100 text-red-800 border-red-200',
   'Reopened':             'bg-orange-100 text-orange-800 border-orange-200',
   'Known Issue':          'bg-yellow-100 text-yellow-800 border-yellow-200',
@@ -145,7 +146,25 @@ function StoryStatusPanel({ stats }) {
   )
 }
 
-function BugResults({ data, refetch }) {
+function exportBugsCSV(bugs, label) {
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const headers = ['Key', 'URL', 'Summary', 'Status', 'Priority', 'Assignee', 'Reporter', 'QA Hours']
+  const rows = bugs.map(b => [
+    b.key, b.url, b.summary, b.status, b.priority,
+    b.assignee || '', b.reporter || '', b.qa_estimate_hours ?? '',
+  ])
+  const csv = [headers, ...rows].map(r => r.map(esc).join(',')).join('\r\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  const date = new Date().toISOString().slice(0, 10)
+  a.href = url
+  a.download = `bugs-${label.replace(/[^a-z0-9]/gi, '_')}-${date}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function BugResults({ data, refetch, exportLabel }) {
   const [activeStatuses, setActiveStatuses] = useState(new Set())
   const [qaOverrides, setQaOverrides] = useState({})
   const allBugs = data?.bugs || []
@@ -264,6 +283,7 @@ function BugResults({ data, refetch }) {
                     status === 'Validation'                           ? 'bg-violet-500' :
                     status === 'Ready For Deployment'                 ? 'bg-teal-500'   :
                     status === 'Monitoring'                           ? 'bg-cyan-500'   :
+                    status === 'QA Monitoring'                        ? 'bg-cyan-500'   :
                     status === 'Blocked'                              ? 'bg-red-500'    :
                     status === 'Reopened'                             ? 'bg-orange-500' :
                     status === 'Known Issue'                          ? 'bg-yellow-500' :
@@ -322,6 +342,14 @@ function BugResults({ data, refetch }) {
               </span>
             )}
             <span className="text-xs text-gray-400">{visibleBugs.length} bug{visibleBugs.length !== 1 ? 's' : ''}</span>
+            <button
+              onClick={() => exportBugsCSV(visibleBugs, exportLabel || 'bugs')}
+              disabled={visibleBugs.length === 0}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              <Download className="h-3.5 w-3.5" />
+              Export CSV
+            </button>
           </div>
         </div>
         {visibleBugs.length === 0
@@ -548,7 +576,7 @@ export default function BugsByVersionPage() {
                 : <><Layers className="h-4 w-4 text-brand-500" /> Epic: <strong className="text-gray-800">{selectedEpicName}</strong> <span className="text-gray-400 font-mono text-xs">({selectedEpic})</span></>
               }
             </div>
-            <BugResults data={activeData} refetch={activeQuery.refetch} />
+            <BugResults data={activeData} refetch={activeQuery.refetch} exportLabel={mode === 'version' ? selectedVersion : selectedEpicName} />
           </>
         )}
 

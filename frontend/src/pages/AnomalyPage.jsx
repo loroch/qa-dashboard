@@ -22,8 +22,10 @@ const getDuplicateBugs = (days, refresh) =>
   api.get(`/anomaly/duplicate-bugs?days=${days}${refresh ? '&refresh=true' : ''}`).then(r => r.data)
 const getTeamActivity = (days, refresh) =>
   api.get(`/anomaly/team-activity?days=${days}${refresh ? '&refresh=true' : ''}`).then(r => r.data)
+const getQaBugsInProgress = (refresh) =>
+  api.get(`/anomaly/qa-bugs-in-progress${refresh ? '?refresh=true' : ''}`).then(r => r.data)
 
-const TABS = ['Tests Without Parent', 'Incomplete Bugs', 'Duplicate Bugs', 'Team Activity']
+const TABS = ['Tests Without Parent', 'Incomplete Bugs', 'Duplicate Bugs', 'QA In Progress', 'Team Activity']
 
 const STATUS_COLORS = {
   'Done':              'bg-green-100 text-green-700',
@@ -1123,6 +1125,131 @@ function TeamActivityTab() {
   )
 }
 
+// ── Section 5: QA In Progress ─────────────────────────────────────────────────
+
+function QAInProgressTab() {
+  const { data, isLoading, isError, error } = useQuery({
+    queryKey: ['anomaly-qa-bugs-in-progress'],
+    queryFn: () => getQaBugsInProgress(false),
+    staleTime: 3 * 60 * 1000,
+  })
+
+  const [expanded, setExpanded] = useState(new Set())
+
+  const toggleMember = (id) => {
+    setExpanded(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  return (
+    <div className="space-y-5">
+      <p className="text-sm text-gray-500">
+        Bugs assigned to QA team members that are <strong>not</strong> in status{' '}
+        <span className="font-mono bg-gray-100 px-1 rounded">Ready for Testing</span>,{' '}
+        <span className="font-mono bg-gray-100 px-1 rounded">Reopened</span>, or{' '}
+        <span className="font-mono bg-gray-100 px-1 rounded">Done</span>.
+      </p>
+
+      {isLoading && <PageLoader />}
+      {isError && <ErrorState message={error?.message} />}
+
+      {data && (
+        <>
+          <div className="text-xs text-gray-400">{data.total} bug{data.total !== 1 ? 's' : ''} across {data.members.filter(m => m.count > 0).length} QA member{data.members.filter(m => m.count > 0).length !== 1 ? 's' : ''}</div>
+
+          {data.total === 0 ? (
+            <div className="text-center py-16 text-gray-400">
+              <Check size={40} className="mx-auto mb-3 opacity-30" />
+              <p className="text-base font-medium">All clear</p>
+              <p className="text-sm mt-1">No bugs stuck with QA team members.</p>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {data.members.filter(m => m.count > 0).map(member => {
+                const isOpen = expanded.has(member.account_id)
+                const initials = member.name.split(' ').map(w => w[0]).join('').slice(0, 2).toUpperCase()
+                return (
+                  <div key={member.account_id} className="border border-gray-200 rounded-xl overflow-hidden">
+                    <button
+                      onClick={() => toggleMember(member.account_id)}
+                      className="w-full flex items-center gap-3 px-4 py-3 bg-gray-50 hover:bg-gray-100 transition-colors text-left"
+                    >
+                      <div className="h-8 w-8 rounded-full bg-brand-600 text-white flex items-center justify-center text-xs font-bold shrink-0">
+                        {initials}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <span className="font-semibold text-gray-900 text-sm">{member.name}</span>
+                        {member.role && <span className="text-xs text-gray-400 ml-2">{member.role}</span>}
+                      </div>
+                      <span className="bg-orange-100 text-orange-700 text-xs font-semibold px-2 py-0.5 rounded-full shrink-0">
+                        {member.count} bug{member.count !== 1 ? 's' : ''}
+                      </span>
+                      {isOpen ? <ChevronDown size={16} className="text-gray-400 shrink-0" /> : <ChevronRight size={16} className="text-gray-400 shrink-0" />}
+                    </button>
+
+                    {isOpen && (
+                      <div className="overflow-x-auto">
+                        <table className="min-w-full text-xs">
+                          <thead className="bg-white text-gray-400 uppercase tracking-wide border-b border-gray-100">
+                            <tr>
+                              <th className="px-4 py-2 text-left whitespace-nowrap">Key</th>
+                              <th className="px-4 py-2 text-left">Summary</th>
+                              <th className="px-4 py-2 text-left whitespace-nowrap">Status</th>
+                              <th className="px-4 py-2 text-left whitespace-nowrap">Priority</th>
+                              <th className="px-4 py-2 text-left whitespace-nowrap">Parent</th>
+                              <th className="px-4 py-2 text-left whitespace-nowrap">Sprint</th>
+                              <th className="px-4 py-2 text-left whitespace-nowrap">Fix Version</th>
+                              <th className="px-4 py-2 text-left">Components</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-gray-50 bg-white">
+                            {member.bugs.map(b => (
+                              <tr key={b.key} className="hover:bg-orange-50">
+                                <td className="px-4 py-2 whitespace-nowrap">
+                                  <IssueLink issueKey={b.key} url={b.url} />
+                                </td>
+                                <td className="px-4 py-2 text-gray-700 break-words whitespace-normal max-w-[260px]">{b.summary}</td>
+                                <td className="px-4 py-2 whitespace-nowrap"><StatusPill status={b.status} /></td>
+                                <td className="px-4 py-2 whitespace-nowrap"><PriorityBadge priority={b.priority} /></td>
+                                <td className="px-4 py-2 whitespace-nowrap">
+                                  {b.parent_key
+                                    ? <div>
+                                        <IssueLink issueKey={b.parent_key} url={`${b.url.split('/browse/')[0]}/browse/${b.parent_key}`} />
+                                        {b.parent_summary && <p className="text-gray-400 truncate max-w-[140px]">{b.parent_summary}</p>}
+                                      </div>
+                                    : <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-4 py-2 text-gray-500 max-w-[120px] truncate">{b.sprint || '—'}</td>
+                                <td className="px-4 py-2 whitespace-nowrap">
+                                  {b.fix_versions?.length
+                                    ? b.fix_versions.map(v => <span key={v} className="inline-block bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded mr-1">{v}</span>)
+                                    : <span className="text-gray-300">—</span>}
+                                </td>
+                                <td className="px-4 py-2">
+                                  {b.components?.length
+                                    ? b.components.map(c => <span key={c} className="inline-block bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded mr-1">{c}</span>)
+                                    : <span className="text-gray-300">—</span>}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────────
 
 export default function AnomalyPage() {
@@ -1146,11 +1273,17 @@ export default function AnomalyPage() {
     queryFn: () => getDuplicateBugs(60, false),
     staleTime: 5 * 60 * 1000,
   })
+  const { data: qaInProgressData } = useQuery({
+    queryKey: ['anomaly-qa-bugs-in-progress'],
+    queryFn: () => getQaBugsInProgress(false),
+    staleTime: 3 * 60 * 1000,
+  })
 
   useAutoRefresh([
     ['anomaly-tests-without-parent'],
     ['anomaly-incomplete-bugs', 30],
     ['anomaly-duplicate-bugs', 60],
+    ['anomaly-qa-bugs-in-progress'],
   ])
 
   const tabCounts = {
@@ -1161,13 +1294,15 @@ export default function AnomalyPage() {
         (bugsData.no_sprint?.length ?? 0)
       : null,
     'Duplicate Bugs': dupData?.total_clusters ?? null,
-    'Team Activity': null,  // no badge count on this tab
+    'QA In Progress': qaInProgressData?.total ?? null,
+    'Team Activity': null,
   }
 
   const tabColors = {
     'Tests Without Parent': 'orange',
     'Incomplete Bugs': 'red',
     'Duplicate Bugs': 'orange',
+    'QA In Progress': 'orange',
     'Team Activity': 'blue',
   }
 
@@ -1177,6 +1312,7 @@ export default function AnomalyPage() {
       queryClient.invalidateQueries({ queryKey: ['anomaly-tests-without-parent'] }),
       queryClient.invalidateQueries({ queryKey: ['anomaly-incomplete-bugs'] }),
       queryClient.invalidateQueries({ queryKey: ['anomaly-duplicate-bugs'] }),
+      queryClient.invalidateQueries({ queryKey: ['anomaly-qa-bugs-in-progress'] }),
     ])
     setLastRefresh(new Date())
     setIsRefreshing(false)
@@ -1220,6 +1356,7 @@ export default function AnomalyPage() {
           {activeTab === 'Tests Without Parent' && <TestsWithoutParentTab />}
           {activeTab === 'Incomplete Bugs'       && <IncompleteBugsTab />}
           {activeTab === 'Duplicate Bugs'        && <DuplicateBugsTab />}
+          {activeTab === 'QA In Progress'        && <QAInProgressTab />}
           {activeTab === 'Team Activity'         && <TeamActivityTab />}
         </div>
       </div>

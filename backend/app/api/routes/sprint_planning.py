@@ -13,6 +13,8 @@ class AddActivityRequest(BaseModel):
     activity_type: Optional[str] = "qa_testing"
     story_key: Optional[str] = None
     story_summary: Optional[str] = None
+    epic_key: Optional[str] = None
+    epic_summary: Optional[str] = None
     sprint_name: Optional[str] = None
     description: Optional[str] = None
     estimation_hours: Optional[float] = None
@@ -24,6 +26,8 @@ class UpdateActivityRequest(BaseModel):
     activity_type: Optional[str] = None
     story_key: Optional[str] = None
     story_summary: Optional[str] = None
+    epic_key: Optional[str] = None
+    epic_summary: Optional[str] = None
     description: Optional[str] = None
     estimation_hours: Optional[float] = None
     status: Optional[str] = None
@@ -46,6 +50,15 @@ async def get_sprints(refresh: bool = Query(False)):
     svc = get_sprint_planning_service()
     try:
         return {"sprints": await svc.get_sprints(force_refresh=refresh)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/project-issues")
+async def get_project_issues(refresh: bool = Query(False)):
+    svc = get_sprint_planning_service()
+    try:
+        return await svc.get_project_issues(force_refresh=refresh)
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

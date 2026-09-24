@@ -463,26 +463,30 @@ class CreateBugService:
 
         prompt = (
             "You are a senior QA engineer writing a professional Jira bug report.\n"
-            "Based on the bug information below, do four things:\n"
-            "1. Rewrite the summary to be clear, specific, and professional (max 120 chars). "
+            "The input may be in Spanish or another language — translate everything to English.\n"
+            "Based on the bug information below, do five things:\n"
+            "1. Rewrite the summary to be clear, specific, and professional in English (max 120 chars). "
             "Use the pattern '[Component/Feature] - [What fails] [briefly how]'. "
-            "Do NOT start with 'Bug:' or 'Issue:'.\n"
-            "2. Write numbered steps to reproduce.\n"
-            "3. Write the actual result (what currently happens).\n"
-            "4. Write the expected result (what should happen).\n\n"
+            "Do NOT start with 'Bug:' or 'Issue:'. Do NOT wrap in quotes.\n"
+            "2. Write a brief structured English description of the issue (2-4 sentences). "
+            "Do NOT include steps/actual/expected here — just a clear professional description.\n"
+            "3. Write numbered steps to reproduce in English.\n"
+            "4. Write the actual result in English (what currently happens).\n"
+            "5. Write the expected result in English (what should happen).\n\n"
             f"Original Summary: {summary}\n\n"
-            f"Description:\n{description or '(none)'}\n\n"
+            f"Original Description (customer complaint):\n{description or '(none)'}\n\n"
             "Return ONLY valid JSON with exactly these keys (no markdown, no extra text):\n"
-            '{"summary": "enriched summary", '
-            '"steps_to_reproduce": "numbered steps", '
-            '"actual_result": "what actually happens", '
-            '"expected_result": "what should happen"}'
+            '{"summary": "enriched English summary", '
+            '"ai_description": "structured English description", '
+            '"steps_to_reproduce": "numbered steps in English", '
+            '"actual_result": "what actually happens in English", '
+            '"expected_result": "what should happen in English"}'
         )
 
         client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
         message = await client.messages.create(
             model="claude-sonnet-4-6",
-            max_tokens=1000,
+            max_tokens=1200,
             messages=[{"role": "user", "content": prompt}],
         )
         text = message.content[0].text.strip()

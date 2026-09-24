@@ -13,6 +13,39 @@ class UpdateFieldRequest(BaseModel):
     value: Optional[str] = None
 
 
+@router.get("/field-discovery")
+async def tmt0_field_discovery():
+    """List all custom fields on the TMT0 Jira instance — use this to find the Ticket # field ID."""
+    from app.jira.client import get_jira_client
+    jira = get_jira_client()
+    try:
+        fields = await jira.get("/field")
+        return sorted(
+            [{"id": f["id"], "name": f["name"], "custom": f.get("custom", False)} for f in (fields or [])],
+            key=lambda x: x["name"].lower()
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/issue-inspect/{key}")
+async def inspect_issue_fields(key: str):
+    """Return ALL field values for a specific TMT0 issue — use this to identify which customfield holds 'Ticket #'."""
+    from app.jira.client import get_jira_client
+    jira = get_jira_client()
+    try:
+        issue = await jira.get(f"/issue/{key.upper()}?expand=names&fields=*all")
+        fields = issue.get("fields", {})
+        names  = issue.get("names", {})
+        return {
+            k: {"label": names.get(k, k), "value": v}
+            for k, v in fields.items()
+            if v is not None and v != "" and v != [] and v != {}
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/search-epics")
 async def search_epics(q: str = Query(..., min_length=1)):
     svc = get_bug_triage_service()
@@ -47,6 +80,47 @@ async def get_bugs(
         return {"bugs": bugs, "total": len(bugs)}
     except HTTPException:
         raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/qa-assignments")
+async def get_qa_assignments(
+    assignees: Optional[str] = Query(None, description="Comma-separated assignee accountIds"),
+    refresh:   bool          = Query(False),
+):
+    """All TMT0 issues (any type/status) assigned to QA team members."""
+    svc = get_bug_triage_service()
+    try:
+        ids = [a.strip() for a in (assignees or "").split(",") if a.strip()]
+        bugs = await svc.get_qa_assignments(ids, force_refresh=refresh)
+        return {"issues": bugs, "total": len(bugs)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/qa-misassigned")
+async def get_qa_misassigned(
+    assignees: Optional[str] = Query(None, description="Comma-separated assignee accountIds"),
+    refresh:   bool          = Query(False),
+):
+    """Issues assigned to QA team members in statuses that shouldn't belong to QA."""
+    svc = get_bug_triage_service()
+    try:
+        ids = [a.strip() for a in (assignees or "").split(",") if a.strip()]
+        bugs = await svc.get_qa_misassigned(ids, force_refresh=refresh)
+        return {"bugs": bugs, "total": len(bugs)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/todo-bugs")
+async def get_todo_bugs(refresh: bool = Query(False)):
+    """All TMT0 bugs in To Do status."""
+    svc = get_bug_triage_service()
+    try:
+        bugs = await svc.get_todo_bugs(force_refresh=refresh)
+        return {"bugs": bugs, "total": len(bugs)}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 

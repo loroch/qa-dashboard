@@ -23,6 +23,28 @@ logger = logging.getLogger(__name__)
 CACHE_KEY_TICKETS   = "kone:tickets"
 CACHE_TTL           = 600   # 10-minute cache
 
+
+def _extract_field_text(val) -> str:
+    """Recursively extract plain text from a Jira field value (ADF dict, string, or None)."""
+    if val is None:
+        return ""
+    if isinstance(val, str):
+        return val.strip()
+    if isinstance(val, dict):
+        texts: list[str] = []
+        def _walk(node):
+            if isinstance(node, dict):
+                if node.get("type") == "text":
+                    texts.append(node.get("text", ""))
+                for v in node.values():
+                    _walk(v)
+            elif isinstance(node, list):
+                for item in node:
+                    _walk(item)
+        _walk(val)
+        return " ".join(t for t in texts if t).strip()
+    return str(val).strip()
+
 # ── Field IDs discovered from the live instance ─────────────────────────
 F_CLIENTE       = "customfield_10110"   # Clientes (option-with-child): parent = region, child = site
 F_CUENTA        = "customfield_10126"   # Cuenta (account): SYM, NATI, …
@@ -35,6 +57,7 @@ F_AFECTED_SVC   = "customfield_10072"   # Affected services: Producción, …
 F_LANG          = "customfield_10040"   # Request language
 F_ORGS          = "customfield_10002"   # Organizations (array)
 F_SUPPORT_VAL   = "customfield_10226"   # Support Validation (option)
+F_BUG_ID        = "customfield_10193"   # Bug ID (TMT0 key written back by QA dashboard)
 JIRA_BASE        = "https://kabatone-ops-it.atlassian.net"
 
 
@@ -141,6 +164,7 @@ def _fmt_ticket(issue: dict) -> dict:
         "classification": ", ".join(_arr_opt(f.get(F_CLASSIF))),  # "Externo"
         "affected_svc":      _opt(f.get(F_AFECTED_SVC)),
         "support_validation": _opt(f.get(F_SUPPORT_VAL)),
+        "bug_id":       f.get(F_BUG_ID) or "",
         "created":      created,
         "updated":      updated,
         "days_open":    days_open,
@@ -288,6 +312,70 @@ class KoneService:
                 ))
             await session.commit()
 
+    # ── Sync: Jira → K1-Support ──────────────────────────────────────────────
+
+    async def sync_from_jira(self) -> dict:
+        """Scan all TMT0 bugs for the 'Ticket #' field (customfield_10407 — plain string)
+        and upsert KONE-<number> → TMT0-XXXXX links in the local DB."""
+        import re
+
+        # Confirmed by field inspection: customfield_10407 = "Ticket #", plain string value
+        TICKET_FIELD = "customfield_10407"
+        jira = get_jira_client()
+
+        # Fetch all TMT0 bugs where the Ticket # field is populated
+        jql = (
+            f'project = TMT0 AND issuetype = Bug AND cf[10407] is not EMPTY '
+            f'ORDER BY created DESC'
+        )
+        try:
+            raw = await jira.search_issues(
+                jql, fields=["summary", TICKET_FIELD], max_total=1000
+            )
+        except Exception as e:
+            raise RuntimeError(f"JQL query for Ticket # failed: {e}")
+
+        created_count = updated_count = skipped_count = 0
+        links_out: list[dict] = []
+        existing_links = await self.get_bug_links()
+
+        for issue in raw:
+            ticket_val = (issue.get("fields", {}).get(TICKET_FIELD) or "").strip()
+            if not ticket_val:
+                skipped_count += 1
+                continue
+
+            # Field stores plain numbers like "3310" — construct KONE key
+            m = re.search(r"(\d+)", ticket_val)
+            if not m:
+                skipped_count += 1
+                continue
+
+            kone_key  = f"KONE-{m.group(1)}"
+            jira_key  = issue["key"]
+            jira_base = get_settings().jira_base_url.rstrip("/")
+            jira_url  = f"{jira_base}/browse/{jira_key}"
+            summary  = issue.get("fields", {}).get("summary", "")
+
+            is_new = kone_key not in existing_links
+            await self.save_bug_link(kone_key, jira_key, jira_url, summary)
+
+            if is_new:
+                created_count += 1
+            else:
+                updated_count += 1
+
+            links_out.append({"kone_key": kone_key, "jira_key": jira_key, "new": is_new})
+
+        return {
+            "total_scanned": len(raw),
+            "created":       created_count,
+            "updated":       updated_count,
+            "skipped":       skipped_count,
+            "ticket_field":  TICKET_FIELD,
+            "links":         links_out,
+        }
+
     async def create_jira_bug(
         self,
         kone_key: str,
@@ -306,6 +394,7 @@ class KoneService:
         sprint_id: Optional[int],
         attachment_ids: list,
         assignee_id: Optional[str] = None,
+        label: Optional[str] = None,
         comment: Optional[str] = None,
     ) -> dict:
         from app.services.create_bug_service import get_create_bug_service
@@ -324,6 +413,7 @@ class KoneService:
             "customfield_10597": {"value": severity or "Medium"},
             "customfield_10600": environments or [],
             "customfield_10434": svc._link_adf(kone_key, kone_url),
+            "customfield_10407": kone_key,
         }
 
         if found_in_version_id:
@@ -338,6 +428,8 @@ class KoneService:
             fields["customfield_10020"] = {"id": sprint_id}
         if assignee_id:
             fields["assignee"] = {"id": assignee_id}
+        if label:
+            fields["labels"] = [label]
 
         jira = get_jira_client()
         settings = get_settings()
@@ -363,12 +455,78 @@ class KoneService:
         # Persist link
         await self.save_bug_link(kone_key, issue_key, issue_url, summary)
 
+        # Write the TMT0 bug key back to the KONE ticket's "Bug ID" field
+        await self.write_bug_id_to_kone(kone_key, issue_key)
+
         return {
             "key": issue_key,
             "url": issue_url,
             "id":  created.get("id"),
             "attachment_results": attachment_results,
             "comment_result": comment_result,
+        }
+
+    async def write_bug_id_to_kone(self, kone_key: str, tmt0_key: str) -> bool:
+        """Write the TMT0 bug key into the KONE ticket's Bug ID custom field (customfield_10193)."""
+        from app.jira.kone_client import get_kone_client
+        kone = get_kone_client()
+        ok = await kone.update_issue(kone_key, {"customfield_10193": tmt0_key})
+        if not ok:
+            logger.warning(f"Could not write Bug ID '{tmt0_key}' to KONE ticket {kone_key}")
+        return ok
+
+    async def retro_sync_bug_ids(self) -> dict:
+        """Write TMT0 bug keys back to KONE tickets that are missing the Bug ID field."""
+        from app.jira.kone_client import get_kone_client
+        import asyncio
+
+        bug_links = await self.get_bug_links()
+        kone = get_kone_client()
+
+        updated_count = 0
+        skipped_count = 0
+        failed_count  = 0
+        results: list[dict] = []
+
+        # Fetch current Bug ID field for all linked KONE tickets in parallel
+        kone_keys = list(bug_links.keys())
+
+        async def check_and_update(kone_key: str) -> dict:
+            nonlocal updated_count, skipped_count, failed_count
+            link = bug_links[kone_key]
+            jira_key = link.get("jira_key") if isinstance(link, dict) else str(link)
+            if not jira_key:
+                failed_count += 1
+                return {"kone_key": kone_key, "jira_key": "", "result": "failed"}
+            issue = await kone.get_issue(kone_key)
+            if not issue:
+                failed_count += 1
+                return {"kone_key": kone_key, "jira_key": jira_key, "result": "not_found"}
+            current = (issue.get("fields") or {}).get("customfield_10193") or ""
+            if current.strip():
+                skipped_count += 1
+                return {"kone_key": kone_key, "jira_key": jira_key, "result": "already_set", "value": current}
+            ok = await kone.update_issue(kone_key, {"customfield_10193": jira_key})
+            if ok:
+                updated_count += 1
+                return {"kone_key": kone_key, "jira_key": jira_key, "result": "updated"}
+            else:
+                failed_count += 1
+                return {"kone_key": kone_key, "jira_key": jira_key, "result": "failed"}
+
+        sem = asyncio.Semaphore(5)
+        async def limited(k):
+            async with sem:
+                return await check_and_update(k)
+
+        results = await asyncio.gather(*[limited(k) for k in kone_keys])
+
+        return {
+            "total":   len(kone_keys),
+            "updated": updated_count,
+            "skipped": skipped_count,
+            "failed":  failed_count,
+            "details": [r for r in results if r["result"] in ("updated", "failed")],
         }
 
     async def _transfer_kone_attachments(self, attachment_ids: list, jira_issue_key: str) -> list[dict]:

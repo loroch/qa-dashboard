@@ -6,7 +6,7 @@ import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import {
   ExternalLink, ChevronDown, ChevronRight, Search,
   Link2, CheckCircle2, XCircle, AlertTriangle, FlaskConical,
-  X, Check, Wand2, Sparkles, FileText, Figma, BookOpen
+  X, Check, Wand2, Sparkles, FileText, Figma, BookOpen, Download
 } from 'lucide-react'
 import axios from 'axios'
 import { BASE_URL } from '../services/api'
@@ -872,6 +872,30 @@ function RegressionTestsSection({ query, version }) {
   )
 }
 
+function exportCoverageCSV(byEpic, version) {
+  const esc = v => `"${String(v ?? '').replace(/"/g, '""')}"`
+  const headers = ['Epic Key', 'Epic Summary', 'Story Key', 'Story Summary', 'Story Status', 'Test Count', 'Test Keys', 'Test Statuses']
+  const rows = []
+  for (const epic of byEpic) {
+    for (const story of epic.stories) {
+      const testKeys = (story.test_cases || []).map(t => t.key).join('; ')
+      const testStatuses = story.test_statuses
+        ? Object.entries(story.test_statuses).map(([s, n]) => `${s}:${n}`).join('; ')
+        : ''
+      rows.push([epic.epic_key, epic.epic_summary, story.key, story.summary, story.status, story.test_count, testKeys, testStatuses])
+    }
+  }
+  const csv = [headers, ...rows].map(r => r.map(esc).join(',')).join('\r\n')
+  const blob = new Blob([csv], { type: 'text/csv' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  const date = new Date().toISOString().slice(0, 10)
+  a.href = url
+  a.download = `coverage-${(version || 'all').replace(/[^a-z0-9]/gi, '_')}-${date}.csv`
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
 // ── Main Page ──────────────────────────────────────────────────────────────────
 export default function TestCoveragePage() {
   const [tab, setTab] = useState('By Version')
@@ -906,6 +930,7 @@ export default function TestCoveragePage() {
   const [handoverPushing, setHandoverPushing] = useState(false)
   const [handoverPushMsg, setHandoverPushMsg] = useState(null)
   const [handoverSavedAt, setHandoverSavedAt] = useState(null)
+  const [handoverNotes, setHandoverNotes] = useState('')
 
   const versionsQuery = useQuery({
     queryKey: ['coverage-versions'],
@@ -1069,6 +1094,15 @@ export default function TestCoveragePage() {
                     value={storySearch}
                     onChange={e => setStorySearch(e.target.value)}
                   />
+                )}
+                {selectedVersion && data && !coverageQuery.isLoading && (
+                  <button
+                    onClick={() => exportCoverageCSV(data.by_epic || [], selectedVersion)}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-gray-50 transition-colors ml-auto"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                    Export CSV
+                  </button>
                 )}
               </div>
 
@@ -1237,7 +1271,18 @@ export default function TestCoveragePage() {
                     <div className="bg-gray-50 rounded-xl p-4">
                       <div className="flex items-center justify-between mb-2">
                         <span className="text-sm font-medium text-gray-600">Coverage</span>
-                        <span className="text-sm font-bold text-brand-600">{s.coverage_pct}%</span>
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-bold text-brand-600">{s.coverage_pct}%</span>
+                          {d.by_epic?.length > 0 && (
+                            <button
+                              onClick={() => exportCoverageCSV(d.by_epic, selectedIssue.key)}
+                              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg text-xs font-medium border border-gray-200 text-gray-600 hover:bg-white transition-colors"
+                            >
+                              <Download className="h-3.5 w-3.5" />
+                              Export CSV
+                            </button>
+                          )}
+                        </div>
                       </div>
                       <div className="bg-gray-200 rounded-full h-3">
                         <div className={`h-3 rounded-full transition-all ${s.coverage_pct === 100 ? 'bg-green-500' : s.coverage_pct >= 50 ? 'bg-yellow-400' : 'bg-red-400'}`}
@@ -1305,7 +1350,7 @@ export default function TestCoveragePage() {
                               </div>
                             )}
                             {testPlanError && <p className="text-sm text-red-500 text-center">{testPlanError}</p>}
-                            {testPlan && !testPlanLoading && <TestPlanView plan={testPlan} onRegen={() => { setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null) }} />}
+                            {testPlan && !testPlanLoading && <TestPlanView plan={testPlan} exportTitle={selectedIssue?.summary || selectedIssue?.key} onRegen={() => { setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null) }} />}
                           </div>
                         )}
                       </div>
@@ -1325,15 +1370,43 @@ export default function TestCoveragePage() {
 
                         {handoverOpen && (
                           <div className="p-4 space-y-4 bg-white">
+
+                            {/* Notes textarea — always visible */}
+                            <div className="space-y-1">
+                              <label className="text-xs font-medium text-gray-600">
+                                Notes for the AI <span className="text-gray-400 font-normal">(optional — AI will use these when generating)</span>
+                              </label>
+                              <textarea
+                                rows={3}
+                                value={handoverNotes}
+                                onChange={e => setHandoverNotes(e.target.value)}
+                                disabled={handoverLoading}
+                                placeholder="e.g. Focus on edge cases around offline mode. R&D should demo both happy path and error recovery. Pay attention to permissions for read-only users."
+                                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-amber-400 placeholder-gray-300 disabled:opacity-50"
+                              />
+                            </div>
+
+                            {/* Delete & start over — only when data exists */}
+                            {handoverData && !handoverLoading && (
+                              <div className="flex justify-end">
+                                <button
+                                  onClick={() => { setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null); setHandoverSavedAt(null) }}
+                                  className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 underline"
+                                >
+                                  Delete & start over
+                                </button>
+                              </div>
+                            )}
+
+                            {/* Empty state — generate button */}
                             {!handoverData && !handoverLoading && (
-                              <div className="text-center py-4">
-                                <p className="text-sm text-gray-500 mb-3">Generate scenarios for R&D to demonstrate during the handover meeting</p>
+                              <div className="flex justify-center">
                                 <button
                                   onClick={async () => {
                                     setHandoverLoading(true); setHandoverError(null)
                                     try {
                                       const stories = (d.by_epic || []).flatMap(e => e.stories || []).map(s => ({ key: s.key, summary: s.summary }))
-                                      const result = await generateHandoverCrit({ issue_key: selectedIssue.key, issue_summary: selectedIssue.summary, issue_type: selectedIssue.type, stories })
+                                      const result = await generateHandoverCrit({ issue_key: selectedIssue.key, issue_summary: selectedIssue.summary, issue_type: selectedIssue.type, stories, notes: handoverNotes })
                                       setHandoverData(result)
                                       setHandoverCommentKey(selectedIssue.key)
                                       const saved = await saveAiContent({ issue_key: selectedIssue.key, content_type: 'handover_criteria', content: result })
@@ -1341,12 +1414,13 @@ export default function TestCoveragePage() {
                                     } catch(e) { setHandoverError(e.message) }
                                     finally { setHandoverLoading(false) }
                                   }}
-                                  className="px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 flex items-center gap-2 mx-auto"
+                                  className="px-4 py-2 bg-amber-600 text-white text-sm rounded-lg hover:bg-amber-700 flex items-center gap-2"
                                 >
                                   <Sparkles className="h-4 w-4" /> Generate Handover Criteria
                                 </button>
                               </div>
                             )}
+
                             {handoverLoading && (
                               <div className="text-center py-6">
                                 <div className="h-6 w-6 border-2 border-amber-200 border-t-amber-600 rounded-full animate-spin mx-auto mb-2" />
@@ -1354,9 +1428,11 @@ export default function TestCoveragePage() {
                               </div>
                             )}
                             {handoverError && <p className="text-sm text-red-500 text-center">{handoverError}</p>}
+
                             {handoverData && !handoverLoading && (
                               <HandoverCriteriaView
                                 data={handoverData}
+                                exportTitle={selectedIssue?.summary || selectedIssue?.key}
                                 commentKey={handoverCommentKey}
                                 pushing={handoverPushing}
                                 pushMsg={handoverPushMsg}
@@ -1559,13 +1635,123 @@ const PHASE_COLORS = {
   'Sign-off':     'bg-green-100 text-green-700',
 }
 
-function TestPlanView({ plan, onRegen }) {
+function downloadBlob(content, filename, mimeType) {
+  const blob = new Blob([content], { type: mimeType })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
+
+function buildTestPlanHTML(plan, title) {
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  const scopeRows = side =>
+    (plan.scope?.[side] || []).map(i => `<li>${esc(i)}</li>`).join('')
+  const testTypesHTML = (plan.test_types || []).map(tt => `
+    <div style="margin-bottom:8px;padding:8px;border:1px solid #ccc;border-radius:4px;">
+      <strong>${esc(tt.type)}</strong>${tt.applicable === false ? ' <em>(N/A)</em>' : ''}
+      ${tt.description ? `<p style="margin:4px 0 4px 0;font-size:0.9em;color:#555;">${esc(tt.description)}</p>` : ''}
+      ${(tt.scenarios || []).length ? `<ul style="margin:4px 0 0 16px;">${(tt.scenarios).map(s=>`<li>${esc(s)}</li>`).join('')}</ul>` : ''}
+    </div>`).join('')
+  const flowHTML = (plan.test_flow || []).map((step,idx,arr) => `
+    <span style="display:inline-block;margin:0 4px 4px 0;padding:6px 10px;background:#e0e7ff;border-radius:4px;font-size:0.85em;">
+      <strong>${step.step}. ${esc(step.phase)}</strong><br/>${esc(step.action)}<br/><em style="font-size:0.85em;color:#666;">${esc(step.validation)}</em>
+    </span>${idx < arr.length-1 ? '<span style="margin:0 2px;">&#8594;</span>' : ''}`).join('')
+  const areasHTML = (plan.coverage_areas || []).map(area => `
+    <div style="margin-bottom:8px;padding:8px;border:1px solid #ddd;border-radius:4px;">
+      <strong>${esc(area.area)}</strong> <span style="font-size:0.8em;color:#888;">(${esc(area.priority)} priority, ~${area.test_count_estimate} TCs)</span>
+      ${(area.tests||[]).length ? `<ul style="margin:4px 0 0 16px;">${(area.tests).map(t=>`<li style="font-size:0.9em;">${esc(t)}</li>`).join('')}</ul>` : ''}
+    </div>`).join('')
+  const risksHTML = (plan.risks || []).map(r => `
+    <div style="margin-bottom:8px;padding:8px;background:#fefce8;border:1px solid #fde047;border-radius:4px;">
+      <strong>&#9888; ${esc(r.risk)}</strong>
+      <p style="margin:4px 0 0 0;font-size:0.9em;">${esc(r.mitigation)}</p>
+    </div>`).join('')
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"/>
+<style>
+  body{font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1f2937;max-width:900px;margin:40px auto;padding:0 24px;}
+  h1{font-size:1.5em;color:#312e81;border-bottom:2px solid #c7d2fe;padding-bottom:8px;}
+  h2{font-size:1.1em;color:#374151;text-transform:uppercase;letter-spacing:0.05em;margin:20px 0 8px;}
+  .summary{background:#eef2ff;padding:12px;border-radius:6px;line-height:1.6;}
+  .scope{display:flex;gap:16px;margin-bottom:12px;}
+  .scope-in{flex:1;background:#f0fdf4;padding:10px;border-radius:6px;}
+  .scope-out{flex:1;background:#fef2f2;padding:10px;border-radius:6px;}
+  ul{padding-left:20px;margin:4px 0;}
+  li{margin-bottom:3px;}
+</style>
+</head><body>
+<h1>${esc(title)}</h1>
+${plan.executive_summary ? `<div class="summary">${esc(plan.executive_summary)}</div>` : ''}
+${plan.scope ? `<h2>Scope</h2><div class="scope">
+  <div class="scope-in"><strong style="color:#15803d;">In Scope</strong><ul>${scopeRows('in_scope')}</ul></div>
+  <div class="scope-out"><strong style="color:#b91c1c;">Out of Scope</strong><ul>${scopeRows('out_of_scope')}</ul></div>
+</div>` : ''}
+${plan.test_types?.length ? `<h2>Test Types</h2>${testTypesHTML}` : ''}
+${plan.test_flow?.length ? `<h2>Test Flow</h2><div style="margin-bottom:12px;">${flowHTML}</div>` : ''}
+${plan.coverage_areas?.length ? `<h2>Coverage Areas</h2>${areasHTML}` : ''}
+${plan.risks?.length ? `<h2>Risks &amp; Mitigations</h2>${risksHTML}` : ''}
+${plan.estimated_test_cases ? `<p style="text-align:center;color:#9ca3af;font-size:0.85em;">Estimated total test cases: <strong>${plan.estimated_test_cases}</strong></p>` : ''}
+</body></html>`
+}
+
+function buildHandoverHTML(data, title) {
+  const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+  const criteriaHTML = (data.criteria || []).map(c => `
+    <div style="margin-bottom:12px;border:1px solid ${c.priority==='must'?'#fcd34d':'#e5e7eb'};border-radius:6px;overflow:hidden;">
+      <div style="padding:8px 12px;background:${c.priority==='must'?'#fffbeb':'#f9fafb'};">
+        <span style="font-size:0.8em;font-weight:bold;padding:2px 6px;background:${c.priority==='must'?'#fde68a':'#e5e7eb'};border-radius:3px;">${c.priority==='must'?'MUST':'NICE'}</span>
+        <strong style="margin-left:8px;">${esc(c.title)}</strong>
+        <span style="font-size:0.8em;color:#6b7280;margin-left:8px;">${esc(c.category)}</span>
+      </div>
+      <div style="padding:8px 12px;">
+        <p style="color:#4b5563;margin:0 0 8px;font-size:0.9em;">${esc(c.description)}</p>
+        <ol style="margin:0;padding-left:20px;">
+          ${(c.steps||[]).map(s=>`<li style="font-size:0.9em;margin-bottom:4px;">${esc(s)}</li>`).join('')}
+        </ol>
+      </div>
+    </div>`).join('')
+
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"/>
+<style>
+  body{font-family:Segoe UI,Arial,sans-serif;font-size:14px;color:#1f2937;max-width:900px;margin:40px auto;padding:0 24px;}
+  h1{font-size:1.5em;color:#92400e;border-bottom:2px solid #fcd34d;padding-bottom:8px;}
+  .intro{background:#fffbeb;padding:12px;border-radius:6px;line-height:1.6;color:#78350f;font-size:0.9em;margin-bottom:16px;}
+</style>
+</head><body>
+<h1>${esc(title)}</h1>
+${data.intro ? `<div class="intro">${esc(data.intro)}</div>` : ''}
+${criteriaHTML}
+</body></html>`
+}
+
+function TestPlanView({ plan, onRegen, exportTitle }) {
   const [expandedType, setExpandedType] = useState(null)
   const [expandedArea, setExpandedArea] = useState(null)
+  const slug = (exportTitle || 'test-plan').replace(/[^a-z0-9]/gi,'_').toLowerCase()
+  const date = new Date().toISOString().slice(0,10)
   return (
     <div className="space-y-4 text-sm">
-      {/* Regen button */}
-      <div className="flex justify-end">
+      {/* Action bar */}
+      <div className="flex justify-end items-center gap-2">
+        <button
+          onClick={() => downloadBlob(buildTestPlanHTML(plan, exportTitle || 'Test Plan'), `test-plan_${slug}_${date}.html`, 'text/html')}
+          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+          title="Export as HTML"
+        >
+          <Download className="h-3 w-3" /> HTML
+        </button>
+        <button
+          onClick={() => downloadBlob(buildTestPlanHTML(plan, exportTitle || 'Test Plan'), `test-plan_${slug}_${date}.doc`, 'application/msword')}
+          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+          title="Export as Word document"
+        >
+          <FileText className="h-3 w-3" /> Doc
+        </button>
         <button onClick={onRegen} className="text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1">
           <Wand2 className="h-3 w-3" /> Regenerate
         </button>
@@ -1713,10 +1899,26 @@ function TestPlanView({ plan, onRegen }) {
   )
 }
 
-function HandoverCriteriaView({ data, commentKey, pushing, pushMsg, onChangeKey, onRegen, onPush }) {
+function HandoverCriteriaView({ data, commentKey, pushing, pushMsg, onChangeKey, onRegen, onPush, exportTitle }) {
+  const slug = (exportTitle || 'handover').replace(/[^a-z0-9]/gi,'_').toLowerCase()
+  const date = new Date().toISOString().slice(0,10)
   return (
     <div className="space-y-3 text-sm">
-      <div className="flex justify-end">
+      <div className="flex justify-end items-center gap-2">
+        <button
+          onClick={() => downloadBlob(buildHandoverHTML(data, exportTitle || 'Handover Exit Criteria'), `handover_${slug}_${date}.html`, 'text/html')}
+          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+          title="Export as HTML"
+        >
+          <Download className="h-3 w-3" /> HTML
+        </button>
+        <button
+          onClick={() => downloadBlob(buildHandoverHTML(data, exportTitle || 'Handover Exit Criteria'), `handover_${slug}_${date}.doc`, 'application/msword')}
+          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+          title="Export as Word document"
+        >
+          <FileText className="h-3 w-3" /> Doc
+        </button>
         <button onClick={onRegen} className="text-xs text-amber-500 hover:text-amber-700 flex items-center gap-1">
           <Wand2 className="h-3 w-3" /> Regenerate
         </button>

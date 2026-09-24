@@ -201,6 +201,40 @@ class SprintPlanningService:
             "total_stories": len(stories),
         }
 
+    async def get_project_issues(self, force_refresh: bool = False) -> dict:
+        """All open Stories, Tasks, and Epics in TMT0 — not sprint-filtered."""
+        cache_key = "sprint_plan:project_issues"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                'project = TMT0 '
+                'AND issuetype in (Story, Task, Epic) '
+                'AND status not in (Done, DONE, Removed) '
+                'ORDER BY updated DESC'
+            )
+            raw = await self.jira.search_issues(jql, fields=STORY_FIELDS, max_total=500)
+            issues = []
+            for i in raw:
+                f = i.get("fields", {})
+                parent_raw = f.get("parent") or {}
+                parent_f = parent_raw.get("fields") or {}
+                issues.append({
+                    "key": i["key"],
+                    "url": f"{self.jira_base_url}/browse/{i['key']}",
+                    "summary": f.get("summary", ""),
+                    "status": (f.get("status") or {}).get("name", ""),
+                    "issue_type": (f.get("issuetype") or {}).get("name", ""),
+                    "epic_key": f.get("customfield_10014") or parent_raw.get("key", "") or "",
+                    "parent_key": parent_raw.get("key", ""),
+                    "parent_summary": parent_f.get("summary", ""),
+                })
+            return issues
+
+        issues = await self.cache.get_or_fetch(cache_key, fetch, ttl=600)
+        return {"issues": issues}
+
     # ── QA Activities CRUD ─────────────────────────────────────────
 
     async def get_activities(self, sprint_id: int) -> list[dict]:
@@ -228,6 +262,8 @@ class SprintPlanningService:
                 sprint_name=data.get("sprint_name", ""),
                 story_key=data.get("story_key") or None,
                 story_summary=data.get("story_summary") or None,
+                epic_key=data.get("epic_key") or None,
+                epic_summary=data.get("epic_summary") or None,
                 activity_name=data["activity_name"],
                 description=data.get("description") or None,
                 estimation_hours=data.get("estimation_hours"),
@@ -249,7 +285,7 @@ class SprintPlanningService:
             row = result.scalar_one_or_none()
             if not row:
                 raise ValueError(f"Activity {activity_id} not found")
-            for k in ["activity_name", "description", "estimation_hours", "activity_type", "status", "story_key", "story_summary"]:
+            for k in ["activity_name", "description", "estimation_hours", "activity_type", "status", "story_key", "story_summary", "epic_key", "epic_summary", "sprint_id"]:
                 if k in data:
                     setattr(row, k, data[k])
             row.updated_at = datetime.now(timezone.utc)
@@ -355,6 +391,8 @@ class SprintPlanningService:
             "sprint_name": row.sprint_name or "",
             "story_key": row.story_key or "",
             "story_summary": row.story_summary or "",
+            "epic_key": getattr(row, "epic_key", None) or "",
+            "epic_summary": getattr(row, "epic_summary", None) or "",
             "activity_name": row.activity_name,
             "description": row.description or "",
             "estimation_hours": row.estimation_hours,

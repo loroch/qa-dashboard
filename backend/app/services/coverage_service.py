@@ -669,7 +669,7 @@ Be concrete — each scenario must be actionable. For Performance, set applicabl
     # ── Handover Exit Criteria ─────────────────────────────────────────
 
     async def generate_handover_criteria(
-        self, issue_key: str, issue_summary: str, issue_type: str, stories: list[dict]
+        self, issue_key: str, issue_summary: str, issue_type: str, stories: list[dict], notes: str = ""
     ) -> dict:
         """AI-generate handover meeting exit criteria using tool-use for valid JSON."""
         settings = get_settings()
@@ -680,13 +680,14 @@ Be concrete — each scenario must be actionable. For Performance, set applicabl
             f"  • {s.get('key','')}: {s.get('summary','')}" for s in stories[:20]
         )
         stories_section = ("Stories/Tasks:\n" + stories_text) if stories_text else ""
+        notes_section = (f"\nAdditional QA context / focus areas (you MUST incorporate these):\n{notes.strip()}") if notes and notes.strip() else ""
 
         prompt = f"""You are a QA Manager preparing a handover meeting with R&D.
 The R&D team will demo the completed feature to you live. Your job is to define the specific scenarios they MUST demonstrate for QA to accept the handover.
 
 Issue: {issue_key} ({issue_type})
 Summary: {issue_summary}
-{stories_section}
+{stories_section}{notes_section}
 
 IMPORTANT: You MUST generate between 5 and 7 criteria in the criteria array. An empty criteria array is NOT acceptable.
 - "must" priority = QA will not sign off without seeing this demonstrated

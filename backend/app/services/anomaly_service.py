@@ -308,6 +308,96 @@ class AnomalyService:
 
         return {"clusters": clusters, "total_clusters": len(clusters)}
 
+    # ── Section 4b: QA Bugs In Progress ────────────────────────────────────
+
+    async def get_qa_bugs_in_progress(self, force_refresh: bool = False) -> dict:
+        """Bugs assigned to any QA team member that are NOT in Done / Ready for Testing / Reopened."""
+        cache_key = "anomaly:qa_bugs_in_progress"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            mapping = get_field_mapping()
+            team_members = mapping["jira"]["team_members"]
+            team_ids_jql = ", ".join(m["id"] for m in team_members)
+            member_by_id = {m["id"]: m for m in team_members}
+
+            exclude_statuses = (
+                '"Done"',
+                '"DONE"',
+                '"Ready for Testing"',
+                '"Reopened"',
+                '"Reopen"',
+                '"Removed"',
+            )
+            exclude_jql = ", ".join(exclude_statuses)
+
+            jql = (
+                f'project = TMT0 '
+                f'AND issuetype = Bug '
+                f'AND assignee in ({team_ids_jql}) '
+                f'AND status not in ({exclude_jql}) '
+                f'ORDER BY updated DESC'
+            )
+            raw = await self.jira.search_issues(
+                jql,
+                fields=["summary", "status", "priority", "assignee", "fixVersions",
+                        "parent", "customfield_10020", "components", "labels"],
+                max_total=500,
+            )
+
+            bugs_by_member: dict[str, list] = {m["id"]: [] for m in team_members}
+            bugs_by_member["__unmatched__"] = []
+
+            for issue in raw:
+                f = issue.get("fields", {})
+                assignee = f.get("assignee") or {}
+                assignee_id = assignee.get("accountId", "")
+                parent_raw = f.get("parent") or {}
+                parent_f = parent_raw.get("fields") or {}
+                sprints = f.get("customfield_10020") or []
+                sprint_name = sprints[-1].get("name", "") if sprints else ""
+                fix_versions = [v["name"] for v in (f.get("fixVersions") or [])]
+                components = [c["name"] for c in (f.get("components") or [])]
+                labels = f.get("labels") or []
+
+                entry = {
+                    "key": issue["key"],
+                    "url": f"{self.jira_base_url}/browse/{issue['key']}",
+                    "summary": f.get("summary", ""),
+                    "status": (f.get("status") or {}).get("name", ""),
+                    "priority": (f.get("priority") or {}).get("name", ""),
+                    "assignee_id": assignee_id,
+                    "assignee_name": assignee.get("displayName", ""),
+                    "parent_key": parent_raw.get("key", ""),
+                    "parent_summary": (parent_f.get("summary") or ""),
+                    "sprint": sprint_name,
+                    "fix_versions": fix_versions,
+                    "components": components,
+                    "labels": labels,
+                }
+
+                if assignee_id in bugs_by_member:
+                    bugs_by_member[assignee_id].append(entry)
+                else:
+                    bugs_by_member["__unmatched__"].append(entry)
+
+            members_out = []
+            for m in team_members:
+                bugs = bugs_by_member.get(m["id"], [])
+                members_out.append({
+                    "account_id": m["id"],
+                    "name": m["name"],
+                    "role": m.get("role", ""),
+                    "bugs": bugs,
+                    "count": len(bugs),
+                })
+
+            total = sum(len(b) for b in bugs_by_member.values())
+            return {"members": members_out, "total": total}
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=180)
+
     # ── Section 4: Team Activity ────────────────────────────────────────────
 
     async def get_team_activity(self, days: int, force_refresh: bool = False) -> dict:

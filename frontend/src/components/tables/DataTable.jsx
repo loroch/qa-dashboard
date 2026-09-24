@@ -473,6 +473,7 @@ export function IssueTable({
               {col('Summary', 'summary')}
               {col('Type', 'issue_type', { options: typeOptions, selected: typeFilter, onChange: applyTypeFilter })}
               {col('Status', 'status', { options: statusOptions, selected: statusFilter, onChange: applyStatusFilter })}
+              {col('Reporter', 'reporter_name')}
               {col('QA Owner', 'qa_owner')}
               {col('Priority', 'priority')}
               {col('QA Est.', 'qa_estimate_hours')}
@@ -513,6 +514,9 @@ export function IssueTable({
                   <StatusCell issue={issue} editable={editableStatus} onChanged={onStatusChanged} />
                 </td>
                 <td className="px-3 py-2.5 whitespace-nowrap text-gray-600 text-xs">
+                  {issue.reporter?.display_name || '—'}
+                </td>
+                <td className="px-3 py-2.5 whitespace-nowrap text-gray-600 text-xs">
                   <QaOwnerCell issue={issue} editable={editableQaOwner} onChanged={onQaOwnerChanged} />
                 </td>
                 <td className="px-3 py-2.5 whitespace-nowrap">
@@ -542,7 +546,7 @@ export function IssueTable({
               </tr>
             ))}
             {sorted.length === 0 && (
-              <tr><td colSpan={12} className="text-center py-8 text-gray-400 text-sm">No issues match the current filter.</td></tr>
+              <tr><td colSpan={13} className="text-center py-8 text-gray-400 text-sm">No issues match the current filter.</td></tr>
             )}
           </tbody>
         </table>
