@@ -25,7 +25,8 @@ const loadAiContent          = (key)  => api.get(`/coverage/ai-content/${encodeU
 const saveAiContent          = (body) => api.post('/coverage/ai-content', body).then(r => r.data)
 const addJiraComment         = (body) => api.post('/coverage/add-jira-comment', body).then(r => r.data)
 const assignTest          = (body) => api.post('/coverage/assign-test', body).then(r => r.data)
-const getRegressionTests  = (v)    => api.get(`/coverage/regression-tests${v ? `?version=${encodeURIComponent(v)}` : ''}`).then(r => r.data)
+const getRegressionTests      = (v)    => api.get(`/coverage/regression-tests${v ? `?version=${encodeURIComponent(v)}` : ''}`).then(r => r.data)
+const getAutomationRegression = ()     => api.get('/coverage/automation-regression').then(r => r.data)
 const generateStoryTests  = (body) => api.post('/coverage/generate-story-tests', body, { timeout: 120000 }).then(r => r.data)
 const createStoryTests    = (body) => api.post('/coverage/create-story-tests', body).then(r => r.data)
 const getTestTransitions  = (k)    => api.get(`/coverage/test-transitions/${k}`).then(r => r.data)
@@ -692,6 +693,93 @@ function EpicRow({ epic, search, version, onGenerate }) {
   )
 }
 
+// ── Automation Regression Section ─────────────────────────────────────────────
+function AutomationRegressionSection({ query }) {
+  const [expanded, setExpanded] = useState(false)
+  const data = query.data
+
+  const PLAN_COLORS = ['bg-blue-500', 'bg-purple-500', 'bg-teal-500', 'bg-orange-400']
+
+  return (
+    <div className="border border-green-200 rounded-xl overflow-hidden mt-2">
+      <button
+        onClick={() => setExpanded(e => !e)}
+        className="w-full flex items-center gap-3 px-5 py-3 bg-green-50 hover:bg-green-100 transition-colors text-left"
+      >
+        {expanded ? <ChevronDown className="h-4 w-4 text-green-400 flex-shrink-0" /> : <ChevronRight className="h-4 w-4 text-green-400 flex-shrink-0" />}
+        <FlaskConical className="h-4 w-4 text-green-500 flex-shrink-0" />
+        <div className="flex-1 min-w-0">
+          <span className="text-sm font-semibold text-green-800">Daily Automation Regression</span>
+          <span className="ml-2 text-xs text-green-500">epic: TMT0-43524</span>
+        </div>
+        {data && (
+          <div className="flex items-center gap-3 ml-auto">
+            <span className="text-xs text-gray-500">{data.total_plans} plans · {data.total_tests} tests</span>
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${data.overall_pct >= 80 ? 'bg-green-100 text-green-700' : data.overall_pct >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-600'}`}>
+              {data.overall_pct}% passed
+            </span>
+            <a href={data.epic_url} target="_blank" rel="noopener noreferrer"
+               onClick={e => e.stopPropagation()}
+               className="text-xs text-green-600 hover:underline flex items-center gap-0.5">
+              <ExternalLink className="h-3 w-3" /> Jira
+            </a>
+          </div>
+        )}
+        {query.isLoading && <span className="text-xs text-gray-400 ml-auto">Loading…</span>}
+      </button>
+
+      {expanded && (
+        <div className="bg-white px-5 py-4 space-y-3">
+          {query.isError && <p className="text-red-500 text-sm">{query.error?.message}</p>}
+          {data?.plans?.length === 0 && <p className="text-sm text-gray-400 text-center py-4">No test plans found</p>}
+          {(data?.plans || []).map((plan, i) => {
+            const barColor = PLAN_COLORS[i % PLAN_COLORS.length]
+            const passW = plan.total ? Math.round(plan.passed / plan.total * 100) : 0
+            const failW = plan.total ? Math.round(plan.failed / plan.total * 100) : 0
+            const inpW  = Math.max(0, 100 - passW - failW)
+            return (
+              <div key={plan.key} className="border border-gray-100 rounded-lg p-3 space-y-2">
+                <div className="flex items-center gap-2">
+                  <a href={plan.url} target="_blank" rel="noopener noreferrer"
+                     className="text-xs font-mono text-brand-600 hover:underline flex items-center gap-0.5 flex-shrink-0">
+                    {plan.key} <ExternalLink className="h-2.5 w-2.5" />
+                  </a>
+                  <span className="text-xs text-gray-700 truncate flex-1">{plan.summary}</span>
+                  <a href={plan.jira_url} target="_blank" rel="noopener noreferrer"
+                     onClick={e => e.stopPropagation()}
+                     className="text-gray-400 hover:text-brand-500 flex-shrink-0">
+                    <ExternalLink className="h-3 w-3" />
+                  </a>
+                </div>
+                {/* Stacked bar: green=passed, red=failed, gray=not run */}
+                <div className="flex h-3 rounded-full overflow-hidden gap-px bg-gray-100">
+                  {passW > 0 && <div className="bg-green-500 h-3" style={{ width: `${passW}%` }} title={`Passed: ${plan.passed}`} />}
+                  {failW > 0 && <div className="bg-red-400 h-3"   style={{ width: `${failW}%` }} title={`Failed: ${plan.failed}`} />}
+                  {inpW  > 0 && <div className="bg-gray-200 h-3"  style={{ width: `${inpW}%`  }} title={`Not run / In progress: ${plan.in_progress}`} />}
+                </div>
+                <div className="flex gap-4 text-xs text-gray-500">
+                  <span className="text-green-600 font-medium">{plan.passed} passed</span>
+                  {plan.failed > 0   && <span className="text-red-500 font-medium">{plan.failed} failed</span>}
+                  {plan.in_progress > 0 && <span>{plan.in_progress} not run</span>}
+                  <span className="ml-auto">{plan.total} total</span>
+                </div>
+                {/* Individual status counts */}
+                <div className="flex flex-wrap gap-1.5">
+                  {Object.entries(plan.status_counts || {}).sort((a,b)=>b[1]-a[1]).map(([st,n]) => (
+                    <span key={st} className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 text-xs rounded-full">
+                      <span className="font-bold">{n}</span> {st}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Regression Tests Section ───────────────────────────────────────────────────
 const DONE_STATUSES = new Set(['Done', 'DONE', 'Passed', 'PASSED'])
 const IN_PROGRESS_STATUSES = new Set(['In Progress', 'In Review', 'Validation'])
@@ -735,13 +823,38 @@ function RegressionTestsSection({ query, version }) {
           <span className="text-sm font-semibold text-purple-800">Regression Tests</span>
           <span className="ml-2 text-xs text-purple-500">label: {query.data?.label || 'REGRESSION_TEST'} · issuetype: Test</span>
         </div>
-        <div className="flex items-center gap-3 flex-shrink-0">
+        <div className="flex items-center gap-2 flex-shrink-0">
           {query.isLoading && <span className="text-xs text-gray-400">Loading…</span>}
           {stats && (
             <span className="text-xs text-gray-500 whitespace-nowrap">
               <span className="font-bold text-purple-600">{stats.total}</span> tests ·{' '}
               <span className="font-bold text-green-600">{stats.pct}%</span> passed
             </span>
+          )}
+          {data?.jira_search_url && (
+            <a
+              href={data.jira_search_url}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={e => e.stopPropagation()}
+              title="View in Jira"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-white border border-purple-200 text-purple-600 hover:bg-purple-50 hover:border-purple-400 transition-colors"
+            >
+              <ExternalLink className="h-3 w-3" />
+              Jira
+            </a>
+          )}
+          {data?.total > 0 && (
+            <a
+              href={`/api/coverage/regression-tests/export${version ? `?version=${encodeURIComponent(version)}` : ''}`}
+              download
+              onClick={e => e.stopPropagation()}
+              title="Export to Excel"
+              className="inline-flex items-center gap-1 px-2 py-1 rounded text-xs font-medium bg-white border border-green-200 text-green-700 hover:bg-green-50 hover:border-green-400 transition-colors"
+            >
+              <Download className="h-3 w-3" />
+              XLS
+            </a>
           )}
         </div>
       </div>
@@ -920,6 +1033,7 @@ export default function TestCoveragePage() {
   const [testPlanLoading, setTestPlanLoading] = useState(false)
   const [testPlanError, setTestPlanError] = useState(null)
   const [testPlanSavedAt, setTestPlanSavedAt] = useState(null)
+  const [testPlanNotes, setTestPlanNotes] = useState('')
 
   // Handover Criteria panel state
   const [handoverOpen, setHandoverOpen] = useState(false)
@@ -956,6 +1070,13 @@ export default function TestCoveragePage() {
     queryKey: ['coverage-regression', selectedVersion],
     queryFn: () => getRegressionTests(selectedVersion),
     enabled: !!selectedVersion,
+    staleTime: 5 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+  })
+
+  const automationRegressionQuery = useQuery({
+    queryKey: ['coverage-automation-regression'],
+    queryFn: getAutomationRegression,
     staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
   })
@@ -1166,6 +1287,7 @@ export default function TestCoveragePage() {
                       <p className="text-center py-8 text-gray-400 text-sm">No results found.</p>
                     )}
                     <RegressionTestsSection query={regressionQuery} version={selectedVersion} />
+                    <AutomationRegressionSection query={automationRegressionQuery} />
                   </div>
                 </>
               )}
@@ -1204,7 +1326,7 @@ export default function TestCoveragePage() {
                 {showIssueDrop && issueResults.length > 0 && (
                   <div className="absolute z-30 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-xl max-h-72 overflow-y-auto">
                     {issueResults.map(r => (
-                      <button key={r.key} onClick={() => { setSelectedIssue(r); setIssueSearch(r.key); setShowIssueDrop(false); setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null); setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null); setHandoverSavedAt(null) }}
+                      <button key={r.key} onClick={() => { setSelectedIssue(r); setIssueSearch(r.key); setShowIssueDrop(false); setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null); setTestPlanNotes(''); setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null); setHandoverSavedAt(null); setHandoverNotes('') }}
                         className="w-full text-left px-4 py-2.5 hover:bg-brand-50 transition-colors border-b border-gray-100 last:border-0">
                         <div className="flex items-center gap-2">
                           <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${r.type === 'Epic' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
@@ -1322,22 +1444,48 @@ export default function TestCoveragePage() {
 
                         {testPlanOpen && (
                           <div className="p-4 space-y-4 bg-white">
+                            {/* Notes textarea — always visible */}
+                            <div className="space-y-1">
+                              <label className="text-xs font-medium text-gray-600">
+                                Notes for the AI <span className="text-gray-400 font-normal">(optional — AI will use these when generating)</span>
+                              </label>
+                              <textarea
+                                rows={3}
+                                value={testPlanNotes}
+                                onChange={e => setTestPlanNotes(e.target.value)}
+                                disabled={testPlanLoading}
+                                placeholder="e.g. Focus on edge cases for offline mode. Emphasize performance under 1000 concurrent users. Skip accessibility — handled by a separate team."
+                                className="w-full text-sm border border-gray-200 rounded-lg px-3 py-2 resize-y focus:outline-none focus:ring-2 focus:ring-indigo-400 placeholder-gray-300 disabled:opacity-50"
+                              />
+                            </div>
+
+                            {/* Delete & start over — only when data exists */}
+                            {testPlan && !testPlanLoading && (
+                              <div className="flex justify-end">
+                                <button
+                                  onClick={() => { setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null) }}
+                                  className="text-xs text-red-500 hover:text-red-700 flex items-center gap-1 underline"
+                                >
+                                  Delete & start over
+                                </button>
+                              </div>
+                            )}
+
                             {!testPlan && !testPlanLoading && (
-                              <div className="text-center py-4">
-                                <p className="text-sm text-gray-500 mb-3">Generate a macro-level test plan to share with R&D and Product</p>
+                              <div className="flex justify-center">
                                 <button
                                   onClick={async () => {
                                     setTestPlanLoading(true); setTestPlanError(null)
                                     try {
                                       const stories = (d.by_epic || []).flatMap(e => e.stories || []).map(s => ({ key: s.key, summary: s.summary }))
-                                      const result = await generateTestPlan({ issue_key: selectedIssue.key, issue_summary: selectedIssue.summary, issue_type: selectedIssue.type, stories })
+                                      const result = await generateTestPlan({ issue_key: selectedIssue.key, issue_summary: selectedIssue.summary, issue_type: selectedIssue.type, stories, notes: testPlanNotes })
                                       setTestPlan(result)
                                       const saved = await saveAiContent({ issue_key: selectedIssue.key, content_type: 'test_plan', content: result })
                                       setTestPlanSavedAt(saved.generated_at)
                                     } catch(e) { setTestPlanError(e.message) }
                                     finally { setTestPlanLoading(false) }
                                   }}
-                                  className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 flex items-center gap-2 mx-auto"
+                                  className="px-4 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700 flex items-center gap-2"
                                 >
                                   <Sparkles className="h-4 w-4" /> Generate Test Plan
                                 </button>

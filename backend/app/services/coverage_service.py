@@ -277,22 +277,17 @@ class CoverageService:
         No fixVersion filter — the label is the version-family identifier.
         """
         label = self._regression_label(version)
-        cache_key = f"coverage:regression_tests:{version or label}"
+        # Regression tests are shared across all versions in the same family (e.g. all K1-S-3.x).
+        # Cache and query by label only — never filter by exact fixVersion.
+        cache_key = f"coverage:regression_tests:{label}"
         if force_refresh:
             self.cache.invalidate(cache_key)
 
         async def fetch():
-            if version:
-                # Both conditions required: label (version family) + exact fixVersion
-                jql = (
-                    f'issuetype = Test AND labels = "{label}" AND fixVersion = "{version}" '
-                    f'ORDER BY status ASC, key ASC'
-                )
-            else:
-                jql = (
-                    f'issuetype = Test AND labels = "{label}" '
-                    f'ORDER BY status ASC, key ASC'
-                )
+            jql = (
+                f'issuetype = Test AND labels = "{label}" '
+                f'ORDER BY status ASC, key ASC'
+            )
             tests_raw = await self._fetch_all(
                 jql,
                 fields=["summary", "status", "labels"],
@@ -311,11 +306,118 @@ class CoverageService:
             for t in tests:
                 st = t["status"]
                 status_counts[st] = status_counts.get(st, 0) + 1
+            from urllib.parse import quote
+            jql_raw = f'issuetype = Test AND labels = "{label}" ORDER BY status ASC, key ASC'
+            jira_search_url = f"{self.jira_base_url}/issues/?jql={quote(jql_raw)}"
             return {
-                "tests":         tests,
-                "total":         len(tests),
-                "status_counts": status_counts,
-                "label":         label,
+                "tests":           tests,
+                "total":           len(tests),
+                "status_counts":   status_counts,
+                "label":           label,
+                "jira_search_url": jira_search_url,
+            }
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
+
+    # ── Automation Regression (daily test plans) ───────────────────────────
+
+    AUTOMATION_REGRESSION_EPIC = "TMT0-43524"
+    PASS_STATUSES  = {"Passed", "Done", "DONE", "Closed"}
+    FAIL_STATUSES  = {"Failed", "Blocked", "Reopened", "Won't Fix"}
+
+    async def get_automation_regression(self, force_refresh: bool = False) -> dict:
+        """Return daily automation regression test plans and per-plan pass/fail stats.
+
+        Structure in Jira:
+          Epic TMT0-43524 → Test Plan children → "is tested by" Test issues
+        """
+        cache_key = "coverage:automation_regression"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            epic_key = self.AUTOMATION_REGRESSION_EPIC
+
+            # 1. Get test plans (direct children of the epic)
+            plans_raw = await self._fetch_all(
+                f'parent = "{epic_key}" ORDER BY key ASC',
+                fields=["summary", "status", "issuelinks", "labels"],
+            )
+
+            # 2. Collect test-case keys from "is tested by" links on each plan
+            plan_meta = []
+            all_test_keys: list[str] = []
+            for plan in plans_raw:
+                pf = plan.get("fields", {})
+                links = pf.get("issuelinks") or []
+                test_keys: list[str] = []
+                for lk in links:
+                    lt = lk.get("type", {})
+                    # "Tests" link type: inward = "is tested by", outward = "tests"
+                    inward_label = lt.get("inward", "").lower()
+                    outward_label = lt.get("outward", "").lower()
+                    linked = lk.get("inwardIssue") or lk.get("outwardIssue")
+                    if linked and ("tested" in inward_label or "tested" in outward_label or "test" in lt.get("name","").lower()):
+                        test_keys.append(linked["key"])
+                        all_test_keys.append(linked["key"])
+                plan_meta.append({
+                    "key":      plan["key"],
+                    "url":      self._issue_url(plan["key"]),
+                    "summary":  pf.get("summary", ""),
+                    "status":   (pf.get("status") or {}).get("name", ""),
+                    "labels":   pf.get("labels") or [],
+                    "test_keys": test_keys,
+                })
+
+            # 3. Fetch all test-case statuses in one query
+            test_status_map: dict[str, str] = {}
+            if all_test_keys:
+                keys_jql = f'issueKey in ({",".join(set(all_test_keys))})'
+                tests_raw = await self._fetch_all(keys_jql, fields=["summary", "status"])
+                for t in tests_raw:
+                    tf = t.get("fields", {})
+                    test_status_map[t["key"]] = (tf.get("status") or {}).get("name", "Unknown")
+
+            # 4. Build per-plan stats
+            from urllib.parse import quote
+            result_plans = []
+            for pm in plan_meta:
+                statuses = [test_status_map.get(k, "Unknown") for k in pm["test_keys"]]
+                total     = len(statuses)
+                passed    = sum(1 for s in statuses if s in self.PASS_STATUSES)
+                failed    = sum(1 for s in statuses if s in self.FAIL_STATUSES)
+                in_prog   = total - passed - failed
+                status_counts: dict[str, int] = {}
+                for s in statuses:
+                    status_counts[s] = status_counts.get(s, 0) + 1
+                jql_plan = f'issueKey in ({",".join(pm["test_keys"])})' if pm["test_keys"] else f'parent = "{pm["key"]}"'
+                result_plans.append({
+                    "key":          pm["key"],
+                    "url":          pm["url"],
+                    "summary":      pm["summary"],
+                    "plan_status":  pm["status"],
+                    "labels":       pm["labels"],
+                    "total":        total,
+                    "passed":       passed,
+                    "failed":       failed,
+                    "in_progress":  in_prog,
+                    "pass_pct":     round(passed / total * 100) if total else 0,
+                    "status_counts": status_counts,
+                    "jira_url":     f"{self.jira_base_url}/issues/?jql={quote(jql_plan)}",
+                })
+
+            totals_t = sum(p["total"]  for p in result_plans)
+            totals_p = sum(p["passed"] for p in result_plans)
+            totals_f = sum(p["failed"] for p in result_plans)
+            return {
+                "epic_key":    epic_key,
+                "epic_url":    self._issue_url(epic_key),
+                "plans":       result_plans,
+                "total_plans": len(result_plans),
+                "total_tests": totals_t,
+                "total_passed": totals_p,
+                "total_failed": totals_f,
+                "overall_pct": round(totals_p / totals_t * 100) if totals_t else 0,
             }
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
@@ -558,7 +660,7 @@ class CoverageService:
     # ── AI Test Plan ───────────────────────────────────────────────────
 
     async def generate_test_plan(
-        self, issue_key: str, issue_summary: str, issue_type: str, stories: list[dict]
+        self, issue_key: str, issue_summary: str, issue_type: str, stories: list[dict], notes: str = ""
     ) -> dict:
         """AI-generate a macro-level test plan for an Epic or Story using tool-use for valid JSON."""
         settings = get_settings()
@@ -569,12 +671,13 @@ class CoverageService:
             f"  • {s.get('key','')}: {s.get('summary','')}" for s in stories[:25]
         )
         stories_section = ("Stories/Tasks in scope:\n" + stories_text) if stories_text else ""
+        notes_section = (f"\nQA notes / additional context:\n{notes.strip()}") if notes and notes.strip() else ""
 
         prompt = f"""You are a senior QA engineer creating a test plan document to present to R&D and Product.
 
 Issue: {issue_key} ({issue_type})
 Summary: {issue_summary}
-{stories_section}
+{stories_section}{notes_section}
 
 Call the generate_test_plan tool with a comprehensive, specific test plan for this feature.
 Be concrete — each scenario must be actionable. For Performance, set applicable=false if not relevant."""

@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.database.db import init_db
 from app.services.changelog_service import get_changelog_service
 from app.services.dashboard_service import get_dashboard_service
-from app.api.routes import dashboard, changelog, export, jira_meta, zoho, coverage, test_generator, anomaly, test_plans, release_notes, investigation, bug_triage, bug_reporter, mexico_qa, kone, automation, sprint_planning, auth
+from app.api.routes import dashboard, changelog, export, jira_meta, zoho, coverage, test_generator, anomaly, test_plans, release_notes, investigation, bug_triage, bug_reporter, mexico_qa, kone, automation, sprint_planning, auth, activity
 
 logging.basicConfig(
     level=logging.INFO,
@@ -114,6 +114,7 @@ app.include_router(kone.router)
 app.include_router(automation.router)
 app.include_router(sprint_planning.router)
 app.include_router(auth.router)
+app.include_router(activity.router)
 
 
 @app.get("/health")

@@ -504,8 +504,8 @@ export function IssueTable({
                     <ExternalLink className="h-3 w-3" />
                   </a>
                 </td>
-                <td className="px-3 py-2.5 max-w-xs">
-                  <span className="line-clamp-2 text-gray-800">{issue.summary}</span>
+                <td className="px-3 py-2.5 min-w-[300px]">
+                  <span className="line-clamp-2 text-gray-800" title={issue.summary}>{issue.summary}</span>
                 </td>
                 <td className="px-3 py-2.5 whitespace-nowrap">
                   <IssueTypeBadge type={issue.issue_type} />

@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, CheckSquare, Users, AlertTriangle,
   Bug, Clock, TrendingUp, History, Ticket, BarChart2, FlaskConical, PlayCircle, Zap, Layers, ClipboardList, FileText, GitBranch, PenLine, Target, Globe, CalendarDays,
-  Moon, Sun, LogOut, ShieldCheck, UserCircle2
+  Moon, Sun, LogOut, ShieldCheck, UserCircle2, Activity, Flame
 } from 'lucide-react'
 import { useDarkMode } from '../../hooks/useDarkMode'
 
@@ -14,6 +14,9 @@ const ALL_NAV = [
   { to: '/blockers',       label: 'Blockers',         icon: AlertTriangle,   roles: ['admin'] },
   { to: '/bugs',           label: 'Bugs (30d)',        icon: Bug,             roles: ['admin'] },
   { to: '/bugs-by-version', label: 'Bugs by Version', icon: Layers,          roles: ['admin', 'qa'] },
+  { to: '/prod-bugs',       label: 'Production Bugs',  icon: Flame,           roles: ['admin'] },
+  { to: '/qa-status',       label: 'QA Version Status', icon: Activity,       roles: ['admin', 'qa'] },
+  { to: '/qa-activity',     label: 'QA Activity Report',icon: TrendingUp,     roles: ['admin'] },
   { to: '/trends',         label: 'Trends',           icon: TrendingUp,      roles: ['admin'] },
   { to: '/zoho',           label: 'Zoho Desk',        icon: Ticket,          roles: ['admin'] },
   { to: '/zoho-reports',   label: 'Zoho Reports',     icon: BarChart2,       roles: ['admin'] },

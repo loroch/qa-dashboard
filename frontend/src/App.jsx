@@ -24,9 +24,12 @@ import BugTriagePage from './pages/BugTriagePage'
 import MexicoQAPage from './pages/MexicoQAPage'
 import KonePage from './pages/KonePage'
 import SprintPlanningPage from './pages/SprintPlanningPage'
+import VersionQAStatusPage from './pages/VersionQAStatusPage'
+import ProdBugsPage from './pages/ProdBugsPage'
+import QAActivityPage from './pages/QAActivityPage'
 
 // Routes accessible by the QA role
-const QA_ALLOWED_PATHS = new Set(['/kone', '/coverage', '/bugs-by-version'])
+const QA_ALLOWED_PATHS = new Set(['/kone', '/coverage', '/bugs-by-version', '/qa-status'])
 const QA_HOME = '/coverage'
 
 function loadUser() {
@@ -76,10 +79,13 @@ export default function App() {
             <Route path="/bug-triage"        element={isAdmin ? <BugTriagePage />     : <Navigate to={QA_HOME} replace />} />
             <Route path="/mexico-qa"         element={isAdmin ? <MexicoQAPage />      : <Navigate to={QA_HOME} replace />} />
             <Route path="/sprint-planning"   element={isAdmin ? <SprintPlanningPage />: <Navigate to={QA_HOME} replace />} />
+            <Route path="/prod-bugs"         element={isAdmin ? <ProdBugsPage />      : <Navigate to={QA_HOME} replace />} />
+            <Route path="/qa-activity"       element={isAdmin ? <QAActivityPage />    : <Navigate to={QA_HOME} replace />} />
 
             {/* Routes available to both roles */}
             <Route path="/coverage"          element={<TestCoveragePage />} />
             <Route path="/bugs-by-version"   element={<BugsByVersionPage />} />
+            <Route path="/qa-status"         element={<VersionQAStatusPage />} />
             <Route path="/kone"              element={<KonePage />} />
 
             <Route path="*"                  element={<Navigate to={isAdmin ? '/' : QA_HOME} replace />} />

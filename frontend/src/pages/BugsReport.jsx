@@ -447,8 +447,8 @@ function QAAssignmentsPanel() {
                           </td>
 
                           {/* Summary */}
-                          <td className="px-3 py-2.5">
-                            <p className="text-slate-700 text-xs line-clamp-2 leading-snug">{issue.summary}</p>
+                          <td className="px-3 py-2.5 min-w-[300px]">
+                            <p className="text-slate-700 text-xs line-clamp-2 leading-snug" title={issue.summary}>{issue.summary}</p>
                             {issue.parent_key && (
                               <p className="text-slate-400 text-[10px] mt-0.5">{issue.parent_key} · {issue.parent_summary}</p>
                             )}

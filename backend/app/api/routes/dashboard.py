@@ -100,6 +100,17 @@ async def get_bugs(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/prod-bugs")
+async def get_prod_bugs(refresh: bool = Query(False)):
+    """Bugs labeled FromHaim / Prod_Zoho or filed against PROD environment."""
+    try:
+        svc = get_dashboard_service()
+        return await svc.get_prod_bugs(force_refresh=refresh)
+    except Exception as e:
+        logger.error(f"prod-bugs error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/blockers")
 async def get_blockers(
     refresh: bool = Query(False),
@@ -148,6 +159,20 @@ async def get_bugs_by_version(
         return data
     except Exception as e:
         logger.error(f"Bugs-by-version error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/bugs-grouped-by-epic")
+async def get_bugs_grouped_by_epic(
+    version: str = Query(..., description="Fix version name"),
+    refresh: bool = Query(False),
+):
+    """Bugs for a version grouped by their 'Relates to' Epic issue links."""
+    try:
+        svc = get_dashboard_service()
+        return await svc.get_bugs_grouped_by_relates_epic(version, force_refresh=refresh)
+    except Exception as e:
+        logger.error(f"bugs-grouped-by-epic error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

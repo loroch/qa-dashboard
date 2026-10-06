@@ -450,6 +450,86 @@ class DashboardService:
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
 
+    async def get_bugs_grouped_by_relates_epic(self, version: str, force_refresh: bool = False) -> dict:
+        """Bugs for a version grouped by their 'Relates to' Epic issue links."""
+        import hashlib
+        cache_key = f"dashboard:bugs_relates_epic:{hashlib.md5(version.encode()).hexdigest()[:8]}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                f'project = TMT0 AND issuetype = Bug AND fixVersion = "{version}" '
+                f'ORDER BY priority ASC, created DESC'
+            )
+            bugs_raw = await self.jira.search_issues(
+                jql,
+                fields=[
+                    "summary", "status", "priority", "reporter", "assignee",
+                    "created", "updated", "labels", "components",
+                    "fixVersions", "parent", "customfield_10020", "issuelinks",
+                ],
+                max_total=2000,
+            )
+
+            bugs = self.mapper.map_issues(bugs_raw)
+            mapped_by_key = {b["key"]: b for b in bugs}
+
+            epic_info: dict[str, dict] = {}
+            epic_bugs: dict[str, list] = defaultdict(list)
+            unlinked: list[str] = []
+
+            for raw in bugs_raw:
+                bug_key = raw["key"]
+                links = (raw.get("fields") or {}).get("issuelinks") or []
+                relates_epics = []
+                for lk in links:
+                    if (lk.get("type") or {}).get("name") != "Relates":
+                        continue
+                    for side in ("inwardIssue", "outwardIssue"):
+                        linked = lk.get(side)
+                        if not linked:
+                            continue
+                        lf = linked.get("fields") or {}
+                        if (lf.get("issuetype") or {}).get("name") == "Epic":
+                            ek = linked["key"]
+                            relates_epics.append(ek)
+                            if ek not in epic_info:
+                                epic_info[ek] = {
+                                    "key": ek,
+                                    "summary": lf.get("summary", ek),
+                                    "url": f"{self.jira_base_url}/browse/{ek}",
+                                }
+                if relates_epics:
+                    for ek in relates_epics:
+                        epic_bugs[ek].append(bug_key)
+                else:
+                    unlinked.append(bug_key)
+
+            result_epics = []
+            for ek, info in sorted(epic_info.items(), key=lambda x: -len(epic_bugs[x[0]])):
+                bug_keys = epic_bugs[ek]
+                open_count = sum(
+                    1 for bk in bug_keys
+                    if mapped_by_key.get(bk, {}).get("status_category") != "Done"
+                )
+                result_epics.append({
+                    "key":        ek,
+                    "summary":    info["summary"],
+                    "url":        info["url"],
+                    "bug_count":  len(bug_keys),
+                    "open_count": open_count,
+                })
+
+            return {
+                "version":       version,
+                "epics":         result_epics,
+                "unlinked_count": len(unlinked),
+                "total_bugs":    len(bugs),
+            }
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
+
     async def get_member_work(self, member_id: str, days: int = 30, force_refresh: bool = False) -> list[dict]:
         """All issues assigned to OR created by a specific member in the last N days."""
         import hashlib
@@ -476,6 +556,92 @@ class DashboardService:
             return self.mapper.map_issues(issues)
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=180)
+
+    async def get_prod_bugs(self, force_refresh: bool = False) -> dict:
+        """Bugs labeled FromHaim / Prod_Zoho OR filed against PROD environment."""
+        cache_key = "dashboard:prod_bugs"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                'issuetype = Bug AND ('
+                'labels in ("FromHaim", "Prod_Zoho") OR '
+                'environment ~ "PROD"'
+                ') ORDER BY priority ASC, created DESC'
+            )
+            issues_raw = await self.jira.search_issues(
+                jql,
+                fields=[
+                    "summary", "status", "priority", "assignee", "reporter",
+                    "created", "updated", "fixVersions", "labels",
+                    "environment", "components",
+                ],
+                max_total=500,
+            )
+            bugs = []
+            for i in issues_raw:
+                f = i.get("fields", {})
+                labels = f.get("labels") or []
+                env_text = (f.get("environment") or "").strip()
+                source = []
+                if "FromHaim" in labels:
+                    source.append("FromHaim")
+                if "Prod_Zoho" in labels:
+                    source.append("Prod_Zoho")
+                if env_text and "PROD" in env_text.upper():
+                    source.append("PROD env")
+                bugs.append({
+                    "key":        i["key"],
+                    "url":        f"{self.jira_base_url}/browse/{i['key']}",
+                    "summary":    f.get("summary", ""),
+                    "status":     (f.get("status") or {}).get("name", ""),
+                    "priority":   (f.get("priority") or {}).get("name", ""),
+                    "assignee":   (f.get("assignee") or {}).get("displayName", "Unassigned"),
+                    "labels":     labels,
+                    "environment": env_text,
+                    "source":     source,
+                    "created":    f.get("created", ""),
+                    "updated":    f.get("updated", ""),
+                    "fix_versions": [v.get("name", "") for v in (f.get("fixVersions") or [])],
+                })
+
+            # Stats
+            open_statuses = {"ToDo", "In Progress", "In Review", "Open", "Reopened", "Ready for Testing"}
+            open_count = sum(1 for b in bugs if b["status"] in open_statuses)
+            high_crit  = sum(1 for b in bugs if b["priority"] in ("Highest", "High"))
+            from_haim  = sum(1 for b in bugs if "FromHaim" in b["source"])
+            prod_zoho  = sum(1 for b in bugs if "Prod_Zoho" in b["source"])
+            prod_env   = sum(1 for b in bugs if "PROD env"  in b["source"])
+
+            by_priority = {}
+            by_status   = {}
+            by_assignee = {}
+            by_source   = {}
+            for b in bugs:
+                by_priority[b["priority"]] = by_priority.get(b["priority"], 0) + 1
+                by_status[b["status"]]     = by_status.get(b["status"], 0) + 1
+                by_assignee[b["assignee"]] = by_assignee.get(b["assignee"], 0) + 1
+                for s in b["source"]:
+                    by_source[s] = by_source.get(s, 0) + 1
+
+            return {
+                "bugs": bugs,
+                "stats": {
+                    "total":       len(bugs),
+                    "open":        open_count,
+                    "high_critical": high_crit,
+                    "from_haim":   from_haim,
+                    "prod_zoho":   prod_zoho,
+                    "prod_env":    prod_env,
+                    "by_priority": by_priority,
+                    "by_status":   by_status,
+                    "by_assignee": by_assignee,
+                    "by_source":   by_source,
+                },
+            }
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
 
     async def get_epics(self, force_refresh: bool = False) -> list[dict]:
         cache_key = "dashboard:epics"

@@ -1,10 +1,12 @@
 """
 Test Coverage API routes.
 """
+import io
 import json
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Query, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
 from sqlalchemy import select
@@ -108,6 +110,71 @@ async def get_regression_tests(
         return await svc.get_regression_tests(version=version or None, force_refresh=refresh)
     except Exception as e:
         logger.error(f"Coverage regression tests error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/automation-regression")
+async def get_automation_regression(refresh: bool = Query(False)):
+    """Daily automation regression test plans under TMT0-43524 with per-plan pass/fail stats."""
+    try:
+        svc = get_coverage_service()
+        return await svc.get_automation_regression(force_refresh=refresh)
+    except Exception as e:
+        logger.error(f"Automation regression error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/regression-tests/export")
+async def export_regression_tests(
+    version: Optional[str] = Query(None),
+):
+    """Download regression tests as an Excel file."""
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, PatternFill, Alignment
+        from openpyxl.utils import get_column_letter
+
+        svc = get_coverage_service()
+        data = await svc.get_regression_tests(version=version or None)
+        tests = data.get("tests", [])
+
+        wb = openpyxl.Workbook()
+        ws = wb.active
+        ws.title = "Regression Tests"
+
+        headers = ["Key", "Summary", "Status", "Labels"]
+        header_fill = PatternFill("solid", fgColor="6B46C1")
+        header_font = Font(bold=True, color="FFFFFF")
+        for col, h in enumerate(headers, 1):
+            cell = ws.cell(row=1, column=col, value=h)
+            cell.fill = header_fill
+            cell.font = header_font
+            cell.alignment = Alignment(horizontal="center")
+
+        for row_i, t in enumerate(tests, 2):
+            ws.cell(row=row_i, column=1, value=t.get("key", ""))
+            ws.cell(row=row_i, column=2, value=t.get("summary", ""))
+            ws.cell(row=row_i, column=3, value=t.get("status", ""))
+            ws.cell(row=row_i, column=4, value=", ".join(t.get("labels", [])))
+
+        # Auto-size columns
+        col_widths = [15, 80, 20, 40]
+        for col, width in enumerate(col_widths, 1):
+            ws.column_dimensions[get_column_letter(col)].width = width
+
+        buf = io.BytesIO()
+        wb.save(buf)
+        buf.seek(0)
+
+        label = data.get("label", "REGRESSION_TEST")
+        filename = f"regression_tests_{label}_{datetime.now().strftime('%Y%m%d')}.xlsx"
+        return StreamingResponse(
+            buf,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        )
+    except Exception as e:
+        logger.error(f"Regression export error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -242,7 +309,7 @@ async def generate_test_plan(body: TestPlanRequest):
     try:
         svc = get_coverage_service()
         return await svc.generate_test_plan(
-            body.issue_key, body.issue_summary, body.issue_type, body.stories
+            body.issue_key, body.issue_summary, body.issue_type, body.stories, body.notes
         )
     except Exception as e:
         logger.error(f"generate_test_plan error for {body.issue_key}: {e}", exc_info=True)
