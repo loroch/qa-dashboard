@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Sensor Health Validator</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%2358a6ff' stroke-width='2'><path d='M22 12h-4l-3 9L9 3l-3 9H2'/></svg>">
+<style>
+:root{
+  --bg:#0b0f14; --panel:#11161d; --panel2:#151b23; --line:#232b36; --line2:#2d3744;
+  --fg:#e6edf3; --mut:#8b949e; --dim:#6e7681; --accent:#58a6ff; --accent-bg:rgba(56,139,253,.12);
+  --ok:#3fb950; --warn:#d29922; --err:#f85149; --unk:#768390;
+  --ok-bg:rgba(63,185,80,.12); --warn-bg:rgba(210,153,34,.13); --err-bg:rgba(248,81,73,.12); --unk-bg:rgba(118,131,144,.14);
+  --mono:ui-monospace,SFMono-Regular,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:14px/1.45 "Segoe UI",system-ui,-apple-system,sans-serif}
+button,input,select{font:inherit;color:inherit}
+.wrap{max-width:1440px;margin:0 auto;padding:0 20px 48px}
+
+/* top bar */
+.top{position:sticky;top:0;z-index:10;background:rgba(11,15,20,.92);backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+.top .wrap{display:flex;align-items:center;gap:12px;padding-top:12px;padding-bottom:12px;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto}
+.brand svg{color:var(--accent)}
+.brand h1{font-size:16px;margin:0;font-weight:600}
+.brand span{color:var(--mut);font-size:12px}
+.btn{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line2);background:var(--panel2);border-radius:6px;padding:7px 12px;cursor:pointer;white-space:nowrap}
+.btn:hover{border-color:var(--mut)}
+.btn.primary{background:#1f6feb;border-color:#388bfd;color:#fff;font-weight:600}
+.btn.primary:hover{background:#2f7cf6}
+.btn:disabled{opacity:.6;cursor:default}
+select.btn{padding-right:28px}
+.spin{width:14px;height:14px;border:2px solid rgba(255,255,255,.35);border-top-color:#fff;border-radius:50%;animation:sp .8s linear infinite}
+@keyframes sp{to{transform:rotate(360deg)}}
+
+/* settings */
+.settings{display:none;background:var(--panel);border-bottom:1px solid var(--line)}
+.settings.open{display:block}
+.settings .wrap{display:grid;grid-template-columns:1fr 1fr 2fr 110px;gap:12px;padding-top:14px;padding-bottom:14px}
+label.f{display:flex;flex-direction:column;gap:4px;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+label.f input{background:var(--bg);border:1px solid var(--line2);border-radius:6px;padding:7px 9px;font-family:var(--mono);font-size:12px;text-transform:none;letter-spacing:0;color:var(--fg)}
+
+/* sections */
+h2{font-size:13px;font-weight:600;color:var(--mut);text-transform:uppercase;letter-spacing:.06em;margin:28px 0 10px;display:flex;align-items:center;gap:8px}
+h2 .count{font-weight:400;color:var(--dim);text-transform:none;letter-spacing:0}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:8px}
+
+.sources{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:20px}
+.src{padding:12px 14px;display:flex;flex-direction:column;gap:3px;min-width:0}
+.src .k{display:flex;align-items:center;gap:7px;font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--ok);flex:none}
+.src .v{font-weight:600}
+.src .s{color:var(--dim);font-size:12px;font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+.kpis{display:grid;grid-template-columns:repeat(4,1fr) 2fr;gap:12px;margin-top:12px}
+.kpi{padding:12px 14px}
+.kpi .l{font-size:12px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+.kpi .n{font-size:28px;font-weight:600;font-variant-numeric:tabular-nums;line-height:1.2;margin-top:2px}
+.kinds{display:flex;flex-wrap:wrap;gap:6px;margin-top:8px}
+
+/* type cards */
+.types{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px}
+.type{padding:14px;cursor:pointer;transition:border-color .15s}
+.type:hover{border-color:var(--line2)}
+.type.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent) inset}
+.type .hd{display:flex;align-items:baseline;gap:8px;margin-bottom:10px}
+.type .hd b{font-size:15px}
+.type .hd .c{color:var(--mut);font-size:12px}
+.type .hd .badge{margin-left:auto}
+.srow{display:grid;grid-template-columns:44px 1fr;align-items:center;gap:8px;margin:6px 0}
+.srow .lab{font-size:11px;color:var(--mut);font-weight:600;letter-spacing:.04em}
+.bar{display:flex;height:20px;border-radius:4px;overflow:hidden;background:var(--panel2);font-size:11px;font-weight:600}
+.bar > span{display:flex;align-items:center;justify-content:center;min-width:20px;color:#0b0f14}
+.bar .empty{color:var(--dim);font-weight:400;padding-left:8px;justify-content:flex-start;width:100%}
+.b-workingproperly{background:var(--ok)} .b-malfunction{background:var(--warn)} .b-failed{background:var(--err)} .b-unknown{background:var(--unk)}
+.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--mut)}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:5px;vertical-align:-1px}
+
+/* pills */
+.pill{display:inline-flex;align-items:center;gap:5px;padding:1px 8px;border-radius:10px;font-size:12px;font-weight:500;white-space:nowrap;border:1px solid transparent}
+.p-workingproperly{color:var(--ok);background:var(--ok-bg);border-color:rgba(63,185,80,.3)}
+.p-malfunction{color:var(--warn);background:var(--warn-bg);border-color:rgba(210,153,34,.3)}
+.p-failed{color:var(--err);background:var(--err-bg);border-color:rgba(248,81,73,.3)}
+.p-unknown{color:#adbac7;background:var(--unk-bg);border-color:rgba(118,131,144,.3)}
+.p-none{color:var(--dim)}
+.badge{font-size:11px;padding:1px 7px;border-radius:10px;font-weight:600}
+.badge.good{color:var(--ok);background:var(--ok-bg)} .badge.bad{color:var(--warn);background:var(--warn-bg)}
+.kind{font-family:var(--mono);font-size:11px;font-weight:600;padding:1px 6px;border-radius:4px;background:var(--warn-bg);color:var(--warn);white-space:nowrap}
+
+/* table */
+.toolbar{display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:10px 12px;border-bottom:1px solid var(--line)}
+.tabs{display:flex;gap:4px;flex-wrap:wrap;margin-right:auto}
+.tab{border:1px solid transparent;background:none;border-radius:6px;padding:5px 10px;cursor:pointer;color:var(--mut)}
+.tab:hover{color:var(--fg)}
+.tab.on{background:var(--accent-bg);border-color:rgba(56,139,253,.4);color:var(--fg)}
+.tab .c{color:var(--dim);margin-left:4px;font-size:12px}
+.toggle{display:flex;align-items:center;gap:6px;color:var(--mut);cursor:pointer;user-select:none}
+.search{background:var(--bg);border:1px solid var(--line2);border-radius:6px;padding:6px 9px;width:200px}
+.tbl{overflow-x:auto}
+table{width:100%;border-collapse:collapse}
+th{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em;text-align:left;font-weight:600;padding:9px 12px;border-bottom:1px solid var(--line);white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--line);vertical-align:top}
+tbody tr.r{cursor:pointer}
+tbody tr.r:hover{background:var(--panel2)}
+tr.has-issue td:first-child{box-shadow:3px 0 0 var(--warn) inset}
+.mono{font-family:var(--mono);font-size:12px}
+.num{font-variant-numeric:tabular-nums;white-space:nowrap}
+.sub{color:var(--dim);font-size:12px;margin-top:2px}
+span.sub{white-space:nowrap}
+.ok-txt{color:var(--ok);font-size:12px}
+.issue{display:flex;gap:6px;align-items:baseline;margin:2px 0;font-size:12px}
+tr.det td{background:var(--bg);padding:12px 16px}
+.dgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
+.dgrid h4{margin:0 0 6px;font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.05em}
+.kv{display:grid;grid-template-columns:auto 1fr;gap:2px 12px;font-size:12px}
+.kv dt{color:var(--dim)} .kv dd{margin:0;font-family:var(--mono);word-break:break-all}
+.empty-row td{text-align:center;color:var(--dim);padding:28px}
+
+.two{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.list{padding:6px 14px 12px}
+.list .li{display:flex;justify-content:space-between;gap:12px;padding:7px 0;border-bottom:1px solid var(--line);font-size:13px}
+.list .li:last-child{border-bottom:none}
+.hint{color:var(--dim);font-size:12px;padding:10px 14px 0}
+
+/* states */
+.hero{text-align:center;padding:80px 20px;color:var(--mut)}
+.hero h3{color:var(--fg);font-size:18px;margin:12px 0 6px}
+.banner{margin-top:16px;padding:10px 14px;border-radius:8px;border:1px solid rgba(248,81,73,.4);background:var(--err-bg);color:#ffa198;display:none}
+.banner.show{display:block}
+.running{opacity:.45;pointer-events:none;transition:opacity .2s}
+
+/* modal */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.6);display:none;align-items:center;justify-content:center;z-index:50;padding:16px}
+.modal.show{display:flex}
+.modal .card{width:420px;max-width:100%;padding:20px;display:flex;flex-direction:column;gap:12px}
+.modal h3{margin:0;font-size:16px}
+.modal p{margin:0;color:var(--mut);font-size:13px}
+.modal .acts{display:flex;justify-content:flex-end;gap:8px;margin-top:4px}
+.modal .err{color:var(--err);font-size:12px;min-height:16px}
+
+@media (max-width:1000px){
+  .kpis{grid-template-columns:repeat(2,1fr)} .kpis .kpi:last-child{grid-column:1/-1}
+  .sources,.two,.dgrid{grid-template-columns:1fr}
+  .settings .wrap{grid-template-columns:1fr}
+}
+@media (max-width:600px){ .wrap{padding:0 16px 40px} .search{width:100%} .brand span{display:none} }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="wrap">
+    <div class="brand">
+      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      <div><h1>Sensor Health Validator</h1><span>C-Insight BI · Elasticsearch · Units log</span></div>
+    </div>
+    <select id="history" class="btn" title="Previous runs"><option value="">History</option></select>
+    <button id="btnSettings" class="btn" title="Sources">
+      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/></svg>
+      Sources
+    </button>
+    <button id="btnRun" class="btn primary">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>
+      Run comparison
+    </button>
+  </div>
+</header>
+
+<div id="settings" class="settings">
+  <div class="wrap">
+    <label class="f">BI URL<input id="cfgBi"></label>
+    <label class="f">Elasticsearch URL<input id="cfgEs"></label>
+    <label class="f">Units log path<input id="cfgLog"></label>
+    <label class="f">Log clock (UTC±h)<input id="cfgOff" type="number" step="0.5" title="Fallback only — detected automatically when possible"></label>
+  </div>
+</div>
+
+<main class="wrap">
+  <div id="banner" class="banner"></div>
+  <div id="content">
+    <div class="hero">
+      <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      <h3>No comparison yet</h3>
+      <div>Press <b>Run comparison</b> to check BI and Elasticsearch against the Units log.</div>
+    </div>
+  </div>
+</main>
+
+<div id="modal" class="modal">
+  <div class="card">
+    <h3>Connect to the Units log</h3>
+    <p id="mPath"></p>
+    <label class="f">User<input id="mUser" value="int.local\c4isrv" autocomplete="username"></label>
+    <label class="f">Password<input id="mPass" type="password" autocomplete="current-password"></label>
+    <div class="err" id="mErr"></div>
+    <div class="acts">
+      <button class="btn" id="mCancel">Cancel</button>
+      <button class="btn primary" id="mOk">Connect &amp; run</button>
+    </div>
+  </div>
+</div>
+
+<script>
+const STATUS = ["workingproperly","malfunction","failed","unknown"];
+const SLABEL = {workingproperly:"Working",malfunction:"Malfunction",failed:"Failed",unknown:"Unknown"};
+const KIND_HELP = {
+  "LOG≠ES":"Latest status in Units log differs from current ES state",
+  "ES≠BI":"BI shows a different status than ES",
+  "BUCKET":"BI status/colour bucket mismatch",
+  "TYPE":"Sensor type differs between sources",
+  "MISSING":"Sensor missing from BI or ES",
+  "EVENTS":"Status transitions not matched between log and ES",
+};
+const $ = s => document.querySelector(s);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const pill = s => s ? `<span class="pill p-${esc(s)}">${esc(SLABEL[s] || s)}</span>` : `<span class="pill p-none">—</span>`;
+const fmtTime = iso => iso ? new Date(iso).toLocaleString([], {month:"short",day:"2-digit",hour:"2-digit",minute:"2-digit",second:"2-digit"}) : "—";
+
+let data = null, ui = {type:"all", onlyIssues:false, q:"", open:new Set()};
+try { Object.assign(ui, JSON.parse(localStorage.getItem("shv-ui") || "{}"), {open:new Set()}); } catch {}
+const saveUi = () => { try { localStorage.setItem("shv-ui", JSON.stringify({type:ui.type, onlyIssues:ui.onlyIssues})); } catch {} };
+
+// ── config / history ────────────────────────────────────────────────────────
+async function init() {
+  const cfg = await (await fetch("/api/config")).json();
+  $("#cfgBi").value = cfg.bi; $("#cfgEs").value = cfg.es; $("#cfgLog").value = cfg.log; $("#cfgOff").value = cfg.utcOffset;
+  const runs = await loadHistory();
+  if (runs.length) loadRun(runs[0].id);
+}
+async function loadHistory() {
+  const runs = await (await fetch("/api/runs")).json();
+  $("#history").innerHTML = `<option value="">History (${runs.length})</option>` + runs.map(r =>
+    `<option value="${esc(r.id)}">${esc(r.generated)} — ${r.withFindings ? r.withFindings + " finding" + (r.withFindings>1?"s":"") : "all consistent"}</option>`).join("");
+  return runs;
+}
+async function loadRun(id) {
+  const r = await fetch(`/api/runs/${id}`);
+  if (r.ok) { data = await r.json(); render(); }
+}
+
+// ── run ─────────────────────────────────────────────────────────────────────
+async function run() {
+  const btn = $("#btnRun");
+  btn.disabled = true; btn.innerHTML = `<span class="spin"></span> Comparing…`;
+  $("#banner").classList.remove("show");
+  $("#content").classList.add("running");
+  try {
+    const body = {bi:$("#cfgBi").value.trim(), es:$("#cfgEs").value.trim(), log:$("#cfgLog").value.trim(), utcOffset:+$("#cfgOff").value || 3};
+    const r = await fetch("/api/run", {method:"POST", headers:{"Content-Type":"application/json"}, body:JSON.stringify(body)});
+    const j = await r.json();
+    if (r.status === 424) { openModal(body.log); return; }
+    if (!r.ok) throw new Error(j.detail?.message || j.detail || r.statusText);
+    data = j; ui.open.clear(); render(); loadHistory();
+  } catch (e) {
+    $("#banner").textContent = "Comparison failed: " + e.message; $("#banner").classList.add("show");
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = `<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg> Run comparison`;
+    $("#content").classList.remove("running");
+  }
+}
+
+function openModal(path) { $("#mPath").textContent = path; $("#mErr").textContent = ""; $("#mPass").value = ""; $("#modal").classList.add("show"); $("#mPass").focus(); }
+async function connect() {
+  $("#mOk").disabled = true; $("#mErr").textContent = "";
+  try {
+    const r = await fetch("/api/connect", {method:"POST", headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({log:$("#cfgLog").value.trim(), user:$("#mUser").value.trim(), password:$("#mPass").value})});
+    const j = await r.json();
+    if (!r.ok) { $("#mErr").textContent = j.detail?.message || "Connection failed"; return; }
+    $("#modal").classList.remove("show"); run();
+  } finally { $("#mOk").disabled = false; $("#mPass").value = ""; }
+}
+
+// ── render ──────────────────────────────────────────────────────────────────
+function render() {
+  const m = data.meta, s = data.summary, sensors = data.sensors;
+  const onBi = t => sensors.some(x => x.typeLabel === t && x.bi);
+  const types = [...new Set(sensors.map(x => x.typeLabel))].sort((a, b) => onBi(b) - onBi(a) || a.localeCompare(b));
+  if (ui.type !== "all" && !types.includes(ui.type)) ui.type = "all";
+  const kinds = Object.entries(s.byKind || {});
+
+  $("#content").innerHTML = `
+    <div class="sources">
+      <div class="card src"><div class="k"><span class="dot"></span>C-Insight BI</div>
+        <div class="v">${sensors.filter(x => x.bi).length} sensors on dashboard</div><div class="s" title="${esc(m.bi)}">${esc(m.bi)}</div></div>
+      <div class="card src"><div class="k"><span class="dot"></span>Elasticsearch</div>
+        <div class="v">Snapshot ${esc(m.cycle)} · ${m.snapCount} docs</div><div class="s" title="${esc(m.es)}">${esc(m.es)}</div></div>
+      <div class="card src"><div class="k"><span class="dot"></span>Units log</div>
+        <div class="v">${esc(m.logFrom.slice(11,16))} → ${esc(m.logTo.slice(11,16))} UTC · ${m.logLines.toLocaleString()} lines</div>
+        <div class="s" title="${esc(m.log)}">clock ${esc(m.offset)} (${esc(m.offsetSource)}) · ${esc(m.log)}</div></div>
+    </div>
+
+    <div class="kpis">
+      <div class="card kpi"><div class="l">Sensors compared</div><div class="n">${s.total}</div></div>
+      <div class="card kpi"><div class="l">Consistent</div><div class="n" style="color:var(--ok)">${s.total - s.withFindings}</div></div>
+      <div class="card kpi"><div class="l">With findings</div><div class="n" style="color:${s.withFindings ? "var(--warn)" : "var(--fg)"}">${s.withFindings}</div></div>
+      <div class="card kpi"><div class="l">VMS cameras unknown to Units</div><div class="n">${m.unknownCams.length}</div></div>
+      <div class="card kpi"><div class="l">Findings by check · run ${esc(m.generated)}</div>
+        <div class="kinds">${kinds.length ? kinds.map(([k,n]) => `<span class="kind" title="${esc(KIND_HELP[k]||"")}">${esc(k)} × ${n}</span>`).join("")
+          : `<span class="ok-txt">No discrepancies between BI, ES and the Units log</span>`}</div></div>
+    </div>
+
+    <h2>Status by sensor type <span class="count">— click a type to filter</span></h2>
+    <div class="legend" style="margin:-4px 0 10px">${STATUS.map(x => `<span><i class="b-${x}"></i>${SLABEL[x]}</span>`).join("")}
+      <span style="color:var(--dim)">LOG = sensors whose status changed in the log window</span></div>
+    <div class="types">${types.map(t => typeCard(t)).join("")}</div>
+
+    <h2>Sensors</h2>
+    <div class="card">
+      <div class="toolbar">
+        <div class="tabs">${["all", ...types].map(t => {
+          const n = t === "all" ? sensors.length : sensors.filter(x => x.typeLabel === t).length;
+          return `<button class="tab ${ui.type === t ? "on" : ""}" data-type="${esc(t)}">${t === "all" ? "All" : esc(t)}<span class="c">${n}</span></button>`;
+        }).join("")}</div>
+        <label class="toggle"><input type="checkbox" id="onlyIssues" ${ui.onlyIssues ? "checked" : ""}> Findings only</label>
+        <input class="search" id="q" placeholder="Search ID or name" value="${esc(ui.q)}">
+      </div>
+      <div class="tbl"><table>
+        <thead><tr><th>ID</th><th>Name</th><th>Type</th><th>BI</th><th>Elasticsearch</th><th>Units log</th><th title="Status transitions in log window: log / ES">Transitions</th><th>Findings</th></tr></thead>
+        <tbody id="rows"></tbody>
+      </table></div>
+    </div>
+
+    <div class="two">
+      <div><h2>Other sensors in ES <span class="count">— not shown on BI</span></h2>
+        <div class="card list">${Object.entries(data.other).sort().map(([t,c]) =>
+          `<div class="li"><span>${esc(t)}</span><span>${STATUS.concat(Object.keys(c).filter(k => !STATUS.includes(k))).filter(k => c[k]).map(k => `${pill(k)} <span class="num">${c[k]}</span>`).join(" ")}</span></div>`).join("") || `<div class="hint">None</div>`}</div></div>
+      <div><h2>Log observations</h2>
+        <div class="card list">
+          <div class="li"><span>Export snapshots in log</span><span class="num">${m.exports.length}${m.exports.length ? ` · last ${esc(m.exports.at(-1).cycle)}: ${m.exports.at(-1).published}/${m.exports.at(-1).total}` : ""}</span></div>
+          <div class="li"><span>Incomplete exports</span><span class="num" style="color:${m.exports.some(x => x.published !== x.total) ? "var(--err)" : "inherit"}">${m.exports.filter(x => x.published !== x.total).length}</span></div>
+          <div class="li" style="display:block"><div>VMS cameras not found in Units cache/DB <span class="num" style="color:var(--dim)">(${m.unknownCams.length})</span></div>
+            <div class="sub mono" style="margin-top:6px;line-height:1.7">${m.unknownCams.map(esc).join("<br>") || "none"}</div></div>
+        </div></div>
+    </div>`;
+
+  document.querySelectorAll(".tab").forEach(b => b.onclick = () => { ui.type = b.dataset.type; saveUi(); render(); });
+  document.querySelectorAll(".type").forEach(b => b.onclick = () => { ui.type = ui.type === b.dataset.type ? "all" : b.dataset.type; saveUi(); render(); });
+  $("#onlyIssues").onchange = e => { ui.onlyIssues = e.target.checked; saveUi(); renderRows(); };
+  $("#q").oninput = e => { ui.q = e.target.value; renderRows(); };
+  renderRows();
+}
+
+function typeCard(t) {
+  const list = data.sensors.filter(x => x.typeLabel === t);
+  const bt = data.byType[t] || {bi:{},es:{},log:{}};
+  const issues = list.filter(x => x.issues.length).length;
+  const card = data.biCard[t];
+  const cardNote = card !== undefined && card !== list.filter(x => x.bi).length
+    ? `<div class="sub" style="color:var(--warn)">BI card shows ${card}, health list returns ${list.filter(x => x.bi).length}</div>` : "";
+  return `<div class="card type ${ui.type === t ? "sel" : ""}" data-type="${esc(t)}">
+    <div class="hd"><b>${esc(t)}</b><span class="c">${list.length} sensor${list.length === 1 ? "" : "s"}${card !== undefined ? ` · BI card ${card}` : ""}</span>
+      <span class="badge ${issues ? "bad" : "good"}">${issues ? issues + " finding" + (issues > 1 ? "s" : "") : "✓ match"}</span></div>
+    ${["bi","es","log"].map(src => `<div class="srow"><span class="lab">${src.toUpperCase()}</span>${bar(bt[src] || {}, src)}</div>`).join("")}
+    ${cardNote}</div>`;
+}
+function bar(counts, src) {
+  const total = Object.values(counts).reduce((a, b) => a + b, 0);
+  if (!total) return `<div class="bar"><span class="empty">${src === "bi" ? "not on BI" : src === "log" ? "no changes in window" : "—"}</span></div>`;
+  return `<div class="bar">${STATUS.concat(Object.keys(counts).filter(k => !STATUS.includes(k))).filter(k => counts[k]).map(k =>
+    `<span class="b-${esc(k)}" style="flex:${counts[k]}" title="${esc(SLABEL[k] || k)}: ${counts[k]}">${counts[k]}</span>`).join("")}</div>`;
+}
+
+function renderRows() {
+  const q = ui.q.trim().toLowerCase();
+  const list = data.sensors.filter(x =>
+    (ui.type === "all" || x.typeLabel === ui.type) &&
+    (!ui.onlyIssues || x.issues.length) &&
+    (!q || String(x.id).includes(q) || (x.name || "").toLowerCase().includes(q)));
+  list.sort((a, b) => (b.issues.length > 0) - (a.issues.length > 0) || (!!b.bi - !!a.bi) || a.typeLabel.localeCompare(b.typeLabel) || a.id - b.id);
+  $("#rows").innerHTML = list.length ? list.map(x => {
+    const open = ui.open.has(x.id);
+    return `<tr class="r ${x.issues.length ? "has-issue" : ""}" data-id="${x.id}">
+      <td class="mono num">${x.id}</td>
+      <td>${esc(x.name || "—")}</td>
+      <td style="white-space:nowrap">${esc(x.typeLabel)}</td>
+      <td>${x.bi ? pill(x.bi) : `<span class="sub">not on BI</span>`}</td>
+      <td>${pill(x.es)}${x.esDescription ? `<div class="sub">${esc(x.esDescription.replaceAll(",", ", "))}</div>` : ""}</td>
+      <td>${x.log ? pill(x.log) + `<div class="sub">${fmtTime(x.logTime)}</div>` : `<span class="sub">no change in window</span>`}</td>
+      <td class="num mono">${x.logTransitions} / ${x.esTransitions}</td>
+      <td>${x.issues.length ? x.issues.map(i => `<div class="issue"><span class="kind" title="${esc(KIND_HELP[i.kind]||"")}">${esc(i.kind)}</span><span>${esc(i.message)}</span></div>`).join("")
+        : `<span class="ok-txt">✓ consistent</span>`}</td></tr>
+      ${open ? detailRow(x) : ""}`;
+  }).join("") : `<tr class="empty-row"><td colspan="8">No sensors match the current filter</td></tr>`;
+  document.querySelectorAll("tr.r").forEach(tr => tr.onclick = () => {
+    const id = +tr.dataset.id; ui.open.has(id) ? ui.open.delete(id) : ui.open.add(id); renderRows();
+  });
+}
+function detailRow(x) {
+  const kv = o => `<dl class="kv">${Object.entries(o).filter(([,v]) => v !== null && v !== undefined && v !== "").map(([k,v]) => `<dt>${esc(k)}</dt><dd>${esc(v)}</dd>`).join("") || "<dt>—</dt><dd></dd>"}</dl>`;
+  const d = x.logDetail || {};
+  return `<tr class="det"><td colspan="8"><div class="dgrid">
+    <div><h4>BI</h4>${kv({status:x.bi, bucket:x.biBucket})}</div>
+    <div><h4>Elasticsearch</h4>${kv({status:x.es, description:x.esDescription, record:x.esKind, time:x.esTime, onDashboard:x.esOnDashboard})}</div>
+    <div><h4>Units log</h4>${kv({latest:x.log, at:x.logTime, ...Object.fromEntries(Object.entries(d).filter(([k]) => k !== "name"))})}</div>
+  </div></td></tr>`;
+}
+
+$("#btnRun").onclick = run;
+$("#btnSettings").onclick = () => $("#settings").classList.toggle("open");
+$("#history").onchange = e => { if (e.target.value) loadRun(e.target.value); };
+$("#mCancel").onclick = () => $("#modal").classList.remove("show");
+$("#mOk").onclick = connect;
+$("#mPass").onkeydown = e => { if (e.key === "Enter") connect(); };
+init();
+</script>
+</body>
+</html>
