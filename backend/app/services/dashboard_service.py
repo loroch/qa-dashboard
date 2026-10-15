@@ -380,7 +380,7 @@ class DashboardService:
                     fields=[
                         "summary", "status", "priority", "reporter", "assignee",
                         "created", "updated", "labels", "components",
-                        "fixVersions", "parent", "customfield_10020",
+                        "fixVersions", "parent", "customfield_10020", "description",
                     ],
                     max_total=2000,
                 ),
@@ -450,6 +450,31 @@ class DashboardService:
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
 
+    async def get_recent_bugs(self, days: int = 7, force_refresh: bool = False) -> dict:
+        """All project bugs opened in the last N days across all versions."""
+        cache_key = f"dashboard:recent_bugs:{days}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                f'project = TMT0 AND issuetype = Bug AND created >= "-{days}d" '
+                f'ORDER BY created DESC'
+            )
+            bugs_raw = await self.jira.search_issues(
+                jql,
+                fields=[
+                    "summary", "status", "priority", "reporter", "assignee",
+                    "created", "updated", "fixVersions", "parent",
+                    "customfield_10020", "description",
+                ],
+                max_total=500,
+            )
+            bugs = self.mapper.map_issues(bugs_raw)
+            return {"bugs": bugs, "total": len(bugs), "days": days}
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
+
     async def get_bugs_grouped_by_relates_epic(self, version: str, force_refresh: bool = False) -> dict:
         """Bugs for a version grouped by their 'Relates to' Epic issue links."""
         import hashlib
@@ -467,65 +492,98 @@ class DashboardService:
                 fields=[
                     "summary", "status", "priority", "reporter", "assignee",
                     "created", "updated", "labels", "components",
-                    "fixVersions", "parent", "customfield_10020", "issuelinks",
+                    "fixVersions", "parent", "customfield_10020", "issuelinks", "description",
                 ],
-                max_total=2000,
+                max_total=5000,
             )
 
             bugs = self.mapper.map_issues(bugs_raw)
             mapped_by_key = {b["key"]: b for b in bugs}
 
-            epic_info: dict[str, dict] = {}
-            epic_bugs: dict[str, list] = defaultdict(list)
+            group_info: dict[str, dict] = {}   # epic/story key → meta
+            group_bugs: dict[str, list] = defaultdict(list)
             unlinked: list[str] = []
 
             for raw in bugs_raw:
                 bug_key = raw["key"]
-                links = (raw.get("fields") or {}).get("issuelinks") or []
-                relates_epics = []
+                f = raw.get("fields") or {}
+                links = f.get("issuelinks") or []
+
+                epic_linked: list[dict] = []
+                story_linked: list[dict] = []
+
+                # Check ALL link types for links to Epic or Story
                 for lk in links:
-                    if (lk.get("type") or {}).get("name") != "Relates":
-                        continue
                     for side in ("inwardIssue", "outwardIssue"):
                         linked = lk.get(side)
                         if not linked:
                             continue
                         lf = linked.get("fields") or {}
-                        if (lf.get("issuetype") or {}).get("name") == "Epic":
-                            ek = linked["key"]
-                            relates_epics.append(ek)
-                            if ek not in epic_info:
-                                epic_info[ek] = {
-                                    "key": ek,
-                                    "summary": lf.get("summary", ek),
-                                    "url": f"{self.jira_base_url}/browse/{ek}",
-                                }
-                if relates_epics:
-                    for ek in relates_epics:
-                        epic_bugs[ek].append(bug_key)
+                        itype = (lf.get("issuetype") or {}).get("name", "")
+                        if itype == "Epic":
+                            epic_linked.append(linked)
+                        elif itype == "Story":
+                            story_linked.append(linked)
+
+                # Prefer epic links; fall back to story links
+                chosen = epic_linked if epic_linked else story_linked
+
+                if chosen:
+                    for linked in chosen:
+                        gk = linked["key"]
+                        lf = linked.get("fields") or {}
+                        if gk not in group_info:
+                            group_info[gk] = {
+                                "key":     gk,
+                                "summary": lf.get("summary", gk),
+                                "url":     f"{self.jira_base_url}/browse/{gk}",
+                                "type":    (lf.get("issuetype") or {}).get("name", "Epic"),
+                            }
+                        group_bugs[gk].append(bug_key)
                 else:
                     unlinked.append(bug_key)
 
+            def _assignee_breakdown(bug_keys: list) -> list:
+                counts: dict[str, int] = defaultdict(int)
+                for bk in bug_keys:
+                    b = mapped_by_key.get(bk) or {}
+                    raw = b.get("assignee")
+                    if isinstance(raw, dict):
+                        name = raw.get("displayName") or raw.get("name") or "Unassigned"
+                    elif isinstance(raw, str) and raw:
+                        name = raw
+                    else:
+                        name = "Unassigned"
+                    counts[name] += 1
+                return sorted(
+                    [{"name": n, "count": c} for n, c in counts.items()],
+                    key=lambda x: -x["count"],
+                )
+
             result_epics = []
-            for ek, info in sorted(epic_info.items(), key=lambda x: -len(epic_bugs[x[0]])):
-                bug_keys = epic_bugs[ek]
+            for gk, info in sorted(group_info.items(), key=lambda x: -len(group_bugs[x[0]])):
+                bug_keys = group_bugs[gk]
                 open_count = sum(
                     1 for bk in bug_keys
                     if mapped_by_key.get(bk, {}).get("status_category") != "Done"
                 )
                 result_epics.append({
-                    "key":        ek,
+                    "key":        gk,
                     "summary":    info["summary"],
                     "url":        info["url"],
+                    "type":       info["type"],
                     "bug_count":  len(bug_keys),
                     "open_count": open_count,
+                    "assignees":  _assignee_breakdown(bug_keys),
                 })
 
             return {
-                "version":       version,
-                "epics":         result_epics,
-                "unlinked_count": len(unlinked),
-                "total_bugs":    len(bugs),
+                "version":            version,
+                "epics":              result_epics,
+                "unlinked_count":     len(unlinked),
+                "unlinked_keys":      unlinked,
+                "unlinked_assignees": _assignee_breakdown(unlinked),
+                "total_bugs":         len(bugs_raw),
             }
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
@@ -686,7 +744,7 @@ class DashboardService:
                     fields=[
                         "summary", "status", "priority", "reporter", "assignee",
                         "created", "updated", "labels", "components",
-                        "fixVersions", "parent", "customfield_10020",
+                        "fixVersions", "parent", "customfield_10020", "description",
                     ],
                     max_total=2000,
                 ),
@@ -797,6 +855,148 @@ class DashboardService:
             "bugs_30d": bugs,
             "recent_activity": activity[:50],
         }
+
+    async def get_sprints_for_version(self, version: str) -> list[dict]:
+        """Return distinct sprints that appear on issues in a fix version."""
+        import hashlib
+        cache_key = f"dashboard:sprints:{hashlib.md5(version.encode()).hexdigest()[:8]}"
+
+        async def fetch():
+            issues_raw = await self.jira.search_issues(
+                f'project = TMT0 AND fixVersion = "{version}" AND issuetype in (Story, Bug)',
+                fields=["customfield_10020"],
+                max_total=500,
+            )
+            seen: dict[str, dict] = {}
+            for i in issues_raw:
+                sprints = (i.get("fields") or {}).get("customfield_10020") or []
+                if isinstance(sprints, list):
+                    for sp in sprints:
+                        if isinstance(sp, dict):
+                            sid  = str(sp.get("id", ""))
+                            name = sp.get("name", "")
+                            state = sp.get("state", "")
+                            if sid and name and sid not in seen:
+                                seen[sid] = {"id": sid, "name": name, "state": state}
+            return sorted(seen.values(), key=lambda x: x["name"], reverse=True)
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=600)
+
+    async def get_qa_activity(
+        self,
+        version: str,
+        sprint: str | None,
+        days: int,
+        epic_key: str | None = None,
+        force_refresh: bool = False,
+    ) -> dict:
+        """QA activity report: what changed in the last N days for a version/sprint/epic."""
+        import hashlib, asyncio as aio
+        sprint_slug = sprint or "all"
+        epic_slug   = epic_key or "all"
+        cache_key = f"dashboard:qa_activity:{hashlib.md5(f'{version}:{sprint_slug}:{epic_slug}:{days}'.encode()).hexdigest()[:10]}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            # Build scope clause: fixVersion OR (parent = epic_key for epic children)
+            if epic_key:
+                ver_jql = f'(fixVersion = "{version}" OR parent = "{epic_key}")'
+            else:
+                ver_jql = f'fixVersion = "{version}"'
+            sprint_jql = f' AND sprint = "{sprint}"' if sprint else ""
+            base       = f'project = TMT0 AND {ver_jql}{sprint_jql}'
+            cutoff     = f'"-{days}d"'
+
+            FIELDS_BASIC = [
+                "summary", "status", "issuetype", "priority",
+                "assignee", "reporter", "created", "updated", "parent",
+            ]
+
+            (
+                new_bugs_raw,
+                done_raw,
+                rft_raw,
+                reopened_raw,
+                rfd_raw,
+                in_progress_raw,
+            ) = await aio.gather(
+                self.jira.search_issues(
+                    f'{base} AND issuetype = Bug AND created >= {cutoff} ORDER BY created DESC',
+                    fields=FIELDS_BASIC, max_total=200,
+                ),
+                self.jira.search_issues(
+                    f'{base} AND status changed to "Done" AFTER {cutoff} ORDER BY updated DESC',
+                    fields=FIELDS_BASIC, max_total=200,
+                ),
+                self.jira.search_issues(
+                    f'{base} AND status changed to "Ready for Testing" AFTER {cutoff} ORDER BY updated DESC',
+                    fields=FIELDS_BASIC, max_total=200,
+                ),
+                self.jira.search_issues(
+                    f'{base} AND status changed to "Reopened" AFTER {cutoff} ORDER BY updated DESC',
+                    fields=FIELDS_BASIC, max_total=200,
+                ),
+                self.jira.search_issues(
+                    f'{base} AND status changed to "Ready For Deployment" AFTER {cutoff} ORDER BY updated DESC',
+                    fields=FIELDS_BASIC, max_total=100,
+                ),
+                self.jira.search_issues(
+                    f'{base} AND status changed to "In Progress" AFTER {cutoff} ORDER BY updated DESC',
+                    fields=FIELDS_BASIC, max_total=200,
+                ),
+            )
+
+            def _fmt(i: dict, ts_field: str = "updated") -> dict:
+                f = i.get("fields") or {}
+                parent_raw  = f.get("parent") or {}
+                parent_key  = parent_raw.get("key", "")
+                parent_name = ((parent_raw.get("fields") or {}).get("summary") or "")
+                return {
+                    "key":         i["key"],
+                    "url":         f"{self.jira_base_url}/browse/{i['key']}",
+                    "summary":     f.get("summary", ""),
+                    "type":        (f.get("issuetype") or {}).get("name", ""),
+                    "status":      (f.get("status") or {}).get("name", ""),
+                    "priority":    (f.get("priority") or {}).get("name", ""),
+                    "assignee":    (f.get("assignee") or {}).get("displayName", "Unassigned"),
+                    "reporter":    (f.get("reporter") or {}).get("displayName", ""),
+                    "parent_key":  parent_key,
+                    "parent_name": parent_name,
+                    "parent_url":  f"{self.jira_base_url}/browse/{parent_key}" if parent_key else "",
+                    "when":        f.get(ts_field, ""),
+                }
+
+            new_bugs      = [_fmt(i, "created")  for i in new_bugs_raw]
+            moved_done    = [_fmt(i)              for i in done_raw]
+            moved_rft     = [_fmt(i)              for i in rft_raw]
+            reopened      = [_fmt(i)              for i in reopened_raw]
+            moved_rfd     = [_fmt(i)              for i in rfd_raw]
+            started       = [_fmt(i)              for i in in_progress_raw]
+
+            return {
+                "version":      version,
+                "sprint":       sprint,
+                "epic_key":     epic_key,
+                "days":         days,
+                "new_bugs":     new_bugs,
+                "moved_done":   moved_done,
+                "moved_rft":    moved_rft,
+                "reopened":     reopened,
+                "moved_rfd":    moved_rfd,
+                "started":      started,
+                "counts": {
+                    "new_bugs":   len(new_bugs),
+                    "done":       len(moved_done),
+                    "rft":        len(moved_rft),
+                    "reopened":   len(reopened),
+                    "rfd":        len(moved_rfd),
+                    "started":    len(started),
+                    "total_moves": len(done_raw) + len(rft_raw) + len(reopened_raw) + len(rfd_raw) + len(in_progress_raw),
+                },
+            }
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
 
     async def refresh_all(self):
         """Force refresh all cache keys. Called by background scheduler."""

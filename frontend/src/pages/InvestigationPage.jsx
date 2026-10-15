@@ -1,13 +1,14 @@
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import axios from 'axios'
-import { BASE_URL } from '../services/api'
-import { Search, X, Plus, GitBranch, Loader2, AlertCircle } from 'lucide-react'
+import api, { BASE_URL } from '../services/api'
+import { Search, X, Plus, GitBranch, Loader2, AlertCircle, Layers, Clock } from 'lucide-react'
 
 /* ── constants ───────────────────────────────────────────── */
 const API        = `${BASE_URL}/investigation`
+const getVersions = () => api.get('/coverage/versions')
 const LEFT_W     = 440   // px – issue info column
-const RIGHT_W    = 228   // px – milestone dates column
+const RIGHT_W    = 480   // px – 6 columns: Dev Start | RFT | Deployed | Commit | Actual | Delay
 const TYPE_ORDER = { Epic: 0, Story: 1, Bug: 2 }
 
 /* ── date helpers ────────────────────────────────────────── */
@@ -119,22 +120,90 @@ function wPct(a, b, totalMs) {
   return `${Math.min(100, Math.max(0.3, ((b - a) / totalMs) * 100)).toFixed(3)}%`
 }
 
+/* ── EstimationBadge ─────────────────────────────────────── */
+// Measures full R&D cycle: from leaving "To Do" → deployed/done vs. R&D estimation
+// Conversion: 6 working hours = 1 day
+function EstimationBadge({ storyPoints, estimatedHours, actualDays, isDeployed, inProgress }) {
+  // 1 SP ≈ 1 day; time estimate uses 6h workday (per team convention)
+  const estDays = storyPoints != null
+    ? storyPoints
+    : estimatedHours != null ? estimatedHours / 6 : null
+
+  let diffPct = null
+  let color   = 'text-slate-400'
+  let label   = ''
+
+  if (estDays != null && actualDays != null) {
+    diffPct = Math.round(((actualDays - estDays) / estDays) * 100)
+    if (isDeployed) {
+      // Final comparison — definitive colour
+      color = diffPct > 30 ? 'text-red-600' : diffPct > 10 ? 'text-amber-600' : 'text-green-600'
+      label = diffPct > 0 ? `+${diffPct}% over est.` : `${Math.abs(diffPct)}% under est.`
+    } else {
+      // Still in progress — softer warning
+      color = diffPct > 30 ? 'text-red-500' : diffPct > 10 ? 'text-yellow-600' : 'text-slate-400'
+      label = diffPct > 0 ? `+${diffPct}% over so far` : `on track`
+    }
+  }
+
+  // Status label for the actual-days badge
+  const cycleLabel = isDeployed ? 'total' : 'so far'
+
+  return (
+    <div className="flex items-center gap-2 mt-1 flex-wrap">
+      {storyPoints != null && (
+        <span className="inline-flex items-center gap-1 text-[10px] bg-violet-50 text-violet-700 border border-violet-200 rounded-full px-1.5 py-0.5 font-medium">
+          <span className="opacity-70">SP</span> {storyPoints}
+        </span>
+      )}
+      {estimatedHours != null && (
+        <span className="inline-flex items-center gap-1 text-[10px] bg-blue-50 text-blue-600 border border-blue-200 rounded-full px-1.5 py-0.5 font-medium">
+          <Clock className="h-2.5 w-2.5" /> {estimatedHours}h est.
+        </span>
+      )}
+      {actualDays != null && (
+        <span className={`inline-flex items-center gap-1 text-[10px] border rounded-full px-1.5 py-0.5 font-medium ${
+          isDeployed ? 'bg-emerald-50 text-emerald-700 border-emerald-200' : 'bg-slate-50 text-slate-600 border-slate-200'
+        }`}>
+          {actualDays}d {cycleLabel}
+        </span>
+      )}
+      {label && (
+        <span className={`text-[10px] font-semibold ${color}`}>{label}</span>
+      )}
+    </div>
+  )
+}
+
+/* ── Cell — right panel cell helper ─────────────────────── */
+function Cell({ children, color = 'text-slate-600', bg = '' }) {
+  return (
+    <div className={`flex flex-col items-center justify-center text-center text-[11px] py-2 px-1 border-r border-slate-100 last:border-r-0 ${color} ${bg}`}>
+      {children}
+    </div>
+  )
+}
+
 /* ── GanttRow ────────────────────────────────────────────── */
 function GanttRow({ row, minMs, totalMs }) {
   // Bug-layer rows get amber styling instead of red
   const meta = row.isBugLayer && row.type === 'Bug'
     ? { ...getMeta('Bug'), badge: 'bg-orange-100 text-orange-800 border-orange-300', row: 'bg-orange-50', border: 'border-l-[5px] border-orange-400', link: 'text-indigo-600', text: 'text-slate-700' }
     : getMeta(row.type)
-  const today = Date.now()
-  const todo    = parseDate(row.todo_date)
-  const rft     = parseDate(row.rft_date)
-  const postRft = parseDate(row.post_rft_date)
+  const today     = Date.now()
+  const todo      = parseDate(row.todo_date)
+  const devStart0 = parseDate(row.dev_start_date)  // when issue left "To Do"
+  const rft       = parseDate(row.rft_date)
+  const postRft   = parseDate(row.post_rft_date)
+  const deploy    = parseDate(row.deploy_date)      // when issue reached Done/Deployed
 
-  const devStart  = todo    ? todo.getTime()    : minMs
-  const devEnd    = rft     ? rft.getTime()     : today
-  const rftStart  = rft     ? rft.getTime()     : null
-  const rftEnd    = postRft ? postRft.getTime() : (rft ? today : null)
-  const pStart    = postRft ? postRft.getTime() : null
+  const devStartMs = devStart0 ? devStart0.getTime() : (todo ? todo.getTime() : minMs)
+  const devStart   = devStartMs
+  // Dev bar ends at RFT (if available), otherwise at deploy/done, otherwise at today
+  const devEnd     = rft ? rft.getTime() : (deploy ? deploy.getTime() : today)
+  const rftStart   = rft     ? rft.getTime()     : null
+  const rftEnd     = postRft ? postRft.getTime() : (rft ? (deploy ? deploy.getTime() : today) : null)
+  const pStart     = postRft ? postRft.getTime() : null
 
   const depth  = row.depth || 0
   const indent = 12 + depth * 20
@@ -163,15 +232,25 @@ function GanttRow({ row, minMs, totalMs }) {
         <p className={`text-sm leading-snug ${meta.text}`}>
           {row.summary}
         </p>
+        {/* R&D estimation vs actual — Story / Epic only */}
+        {(row.type === 'Story' || row.type === 'Epic') && (row.story_points != null || row.estimated_hours != null || row.actual_dev_days != null) && (
+          <EstimationBadge
+            storyPoints={row.story_points}
+            estimatedHours={row.estimated_hours}
+            actualDays={row.actual_dev_days}
+            isDeployed={!!row.is_deployed}
+            inProgress={!row.is_deployed && !!row.dev_start_date}
+          />
+        )}
       </div>
 
       {/* Timeline bar */}
       <div className="flex-1 relative" style={{ minHeight: 60 }}>
         <div className="absolute inset-y-3 left-1 right-1">
-          {/* Dev phase */}
-          {todo && (
+          {/* Dev phase — starts when issue left "To Do" */}
+          {(devStart0 || todo) && (
             <div
-              title={`Dev: ${fmt(todo)} → ${fmt(rft || new Date())}`}
+              title={`Dev: ${fmt(devStart0 || todo)} → ${fmt(rft || new Date())}`}
               className="absolute h-full rounded-sm bg-indigo-500 opacity-90"
               style={{ left: xPct(devStart, minMs, totalMs), width: wPct(devStart, devEnd, totalMs) }}
             />
@@ -198,12 +277,103 @@ function GanttRow({ row, minMs, totalMs }) {
         </div>
       </div>
 
-      {/* Milestone dates */}
-      <div className="shrink-0 grid grid-cols-3 border-l border-slate-200 py-2 text-center items-center" style={{ width: RIGHT_W }}>
-        <span className="text-xs text-slate-500">{fmt(todo)}</span>
-        <span className="text-xs text-amber-600 font-medium">{fmt(rft)}</span>
-        <span className={`text-xs font-medium ${postRft ? 'text-green-600' : 'text-slate-300'}`}>{fmt(postRft)}</span>
-      </div>
+      {/* 6 columns: Dev Start | RFT | Deployed | Commit | Actual | Delay */}
+      {(() => {
+        const sp       = row.story_points
+        const estH     = row.estimated_hours
+        const actDays  = row.actual_dev_days
+        const deployed = !!row.is_deployed
+
+        // Estimated days: 1 SP = 1 day; hours use 6h workday
+        const estDays = sp != null ? sp : (estH != null ? estH / 6 : null)
+
+        // Commitment label
+        const commitLabel = sp != null
+          ? `${sp} SP`
+          : estH != null
+            ? `${estH}h`
+            : '—'
+
+        // Estimated days formatted
+        const estDaysFmt = estDays != null
+          ? `${Math.round(estDays * 10) / 10}d`
+          : null
+
+        // Delta
+        let deltaDays  = null
+        let deltaPct   = null
+        let delayLabel = '—'
+        let delayColor = 'text-slate-300'
+        let delayBg    = ''
+
+        if (estDays != null && actDays != null && estDays > 0) {
+          deltaDays = Math.round((actDays - estDays) * 10) / 10
+          deltaPct  = Math.round(((actDays - estDays) / estDays) * 100)
+
+          if (deployed) {
+            if (deltaDays > 0) {
+              delayColor = deltaPct > 30 ? 'text-red-700' : 'text-amber-700'
+              delayBg    = deltaPct > 30 ? 'bg-red-50' : 'bg-amber-50'
+              delayLabel = `+${deltaDays}d (+${deltaPct}%)`
+            } else {
+              delayColor = 'text-green-700'
+              delayBg    = 'bg-green-50'
+              delayLabel = `${deltaDays}d (${deltaPct}%)`
+            }
+          } else {
+            if (deltaDays > 0) {
+              delayColor = deltaPct > 30 ? 'text-red-500' : 'text-yellow-600'
+              delayBg    = deltaPct > 30 ? 'bg-red-50' : 'bg-yellow-50'
+              delayLabel = `+${deltaDays}d`
+            } else {
+              delayColor = 'text-slate-400'
+              delayLabel = 'on track'
+            }
+          }
+        }
+
+        const isEstRow = (row.type === 'Story' || row.type === 'Epic')
+
+        return (
+          <div
+            className="shrink-0 grid border-l border-slate-200 items-stretch"
+            style={{ width: RIGHT_W, gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 1.4fr' }}
+          >
+            {/* Date cols */}
+            <Cell color="text-slate-600">{fmt(devStart0 || todo)}</Cell>
+            <Cell color="text-amber-600 font-medium">{fmt(rft)}</Cell>
+            <Cell color={deploy ? 'text-emerald-600 font-medium' : postRft ? 'text-green-600 font-medium' : 'text-slate-300'}>
+              {fmt(deploy || postRft)}
+            </Cell>
+            {/* Estimation cols — Story/Epic only */}
+            {isEstRow ? (
+              <>
+                <Cell color="text-violet-600 font-semibold">
+                  {commitLabel}
+                  {estDaysFmt && sp == null && (
+                    <span className="block text-[9px] text-violet-400">{estDaysFmt}</span>
+                  )}
+                </Cell>
+                <Cell color="text-slate-600">
+                  {actDays != null ? `${actDays}d` : '—'}
+                  {actDays != null && (
+                    <span className="block text-[9px] text-slate-400">{deployed ? 'total' : 'so far'}</span>
+                  )}
+                </Cell>
+                <Cell color={delayColor} bg={delayBg}>
+                  <span className="font-bold">{delayLabel}</span>
+                </Cell>
+              </>
+            ) : (
+              <>
+                <Cell color="text-slate-300">—</Cell>
+                <Cell color="text-slate-300">—</Cell>
+                <Cell color="text-slate-300">—</Cell>
+              </>
+            )}
+          </div>
+        )
+      })()}
     </div>
   )
 }
@@ -212,8 +382,10 @@ function GanttRow({ row, minMs, totalMs }) {
 function GanttChart({ rows }) {
   const allMs = rows.flatMap(r => [
     parseDate(r.todo_date),
+    parseDate(r.dev_start_date),
     parseDate(r.rft_date),
     parseDate(r.post_rft_date),
+    parseDate(r.deploy_date),
   ]).filter(Boolean).map(d => d.getTime())
 
   const now   = Date.now()
@@ -251,10 +423,16 @@ function GanttChart({ rows }) {
             <span className="absolute top-1.5 text-[11px] text-red-300 -translate-x-1/2 whitespace-nowrap">Today</span>
           </div>
         </div>
-        <div className="shrink-0 grid grid-cols-3 border-l border-slate-600 py-2.5 text-center" style={{ width: RIGHT_W }}>
-          <span className="text-indigo-300">To Do</span>
-          <span className="text-amber-300">RFT</span>
-          <span className="text-green-300">Post-RFT</span>
+        <div
+          className="shrink-0 grid border-l border-slate-600 text-[11px] font-semibold text-center"
+          style={{ width: RIGHT_W, gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr 1.4fr' }}
+        >
+          <div className="flex items-center justify-center py-2.5 px-1 border-r border-slate-600 text-indigo-300">Dev Start</div>
+          <div className="flex items-center justify-center py-2.5 px-1 border-r border-slate-600 text-amber-300">RFT</div>
+          <div className="flex items-center justify-center py-2.5 px-1 border-r border-slate-600 text-emerald-300">Deployed</div>
+          <div className="flex items-center justify-center py-2.5 px-1 border-r border-slate-600 text-violet-300">Commit</div>
+          <div className="flex items-center justify-center py-2.5 px-1 border-r border-slate-600 text-slate-300">Actual</div>
+          <div className="flex items-center justify-center py-2.5 px-1 text-slate-300">Delay</div>
         </div>
       </div>
 
@@ -265,11 +443,16 @@ function GanttChart({ rows }) {
 
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-5 px-4 py-2.5 bg-slate-50 border-t border-slate-200 text-xs text-slate-500">
-        <span className="flex items-center gap-1.5"><span className="inline-block w-6 h-3 bg-indigo-500 rounded" />Dev (To Do → RFT)</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block w-6 h-3 bg-indigo-500 rounded" />Dev (left To Do → RFT)</span>
         <span className="flex items-center gap-1.5"><span className="inline-block w-6 h-3 bg-amber-400 rounded" />RFT phase</span>
-        <span className="flex items-center gap-1.5"><span className="inline-block w-6 h-3 bg-green-500 rounded" />Post-RFT (pass)</span>
+        <span className="flex items-center gap-1.5"><span className="inline-block w-6 h-3 bg-green-500 rounded" />Post-RFT → Deployed (pass)</span>
         <span className="flex items-center gap-1.5"><span className="inline-block w-6 h-3 bg-red-500 rounded" />Post-RFT (reopen/fail)</span>
         <span className="flex items-center gap-1.5"><span className="inline-block w-3 h-3 bg-orange-50 border border-orange-400 rounded" />Bug overlay layer</span>
+        <span className="flex items-center gap-1.5">
+          <span className="inline-flex items-center gap-1 text-[10px] bg-violet-50 text-violet-700 border border-violet-200 rounded-full px-1.5 py-0.5">SP 5</span>
+          R&amp;D commitment (SP or hours, 6h = 1 day)
+        </span>
+        <span className="flex items-center gap-1.5 text-green-600">● under commitment / <span className="text-amber-500">● over</span> / <span className="text-red-500">● &gt;30% over</span></span>
         <span className="ml-auto flex items-center gap-1.5 text-red-400">
           <span className="inline-block w-px h-3 border-l-2 border-red-400" />Today
         </span>
@@ -621,6 +804,99 @@ function TrackedChips({ keys, onRemove, onClearAll }) {
   )
 }
 
+/* ── VersionLoader ───────────────────────────────────────── */
+function VersionLoader({ onAddKeys, allTrackedKeys }) {
+  const [version,  setVersion]  = useState('')
+  const [incEpics, setIncEpics] = useState(false)
+  const [incStories, setIncStories] = useState(true)
+  const [loading,  setLoading]  = useState(false)
+  const [result,   setResult]   = useState(null)
+
+  const versionsQ = useQuery({
+    queryKey: ['inv-versions'],
+    queryFn:  getVersions,
+    staleTime: 10 * 60 * 1000,
+  })
+  const versions = Array.isArray(versionsQ.data) ? versionsQ.data : []
+
+  const handleLoad = async () => {
+    if (!version || (!incEpics && !incStories)) return
+    setLoading(true)
+    setResult(null)
+    try {
+      const types = []
+      if (incEpics)   types.push('Epic')
+      if (incStories) types.push('Story')
+      const res = await axios.get(`${API}/by-version`, {
+        params: { version, types: types.join(',') },
+      })
+      const items   = res.data.items || []
+      const newKeys = items.map(i => i.key).filter(k => !allTrackedKeys.includes(k))
+      onAddKeys(newKeys)
+      setResult({ added: newKeys.length, total: items.length })
+      setTimeout(() => setResult(null), 4000)
+    } catch (e) {
+      console.error('VersionLoader error:', e)
+      setResult({ error: true })
+    }
+    setLoading(false)
+  }
+
+  return (
+    <div className="flex flex-wrap items-center gap-3 bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-2.5">
+      <div className="flex items-center gap-1.5 shrink-0">
+        <Layers className="h-3.5 w-3.5 text-indigo-600" />
+        <span className="text-xs font-semibold text-indigo-700 whitespace-nowrap">Load by Version</span>
+      </div>
+
+      {/* Version dropdown */}
+      <select
+        value={version}
+        onChange={e => setVersion(e.target.value)}
+        className="text-xs border border-indigo-300 rounded-lg px-2.5 py-1.5 bg-white text-slate-700 outline-none focus:ring-2 focus:ring-indigo-300 min-w-[160px]"
+      >
+        <option value="">— Select version —</option>
+        {versions.map(v => (
+          <option key={v.id || v.name} value={v.name}>{v.name}{v.released ? ' (released)' : ''}</option>
+        ))}
+      </select>
+
+      {/* Type checkboxes */}
+      <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none">
+        <input type="checkbox" checked={incEpics} onChange={e => setIncEpics(e.target.checked)}
+               className="accent-indigo-600 h-3.5 w-3.5" />
+        Epics
+      </label>
+      <label className="flex items-center gap-1.5 text-xs text-slate-700 cursor-pointer select-none">
+        <input type="checkbox" checked={incStories} onChange={e => setIncStories(e.target.checked)}
+               className="accent-indigo-600 h-3.5 w-3.5" />
+        Stories
+      </label>
+
+      <button
+        onClick={handleLoad}
+        disabled={!version || (!incEpics && !incStories) || loading}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 text-white text-xs font-semibold rounded-lg hover:bg-indigo-700 disabled:opacity-40 transition-colors"
+      >
+        {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}
+        Load
+      </button>
+
+      {result && !result.error && (
+        <span className="text-xs text-green-600 font-medium">
+          {result.added === 0
+            ? `All ${result.total} issues already in timeline`
+            : `Added ${result.added} issue${result.added !== 1 ? 's' : ''} (${result.total} found)`}
+        </span>
+      )}
+      {result?.error && <span className="text-xs text-red-500">Failed to load — check version name</span>}
+      {!result && !loading && (
+        <span className="text-xs text-indigo-400">Bulk-load all Epics and/or Stories from a fix version</span>
+      )}
+    </div>
+  )
+}
+
 /* ── InvestigationPage ───────────────────────────────────── */
 export default function InvestigationPage() {
   const [trackedKeys,  setTrackedKeys]  = useState([])   // hierarchy layer (epics/stories/bugs)
@@ -695,12 +971,15 @@ export default function InvestigationPage() {
           Investigation Timeline
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          Track milestones — To Do → Ready for Testing → Post-RFT. Select an Epic to load its full hierarchy automatically.
+          Track milestones — To Do → Ready for Testing → Post-RFT. Load by version or search for an Epic. Stories show R&amp;D estimate vs actual dev time.
         </p>
       </div>
 
       {/* Toolbar */}
       <div className="flex flex-col gap-3">
+        {/* Row 0: Version bulk loader */}
+        <VersionLoader onAddKeys={handleConfirm} allTrackedKeys={allKeys} />
+
         {/* Row 1: Bug overlay layer search */}
         <BugLayerPanel onAddKeys={addBugLayerKeys} allTrackedKeys={allKeys} />
 

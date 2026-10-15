@@ -6,7 +6,7 @@ import { PageLoader, ErrorState } from '../components/common/LoadingSpinner'
 import {
   ExternalLink, ChevronDown, ChevronRight, Search,
   Link2, CheckCircle2, XCircle, AlertTriangle, FlaskConical,
-  X, Check, Wand2, Sparkles, FileText, Figma, BookOpen, Download
+  X, Check, Wand2, Sparkles, FileText, Figma, BookOpen, Download, Paperclip
 } from 'lucide-react'
 import axios from 'axios'
 import { BASE_URL } from '../services/api'
@@ -20,6 +20,7 @@ const getUnlinked            = ()     => api.get('/coverage/unlinked-tests').the
 const searchStories          = (q)    => api.get(`/coverage/search-stories?q=${encodeURIComponent(q)}`).then(r => r.data)
 const searchIssues           = (q)    => api.get(`/coverage/search-issues?q=${encodeURIComponent(q)}`).then(r => r.data)
 const generateTestPlan       = (body) => api.post('/coverage/generate-test-plan', body, { timeout: 90000 }).then(r => r.data)
+const uploadTestPlanDoc      = (formData) => api.post('/coverage/upload-test-plan', formData, { headers: { 'Content-Type': 'multipart/form-data' }, timeout: 30000 }).then(r => r.data)
 const generateHandoverCrit   = (body) => api.post('/coverage/generate-handover-criteria', body, { timeout: 90000 }).then(r => r.data)
 const loadAiContent          = (key)  => api.get(`/coverage/ai-content/${encodeURIComponent(key)}`).then(r => r.data)
 const saveAiContent          = (body) => api.post('/coverage/ai-content', body).then(r => r.data)
@@ -786,7 +787,16 @@ const IN_PROGRESS_STATUSES = new Set(['In Progress', 'In Review', 'Validation'])
 const BLOCKED_STATUSES = new Set(['Blocked', 'Reopened'])
 
 function RegressionTestsSection({ query, version }) {
+  const queryClient = useQueryClient()
   const [expanded, setExpanded] = useState(false)
+  const [selected, setSelected] = useState(new Set())
+  const [bulkTransitions, setBulkTransitions] = useState([])
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkApplying, setBulkApplying] = useState(false)
+  const [rowResults, setRowResults] = useState({})
+  const [localStatuses, setLocalStatuses] = useState({})
+  const bulkRef = useRef(null)
   const data = query.data
 
   const stats = useMemo(() => {
@@ -807,6 +817,75 @@ function RegressionTestsSection({ query, version }) {
     const barColor = pct === 100 ? 'bg-green-500' : pct >= 50 ? 'bg-yellow-400' : 'bg-red-400'
     return { total, done, inProgress, blocked, notRun: Math.max(0, notRun), pct, barColor, counts }
   }, [data])
+
+  // Close bulk dropdown on outside click
+  useEffect(() => {
+    if (!bulkOpen) return
+    const close = (e) => {
+      if (bulkRef.current && !bulkRef.current.contains(e.target)) setBulkOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [bulkOpen])
+
+  const toggleSelect = (key) => {
+    setSelected(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    const allKeys = (data?.tests || []).map(t => t.key)
+    setSelected(prev => prev.size === allKeys.length ? new Set() : new Set(allKeys))
+  }
+
+  const openBulkDropdown = async () => {
+    if (bulkOpen) { setBulkOpen(false); return }
+    const firstKey = [...selected][0]
+    if (!firstKey) return
+    setBulkLoading(true)
+    try {
+      const d = await getTestTransitions(firstKey)
+      setBulkTransitions(d.transitions || [])
+      setBulkOpen(true)
+    } catch (err) {
+      console.error('bulk transitions fetch failed:', err)
+    } finally {
+      setBulkLoading(false)
+    }
+  }
+
+  const applyBulk = async (transition) => {
+    setBulkOpen(false)
+    setBulkApplying(true)
+    const keys = [...selected]
+    setRowResults(Object.fromEntries(keys.map(k => [k, 'pending'])))
+    const newStatus = transition.to_status || transition.name
+
+    const results = await Promise.allSettled(
+      keys.map(k =>
+        postTestTransition({ test_key: k, transition_id: transition.id, version: version || null })
+          .then(() => ({ key: k, ok: true }))
+          .catch(() => ({ key: k, ok: false }))
+      )
+    )
+
+    const nextResults = {}
+    const nextStatuses = { ...localStatuses }
+    for (const r of results) {
+      const val = r.value
+      if (val?.ok) { nextResults[val.key] = 'ok'; nextStatuses[val.key] = newStatus }
+      else if (val) { nextResults[val.key] = 'error' }
+    }
+    setRowResults(nextResults)
+    setLocalStatuses(nextStatuses)
+    setBulkApplying(false)
+    queryClient.invalidateQueries(['coverage-regression', version])
+    queryClient.invalidateQueries(['coverage-version'])
+    setTimeout(() => { setSelected(new Set()); setRowResults({}) }, 2500)
+  }
 
   return (
     <div className="border border-purple-200 rounded-xl overflow-hidden">
@@ -938,45 +1017,136 @@ function RegressionTestsSection({ query, version }) {
 
       {/* ── Test table — only when expanded ── */}
       {expanded && stats && data.tests.length > 0 && (
-        <div className="overflow-x-auto border-t border-purple-100">
-          <table className="min-w-full text-sm bg-white">
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                {['Test Key', 'Summary', 'Status', 'Labels'].map(h => (
-                  <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {data.tests.map(test => (
-                <tr key={test.key} className="hover:bg-gray-50">
-                  <td className="px-4 py-2.5 whitespace-nowrap">
-                    <a href={test.url} target="_blank" rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1 text-purple-600 font-mono text-xs font-medium hover:underline">
-                      {test.key} <ExternalLink className="h-3 w-3" />
-                    </a>
-                  </td>
-                  <td className="px-4 py-2.5 text-gray-700 max-w-md">
-                    <span className="line-clamp-2">{test.summary}</span>
-                  </td>
-                  <td className="px-4 py-2.5 whitespace-nowrap">
-                    <StatusChanger testKey={test.key} currentStatus={test.status} version={version} />
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <div className="flex flex-wrap gap-1">
-                      {test.labels.length > 0
-                        ? test.labels.map(l => (
-                            <span key={l} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">{l}</span>
-                          ))
-                        : <span className="text-xs text-gray-300">—</span>
-                      }
-                    </div>
-                  </td>
+        <>
+          {/* Bulk action bar */}
+          {selected.size > 0 && (
+            <div className="flex items-center gap-3 px-4 py-2 bg-purple-50 border-t border-purple-200 sticky top-0 z-20">
+              <span className="text-xs font-semibold text-purple-700">
+                {selected.size} of {data.tests.length} selected
+              </span>
+              <div className="relative" ref={bulkRef}>
+                <button
+                  onClick={openBulkDropdown}
+                  disabled={bulkLoading || bulkApplying}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                >
+                  {(bulkLoading || bulkApplying) && (
+                    <span className="h-3 w-3 border border-white border-t-transparent rounded-full animate-spin" />
+                  )}
+                  Change Status
+                  {!bulkLoading && !bulkApplying && <ChevronDown className="h-3 w-3" />}
+                </button>
+                {bulkOpen && (
+                  <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-2xl min-w-[210px] py-1">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 py-1.5 border-b border-gray-100">
+                      Apply to {selected.size} test{selected.size > 1 ? 's' : ''}…
+                    </p>
+                    {bulkTransitions.length === 0 && (
+                      <p className="text-xs text-gray-400 px-3 py-2">No transitions available</p>
+                    )}
+                    {bulkTransitions.map(t => {
+                      const toCls = STATUS_COLORS[t.to_status] || 'bg-gray-100 text-gray-500'
+                      return (
+                        <button key={t.id} onClick={() => applyBulk(t)}
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 transition-colors flex items-center justify-between gap-3">
+                          <span className="text-gray-700 font-medium">{t.name}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${toCls}`}>{t.to_status}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+              <button
+                onClick={() => setSelected(new Set())}
+                className="ml-auto text-xs text-gray-400 hover:text-gray-600 transition-colors"
+              >
+                Clear
+              </button>
+            </div>
+          )}
+          <div className="overflow-x-auto border-t border-purple-100">
+            <table className="min-w-full text-sm bg-white">
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  <th className="px-3 py-2 w-8">
+                    <input
+                      type="checkbox"
+                      checked={data.tests.length > 0 && selected.size === data.tests.length}
+                      ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < data.tests.length }}
+                      onChange={toggleSelectAll}
+                      className="h-3.5 w-3.5 accent-purple-600 cursor-pointer"
+                    />
+                  </th>
+                  {['Test Key', 'Summary', 'Status', 'Labels'].map(h => (
+                    <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {data.tests.map(test => {
+                  const result = rowResults[test.key]
+                  const rowBg = result === 'ok'
+                    ? 'bg-green-50'
+                    : result === 'error'
+                    ? 'bg-red-50'
+                    : selected.has(test.key)
+                    ? 'bg-purple-50'
+                    : 'hover:bg-gray-50'
+                  return (
+                    <tr key={test.key} className={`transition-colors ${rowBg}`}>
+                      <td className="px-3 py-2.5 w-8 align-middle">
+                        {result === 'ok'
+                          ? <Check className="h-3.5 w-3.5 text-green-500" />
+                          : result === 'error'
+                          ? <XCircle className="h-3.5 w-3.5 text-red-400" />
+                          : result === 'pending'
+                          ? <span className="h-3.5 w-3.5 border border-purple-400 border-t-transparent rounded-full animate-spin inline-block" />
+                          : (
+                            <input
+                              type="checkbox"
+                              checked={selected.has(test.key)}
+                              onChange={() => toggleSelect(test.key)}
+                              onClick={e => e.stopPropagation()}
+                              className="h-3.5 w-3.5 accent-purple-600 cursor-pointer"
+                            />
+                          )
+                        }
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <a href={test.url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-purple-600 font-mono text-xs font-medium hover:underline">
+                          {test.key} <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-700 max-w-md">
+                        <span className="line-clamp-2">{test.summary}</span>
+                      </td>
+                      <td className="px-4 py-2.5 whitespace-nowrap">
+                        <StatusChanger
+                          testKey={test.key}
+                          currentStatus={localStatuses[test.key] ?? test.status}
+                          version={version}
+                          onChanged={s => setLocalStatuses(p => ({ ...p, [test.key]: s }))}
+                        />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <div className="flex flex-wrap gap-1">
+                          {test.labels.length > 0
+                            ? test.labels.map(l => (
+                                <span key={l} className="px-1.5 py-0.5 bg-gray-100 text-gray-600 text-xs rounded">{l}</span>
+                              ))
+                            : <span className="text-xs text-gray-300">—</span>
+                          }
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
       {expanded && stats && data.tests.length === 0 && (
         <p className="text-sm text-gray-400 text-center py-8 border-t border-purple-100">No tests with label REGRESSION_TEST found.</p>
@@ -1034,6 +1204,9 @@ export default function TestCoveragePage() {
   const [testPlanError, setTestPlanError] = useState(null)
   const [testPlanSavedAt, setTestPlanSavedAt] = useState(null)
   const [testPlanNotes, setTestPlanNotes] = useState('')
+  const testPlanFileRef = useRef(null)
+  const [testPlanAttachments, setTestPlanAttachments] = useState([])
+  const testPlanAttachFileRef = useRef(null)
 
   // Handover Criteria panel state
   const [handoverOpen, setHandoverOpen] = useState(false)
@@ -1115,6 +1288,10 @@ export default function TestCoveragePage() {
         setTestPlan(data.test_plan.content)
         setTestPlanSavedAt(data.test_plan.generated_at)
         setTestPlanOpen(true)
+      }
+      if (data.test_plan_attachments) {
+        const att = data.test_plan_attachments.content
+        setTestPlanAttachments(Array.isArray(att) ? att : att?.attachments || [])
       }
       if (data.handover_criteria) {
         setHandoverData(data.handover_criteria.content)
@@ -1326,7 +1503,7 @@ export default function TestCoveragePage() {
                 {showIssueDrop && issueResults.length > 0 && (
                   <div className="absolute z-30 top-full mt-1 left-0 right-0 bg-white border border-gray-200 rounded-xl shadow-xl max-h-72 overflow-y-auto">
                     {issueResults.map(r => (
-                      <button key={r.key} onClick={() => { setSelectedIssue(r); setIssueSearch(r.key); setShowIssueDrop(false); setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null); setTestPlanNotes(''); setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null); setHandoverSavedAt(null); setHandoverNotes('') }}
+                      <button key={r.key} onClick={() => { setSelectedIssue(r); setIssueSearch(r.key); setShowIssueDrop(false); setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null); setTestPlanNotes(''); setTestPlanAttachments([]); setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null); setHandoverSavedAt(null); setHandoverNotes('') }}
                         className="w-full text-left px-4 py-2.5 hover:bg-brand-50 transition-colors border-b border-gray-100 last:border-0">
                         <div className="flex items-center gap-2">
                           <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${r.type === 'Epic' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>
@@ -1472,7 +1649,7 @@ export default function TestCoveragePage() {
                             )}
 
                             {!testPlan && !testPlanLoading && (
-                              <div className="flex justify-center">
+                              <div className="flex justify-center gap-3 flex-wrap">
                                 <button
                                   onClick={async () => {
                                     setTestPlanLoading(true); setTestPlanError(null)
@@ -1489,6 +1666,34 @@ export default function TestCoveragePage() {
                                 >
                                   <Sparkles className="h-4 w-4" /> Generate Test Plan
                                 </button>
+                                <input
+                                  ref={testPlanFileRef}
+                                  type="file"
+                                  accept=".txt,.md,.docx"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0]
+                                    if (!file) return
+                                    setTestPlanLoading(true); setTestPlanError(null)
+                                    try {
+                                      const fd = new FormData()
+                                      fd.append('file', file)
+                                      fd.append('issue_key', selectedIssue.key)
+                                      const result = await uploadTestPlanDoc(fd)
+                                      setTestPlan(result)
+                                      const saved = await saveAiContent({ issue_key: selectedIssue.key, content_type: 'test_plan', content: result })
+                                      setTestPlanSavedAt(saved.generated_at)
+                                    } catch(e) { setTestPlanError(e.message) }
+                                    finally { setTestPlanLoading(false); e.target.value = '' }
+                                  }}
+                                />
+                                <button
+                                  onClick={() => testPlanFileRef.current?.click()}
+                                  className="px-4 py-2 bg-white border border-indigo-300 text-indigo-600 text-sm rounded-lg hover:bg-indigo-50 flex items-center gap-2"
+                                >
+                                  <Paperclip className="h-4 w-4" /> Attach existing doc
+                                </button>
+                                <p className="w-full text-center text-xs text-gray-400">.txt · .md · .docx</p>
                               </div>
                             )}
                             {testPlanLoading && (
@@ -1498,7 +1703,56 @@ export default function TestCoveragePage() {
                               </div>
                             )}
                             {testPlanError && <p className="text-sm text-red-500 text-center">{testPlanError}</p>}
-                            {testPlan && !testPlanLoading && <TestPlanView plan={testPlan} exportTitle={selectedIssue?.summary || selectedIssue?.key} onRegen={() => { setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null) }} />}
+                            {testPlan && !testPlanLoading && (
+                              <>
+                                <TestPlanView plan={testPlan} exportTitle={selectedIssue?.summary || selectedIssue?.key} attachments={testPlanAttachments} onRegen={() => { setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null); setTestPlanAttachments([]) }} />
+
+                                {/* Additional attached docs */}
+                                {testPlanAttachments.map((att, idx) => (
+                                  <details key={idx} className="border border-gray-200 rounded-lg overflow-hidden mt-2">
+                                    <summary className="flex items-center gap-2 px-3 py-2 bg-gray-50 cursor-pointer text-xs font-medium text-gray-600 hover:bg-gray-100 list-none">
+                                      <Paperclip className="h-3 w-3 text-gray-400 flex-shrink-0" />
+                                      <span className="flex-1 truncate">{att.filename || `Attachment ${idx + 1}`}</span>
+                                      <button
+                                        onClick={async (e) => { e.preventDefault(); const next = testPlanAttachments.filter((_, i) => i !== idx); setTestPlanAttachments(next); await saveAiContent({ issue_key: selectedIssue.key, content_type: 'test_plan_attachments', content: { attachments: next } }) }}
+                                        className="text-gray-300 hover:text-red-400 ml-2"
+                                        title="Remove"
+                                      ><X className="h-3 w-3" /></button>
+                                    </summary>
+                                    <pre className="bg-white px-4 py-3 text-xs text-gray-700 whitespace-pre-wrap leading-relaxed max-h-[400px] overflow-y-auto">{att.raw_text}</pre>
+                                  </details>
+                                ))}
+
+                                {/* Attach additional doc button */}
+                                <input
+                                  ref={testPlanAttachFileRef}
+                                  type="file"
+                                  accept=".txt,.md,.docx"
+                                  className="hidden"
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0]
+                                    if (!file) return
+                                    setTestPlanLoading(true); setTestPlanError(null)
+                                    try {
+                                      const fd = new FormData()
+                                      fd.append('file', file)
+                                      fd.append('issue_key', selectedIssue.key)
+                                      const result = await uploadTestPlanDoc(fd)
+                                      const next = [...testPlanAttachments, result]
+                                      setTestPlanAttachments(next)
+                                      await saveAiContent({ issue_key: selectedIssue.key, content_type: 'test_plan_attachments', content: { attachments: next } })
+                                    } catch(err) { setTestPlanError(err.message) }
+                                    finally { setTestPlanLoading(false); e.target.value = '' }
+                                  }}
+                                />
+                                <button
+                                  onClick={() => testPlanAttachFileRef.current?.click()}
+                                  className="mt-2 w-full flex items-center justify-center gap-1.5 px-3 py-1.5 border border-dashed border-gray-300 rounded-lg text-xs text-gray-400 hover:border-indigo-300 hover:text-indigo-500 hover:bg-indigo-50 transition-colors"
+                                >
+                                  <Paperclip className="h-3 w-3" /> Attach additional doc (.txt · .md · .docx)
+                                </button>
+                              </>
+                            )}
                           </div>
                         )}
                       </div>
@@ -1793,7 +2047,7 @@ function downloadBlob(content, filename, mimeType) {
   URL.revokeObjectURL(url)
 }
 
-function buildTestPlanHTML(plan, title) {
+function buildTestPlanHTML(plan, title, attachments = []) {
   const esc = s => String(s ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
   const scopeRows = side =>
     (plan.scope?.[side] || []).map(i => `<li>${esc(i)}</li>`).join('')
@@ -1843,6 +2097,12 @@ ${plan.test_flow?.length ? `<h2>Test Flow</h2><div style="margin-bottom:12px;">$
 ${plan.coverage_areas?.length ? `<h2>Coverage Areas</h2>${areasHTML}` : ''}
 ${plan.risks?.length ? `<h2>Risks &amp; Mitigations</h2>${risksHTML}` : ''}
 ${plan.estimated_test_cases ? `<p style="text-align:center;color:#9ca3af;font-size:0.85em;">Estimated total test cases: <strong>${plan.estimated_test_cases}</strong></p>` : ''}
+${attachments.length ? `<hr style="margin:32px 0;border:none;border-top:2px solid #c7d2fe;"/>
+<h2 style="font-size:1.1em;color:#374151;text-transform:uppercase;letter-spacing:0.05em;margin:0 0 12px;">Additional Documents</h2>
+${attachments.map(a => `<div style="margin-bottom:24px;">
+  <p style="font-weight:bold;color:#4b5563;margin:0 0 6px;font-size:0.9em;">${esc(a.filename || '')}</p>
+  <pre style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:6px;padding:12px;font-size:0.82em;white-space:pre-wrap;word-break:break-word;color:#374151;">${esc(a.raw_text || '')}</pre>
+</div>`).join('')}` : ''}
 </body></html>`
 }
 
@@ -1877,7 +2137,42 @@ ${criteriaHTML}
 </body></html>`
 }
 
-function TestPlanView({ plan, onRegen, exportTitle }) {
+function RawTextPlanView({ plan, onRegen, exportTitle, attachments = [] }) {
+  const slug = (exportTitle || 'test-plan').replace(/[^a-z0-9]/gi,'_').toLowerCase()
+  const date = new Date().toISOString().slice(0,10)
+  const buildTxtExport = () => {
+    let out = plan.raw_text || ''
+    if (attachments.length) {
+      out += '\n\n' + '='.repeat(60) + '\nADDITIONAL DOCUMENTS\n' + '='.repeat(60)
+      attachments.forEach(a => {
+        out += `\n\n--- ${a.filename || 'Attachment'} ---\n${a.raw_text || ''}`
+      })
+    }
+    return out
+  }
+  return (
+    <div className="space-y-3 text-sm">
+      <div className="flex justify-end items-center gap-2">
+        {plan.filename && <span className="text-xs text-gray-400 flex items-center gap-1"><Paperclip className="h-3 w-3" />{plan.filename}</span>}
+        <button
+          onClick={() => downloadBlob(buildTxtExport(), `test-plan_${slug}_${date}.txt`, 'text/plain')}
+          className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+        >
+          <Download className="h-3 w-3" /> TXT
+        </button>
+        <button onClick={onRegen} className="text-xs text-indigo-500 hover:text-indigo-700 flex items-center gap-1">
+          <Wand2 className="h-3 w-3" /> Replace
+        </button>
+      </div>
+      <pre className="bg-gray-50 rounded-lg p-4 text-xs text-gray-700 whitespace-pre-wrap leading-relaxed overflow-x-auto max-h-[600px] overflow-y-auto border border-gray-100">
+        {plan.raw_text}
+      </pre>
+    </div>
+  )
+}
+
+function TestPlanView({ plan, onRegen, exportTitle, attachments = [] }) {
+  if (plan?.raw_text) return <RawTextPlanView plan={plan} onRegen={onRegen} exportTitle={exportTitle} attachments={attachments} />
   const [expandedType, setExpandedType] = useState(null)
   const [expandedArea, setExpandedArea] = useState(null)
   const slug = (exportTitle || 'test-plan').replace(/[^a-z0-9]/gi,'_').toLowerCase()
@@ -1887,14 +2182,14 @@ function TestPlanView({ plan, onRegen, exportTitle }) {
       {/* Action bar */}
       <div className="flex justify-end items-center gap-2">
         <button
-          onClick={() => downloadBlob(buildTestPlanHTML(plan, exportTitle || 'Test Plan'), `test-plan_${slug}_${date}.html`, 'text/html')}
+          onClick={() => downloadBlob(buildTestPlanHTML(plan, exportTitle || 'Test Plan', attachments), `test-plan_${slug}_${date}.html`, 'text/html')}
           className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
           title="Export as HTML"
         >
           <Download className="h-3 w-3" /> HTML
         </button>
         <button
-          onClick={() => downloadBlob(buildTestPlanHTML(plan, exportTitle || 'Test Plan'), `test-plan_${slug}_${date}.doc`, 'application/msword')}
+          onClick={() => downloadBlob(buildTestPlanHTML(plan, exportTitle || 'Test Plan', attachments), `test-plan_${slug}_${date}.doc`, 'application/msword')}
           className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
           title="Export as Word document"
         >

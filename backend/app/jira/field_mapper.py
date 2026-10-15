@@ -86,6 +86,17 @@ class FieldMapper:
                 return {"id": None, "name": name, "state": None}
         return None
 
+    @staticmethod
+    def _adf_text(node: Any, _depth: int = 0) -> str:
+        """Recursively extract plain text from Atlassian Document Format."""
+        if not node or not isinstance(node, dict):
+            return ""
+        if node.get("type") == "text":
+            return node.get("text", "")
+        parts = [FieldMapper._adf_text(c, _depth + 1) for c in node.get("content", [])]
+        sep = "\n" if node.get("type") in ("paragraph", "heading", "bulletList", "orderedList", "listItem") else " "
+        return sep.join(p for p in parts if p).strip()
+
     def map_issue(self, issue: dict) -> dict:
         """Map a raw Jira issue to dashboard-friendly dict."""
         fields = issue.get("fields", {})
@@ -150,6 +161,18 @@ class FieldMapper:
         # Days in current status (approximated from updated if no changelog)
         days_in_current_status = self.days_in_status(updated) if updated else 0
 
+        # Parent
+        parent_raw = fields.get("parent") or {}
+        parent_fields_raw = parent_raw.get("fields") or {}
+        parent_key = parent_raw.get("key")
+
+        # Description (ADF in API v3 or plain string in v2)
+        desc_raw = fields.get("description")
+        if isinstance(desc_raw, dict):
+            description = self._adf_text(desc_raw)
+        else:
+            description = str(desc_raw) if desc_raw else ""
+
         return {
             "key": issue.get("key"),
             "id": issue.get("id"),
@@ -177,6 +200,10 @@ class FieldMapper:
             "test_count": test_count,
             "days_in_status": days_in_current_status,
             "aging_level": self.aging_level(days_in_current_status),
+            "parent_key": parent_key,
+            "parent_summary": parent_fields_raw.get("summary"),
+            "parent_url": f"{self.jira_base_url}/browse/{parent_key}" if parent_key else None,
+            "description": description[:400] if description else None,
         }
 
     def map_issues(self, issues: list[dict]) -> list[dict]:

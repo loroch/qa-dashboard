@@ -160,6 +160,67 @@ class ActivityService:
                 if _parse_jira_dt((b.get("fields") or {}).get("created", "")) >= since
             ]
 
+            # ── Daily trend data ───────────────────────────────────────────
+            REOPEN_STATUSES = {"Reopened", "Open"}
+            trend_days = {}
+            for i in range(days):
+                d = (datetime.now(timezone.utc) - timedelta(days=days - 1 - i)).date()
+                trend_days[str(d)] = {
+                    "date": str(d),
+                    "bugs_opened": 0,
+                    "done": 0,
+                    "rft": 0,
+                    "reopened": 0,
+                    "rfd": 0,
+                }
+
+            # Bugs opened: use created field
+            for b in bugs_raw:
+                created_dt = _parse_jira_dt((b.get("fields") or {}).get("created", ""))
+                if created_dt >= since:
+                    key = str(created_dt.date())
+                    if key in trend_days:
+                        trend_days[key]["bugs_opened"] += 1
+
+            # Status transitions: bucket by changelog date
+            for b in bugs_raw:
+                for h2 in (b.get("changelog") or {}).get("histories", []):
+                    hist_dt = _parse_jira_dt(h2.get("created", ""))
+                    if hist_dt < since:
+                        continue
+                    day_key = str(hist_dt.date())
+                    if day_key not in trend_days:
+                        continue
+                    for it in h2.get("items", []):
+                        if it.get("field") != "status":
+                            continue
+                        to_s = it.get("toString", "")
+                        if to_s in DONE_STATUSES:
+                            trend_days[day_key]["done"] += 1
+                        if to_s in REOPEN_STATUSES:
+                            trend_days[day_key]["reopened"] += 1
+
+            for s in stories_raw:
+                for h2 in (s.get("changelog") or {}).get("histories", []):
+                    hist_dt = _parse_jira_dt(h2.get("created", ""))
+                    if hist_dt < since:
+                        continue
+                    day_key = str(hist_dt.date())
+                    if day_key not in trend_days:
+                        continue
+                    for it in h2.get("items", []):
+                        if it.get("field") != "status":
+                            continue
+                        to_s = it.get("toString", "")
+                        if to_s in RFT_STATUSES:
+                            trend_days[day_key]["rft"] += 1
+                        if to_s in DONE_STATUSES:
+                            trend_days[day_key]["done"] += 1
+                        if to_s in {"Ready For Deployment", "Ready for Deployment"}:
+                            trend_days[day_key]["rfd"] += 1
+
+            trend_data = sorted(trend_days.values(), key=lambda x: x["date"])
+
             return {
                 "period_days": days,
                 "version":     version,
@@ -180,6 +241,7 @@ class ActivityService:
                 "tests":            tests_report,
                 "tests_created":    tests_created_list,
                 "bugs_opened_list": bugs_opened_list,
+                "trend_data":       trend_data,
             }
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)

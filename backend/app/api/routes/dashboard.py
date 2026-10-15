@@ -111,6 +111,35 @@ async def get_prod_bugs(refresh: bool = Query(False)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/sprints")
+async def get_sprints(version: str = Query(..., description="Fix version name")):
+    """Return distinct sprint names for a fix version."""
+    try:
+        svc = get_dashboard_service()
+        sprints = await svc.get_sprints_for_version(version)
+        return {"sprints": sprints}
+    except Exception as e:
+        logger.error(f"sprints error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/qa-activity")
+async def get_qa_activity(
+    version:   str           = Query(...,  description="Fix version name"),
+    sprint:    Optional[str] = Query(None, description="Sprint name filter (optional)"),
+    epic_key:  Optional[str] = Query(None, description="Epic issue key (e.g. TMT0-123) — includes epic children alongside fixVersion issues"),
+    days:      int           = Query(7,   ge=1, le=90, description="Look-back window in days"),
+    refresh:   bool          = Query(False),
+):
+    """QA activity report: what changed in the last N days for a version/sprint/epic."""
+    try:
+        svc = get_dashboard_service()
+        return await svc.get_qa_activity(version, sprint or None, days, epic_key=epic_key or None, force_refresh=refresh)
+    except Exception as e:
+        logger.error(f"qa-activity error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/blockers")
 async def get_blockers(
     refresh: bool = Query(False),
@@ -159,6 +188,20 @@ async def get_bugs_by_version(
         return data
     except Exception as e:
         logger.error(f"Bugs-by-version error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/recent-bugs")
+async def get_recent_bugs(
+    days: int = Query(7, ge=1, le=90, description="Bugs opened in the last N days"),
+    refresh: bool = Query(False),
+):
+    """All project bugs opened in the last N days (not version-filtered)."""
+    try:
+        svc = get_dashboard_service()
+        return await svc.get_recent_bugs(days=days, force_refresh=refresh)
+    except Exception as e:
+        logger.error(f"Recent-bugs error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

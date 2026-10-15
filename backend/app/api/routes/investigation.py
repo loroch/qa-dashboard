@@ -59,6 +59,21 @@ async def get_children(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/by-version")
+async def get_issues_by_version(
+    version: str = Query(..., description="Fix version name, e.g. K1-S-3.1.1"),
+    types:   str = Query("Story", description="Comma-separated: Epic,Story"),
+):
+    """Return all Epics/Stories for a fix version so the timeline can bulk-load them."""
+    svc = get_investigation_service()
+    try:
+        type_list = [t.strip() for t in types.split(",") if t.strip()] or ["Story"]
+        items     = await svc.get_issues_by_version(version.strip(), type_list)
+        return {"items": items, "version": version, "total": len(items)}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/epic-bugs")
 async def get_epic_bugs(
     epic:    str  = Query(..., description="Epic key, e.g. TMT0-100"),

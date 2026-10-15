@@ -16,6 +16,64 @@ const COLORS = {
   bugs: '#EF4444',
 }
 
+const ACTIVITY_COLORS = {
+  bugs_opened: '#EF4444',
+  done:        '#16a34a',
+  rft:         '#7c3aed',
+  reopened:    '#ea580c',
+  rfd:         '#0891b2',
+}
+
+export function ActivityTrendChart({ data = [], days = 7 }) {
+  const formatted = data.map(d => ({ ...d, day: formatDay(d.date) }))
+  const title = `${days > 1 ? `${days}-Day` : '24h'} QA Activity Trend`
+  const series = [
+    { key: 'bugs_opened', name: 'Bugs Opened' },
+    { key: 'done',        name: 'Moved to Done' },
+    { key: 'rft',         name: 'Ready for Testing' },
+    { key: 'reopened',    name: 'Reopened' },
+    { key: 'rfd',         name: 'Ready to Deploy' },
+  ]
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl shadow-sm p-5">
+      <h2 className="font-semibold text-gray-800 text-sm mb-4">{title}</h2>
+      <ResponsiveContainer width="100%" height={260}>
+        <AreaChart data={formatted} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+          <defs>
+            {series.map(({ key }) => (
+              <linearGradient key={key} id={`agrad_${key}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor={ACTIVITY_COLORS[key]} stopOpacity={0.25} />
+                <stop offset="95%" stopColor={ACTIVITY_COLORS[key]} stopOpacity={0} />
+              </linearGradient>
+            ))}
+          </defs>
+          <CartesianGrid strokeDasharray="3 3" stroke="#F0F0F0" vertical={false} />
+          <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} />
+          <YAxis tick={{ fontSize: 11, fill: '#94a3b8' }} axisLine={false} tickLine={false} allowDecimals={false} />
+          <Tooltip
+            contentStyle={{ fontSize: 12, borderRadius: 10, border: '1px solid #e2e8f0', boxShadow: '0 4px 16px rgba(0,0,0,.08)' }}
+            itemStyle={{ padding: '1px 0' }}
+          />
+          <Legend iconSize={10} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+          {series.map(({ key, name }) => (
+            <Area
+              key={key}
+              type="monotone"
+              dataKey={key}
+              name={name}
+              stroke={ACTIVITY_COLORS[key]}
+              fill={`url(#agrad_${key})`}
+              strokeWidth={2}
+              dot={false}
+              activeDot={{ r: 4, strokeWidth: 0 }}
+            />
+          ))}
+        </AreaChart>
+      </ResponsiveContainer>
+    </div>
+  )
+}
+
 export function TrendAreaChart({ data = [] }) {
   const formatted = data.map((d) => ({ ...d, day: formatDay(d.date) }))
   return (

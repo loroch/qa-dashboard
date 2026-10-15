@@ -87,7 +87,7 @@ function BugRow({ bug }) {
 }
 
 const JIRA_BASE = 'https://kabatone.atlassian.net'
-function jiraFilter(jql) { return `${JIRA_BASE}/issues/?jql=${encodeURIComponent(jql)}` }
+function jiraFilter(jql) { return `${JIRA_BASE}/jira/issues/?jql=${encodeURIComponent(jql)}` }
 
 export default function ProdBugsPage() {
   const [activeSource, setActiveSource] = useState(null)

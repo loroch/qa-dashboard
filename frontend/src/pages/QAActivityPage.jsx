@@ -6,6 +6,7 @@ import {
   ChevronDown, ChevronRight, ArrowRight, User, Clock, TrendingUp,
   CheckCircle2, PlusCircle, Play
 } from 'lucide-react'
+import { ActivityTrendChart } from '../components/charts/TrendChart'
 
 const getVersions     = () => api.get('/coverage/versions')
 const getReport       = (p) => api.get('/activity/report', { params: p })
@@ -514,6 +515,11 @@ export default function QAActivityPage() {
               </a>
             ))}
           </div>
+        )}
+
+        {/* ── Activity trend chart ── */}
+        {report?.trend_data?.length > 0 && (
+          <ActivityTrendChart data={report.trend_data} days={activeDays} />
         )}
 
         {/* ── Transition sections ── */}

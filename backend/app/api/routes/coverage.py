@@ -5,7 +5,7 @@ import io
 import json
 import logging
 from datetime import datetime, timezone
-from fastapi import APIRouter, Query, HTTPException
+from fastapi import APIRouter, Query, HTTPException, UploadFile, File, Form
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional
@@ -288,6 +288,7 @@ class TestPlanRequest(BaseModel):
     issue_summary: str
     issue_type: str = "Story"
     stories: list[dict] = []
+    notes: str = ""
 
 
 class HandoverCriteriaRequest(BaseModel):
@@ -314,6 +315,31 @@ async def generate_test_plan(body: TestPlanRequest):
     except Exception as e:
         logger.error(f"generate_test_plan error for {body.issue_key}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/upload-test-plan")
+async def upload_test_plan(
+    file: UploadFile = File(...),
+    issue_key: str = Form(...),
+):
+    """Accept an uploaded test-plan document (.txt, .md, .docx) and return its text content."""
+    filename = file.filename or ""
+    ext = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    raw = await file.read()
+
+    if ext in ("txt", "md"):
+        text = raw.decode("utf-8", errors="replace")
+    elif ext == "docx":
+        try:
+            import docx
+            doc = docx.Document(io.BytesIO(raw))
+            text = "\n\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Could not parse .docx: {e}")
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file type. Upload .txt, .md, or .docx.")
+
+    return {"raw_text": text, "filename": filename, "issue_key": issue_key}
 
 
 @router.post("/generate-handover-criteria")

@@ -17,6 +17,13 @@ logger = logging.getLogger(__name__)
 RFT_STATUS  = "Ready for Testing"
 TODO_STATUS = "To Do"
 
+# Statuses that mean "ready to ship" — first time the issue reaches any of these
+# is when R&D's job is considered done for estimation comparison purposes.
+DEPLOY_STATUSES = {
+    "done", "closed", "resolved", "released", "deployed",
+    "ready for deployment", "ready to deploy", "approved",
+}
+
 
 def _parse_dt(s: str | None) -> datetime | None:
     if not s:
@@ -62,7 +69,10 @@ class InvestigationService:
         try:
             issue = await self.jira.get_issue(
                 key,
-                fields=["summary", "status", "issuetype", "created", "assignee", "priority", "parent"],
+                fields=[
+                    "summary", "status", "issuetype", "created", "assignee", "priority", "parent",
+                    "customfield_10016", "timeoriginalestimate", "story_points",
+                ],
             )
         except Exception as e:
             logger.warning(f"Failed to fetch issue {key}: {e}")
@@ -109,19 +119,25 @@ class InvestigationService:
 
         transitions.sort(key=lambda x: x["dt"] or datetime.min.replace(tzinfo=timezone.utc))
 
-        todo_dt        = None
-        rft_dt         = None
-        post_rft_dt    = None
+        todo_dt         = None
+        dev_start_dt    = None   # first transition OUT of "To Do" (dev actually begins)
+        rft_dt          = None
+        post_rft_dt     = None
         post_rft_status = None
+        deploy_dt       = None   # first transition TO a deployment-ready status
 
         for t in transitions:
             if t["to"] == TODO_STATUS and todo_dt is None:
                 todo_dt = t["dt"]
+            if t["from"] == TODO_STATUS and dev_start_dt is None:
+                dev_start_dt = t["dt"]
             if t["to"] == RFT_STATUS and rft_dt is None:
                 rft_dt = t["dt"]
             if t["from"] == RFT_STATUS and post_rft_dt is None:
                 post_rft_dt    = t["dt"]
                 post_rft_status = t["to"]
+            if deploy_dt is None and t["to"].lower() in DEPLOY_STATUSES:
+                deploy_dt = t["dt"]
 
         if todo_dt is None:
             todo_dt = created_dt
@@ -129,21 +145,43 @@ class InvestigationService:
         parent_raw = f.get("parent") or {}
         parent_f   = parent_raw.get("fields") or {}
 
+        # R&D estimation: story points (customfield_10016) or original time estimate
+        sp_raw = f.get("customfield_10016") or f.get("story_points")
+        story_points = float(sp_raw) if sp_raw is not None else None
+
+        time_est_sec = f.get("timeoriginalestimate")
+        estimated_hours = round(time_est_sec / 3600, 1) if time_est_sec else None
+
+        # Actual cycle: from leaving "To Do" → deploy-ready (Done/Closed/etc.)
+        # Falls back to → now if still in progress.
+        now_dt = datetime.now(timezone.utc)
+        actual_dev_days = None
+        cycle_end_dt = deploy_dt  # prefer deploy date as the definitive end
+        if dev_start_dt:
+            end = cycle_end_dt or now_dt
+            actual_dev_days = round((end - dev_start_dt).total_seconds() / 86400, 1)
+
         return {
-            "key":            key,
-            "url":            self._issue_url(key),
-            "summary":        f.get("summary", ""),
-            "type":           (f.get("issuetype") or {}).get("name", ""),
-            "status":         (f.get("status") or {}).get("name", ""),
-            "assignee":       ((f.get("assignee") or {}).get("displayName") or ""),
-            "priority":       (f.get("priority") or {}).get("name", ""),
-            "created":        _iso(created_dt),
-            "todo_date":      _iso(todo_dt),
-            "rft_date":       _iso(rft_dt),
-            "post_rft_date":  _iso(post_rft_dt),
+            "key":             key,
+            "url":             self._issue_url(key),
+            "summary":         f.get("summary", ""),
+            "type":            (f.get("issuetype") or {}).get("name", ""),
+            "status":          (f.get("status") or {}).get("name", ""),
+            "assignee":        ((f.get("assignee") or {}).get("displayName") or ""),
+            "priority":        (f.get("priority") or {}).get("name", ""),
+            "created":         _iso(created_dt),
+            "todo_date":       _iso(todo_dt),
+            "dev_start_date":  _iso(dev_start_dt),
+            "rft_date":        _iso(rft_dt),
+            "post_rft_date":   _iso(post_rft_dt),
             "post_rft_status": post_rft_status,
-            "parent_key":     parent_raw.get("key", ""),
-            "parent_summary": parent_f.get("summary", ""),
+            "deploy_date":     _iso(deploy_dt),
+            "is_deployed":     deploy_dt is not None,
+            "parent_key":      parent_raw.get("key", ""),
+            "parent_summary":  parent_f.get("summary", ""),
+            "story_points":    story_points,
+            "estimated_hours": estimated_hours,
+            "actual_dev_days": actual_dev_days,
         }
 
     async def search_issues(
@@ -240,6 +278,37 @@ class InvestigationService:
                     "status":  (issue.get("fields", {}).get("status") or {}).get("name", ""),
                 }
                 for issue in issues_raw
+            ]
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
+
+    async def get_issues_by_version(self, version: str, types: list[str]) -> list[dict]:
+        """All Epics/Stories for a fix version — used by the VersionLoader panel."""
+        import hashlib
+        type_slug = "_".join(sorted(types))
+        cache_key = f"investigation:by_version:{hashlib.md5((version + type_slug).encode()).hexdigest()[:10]}"
+
+        async def fetch():
+            types_str = ", ".join(types)
+            jql = (
+                f'project = TMT0 AND issuetype in ({types_str}) '
+                f'AND fixVersion = "{version}" ORDER BY issuetype ASC, key ASC'
+            )
+            issues_raw = await self.jira.search_issues(
+                jql,
+                fields=["summary", "status", "issuetype", "parent"],
+                max_total=500,
+            )
+            return [
+                {
+                    "key":        i["key"],
+                    "url":        self._issue_url(i["key"]),
+                    "summary":    i.get("fields", {}).get("summary", ""),
+                    "type":       (i.get("fields", {}).get("issuetype") or {}).get("name", ""),
+                    "status":     (i.get("fields", {}).get("status") or {}).get("name", ""),
+                    "parent_key": (i.get("fields", {}).get("parent") or {}).get("key", ""),
+                }
+                for i in issues_raw
             ]
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
