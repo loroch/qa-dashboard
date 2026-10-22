@@ -20,6 +20,11 @@ const getRecentBugs    = (d) => api.get('/dashboard/recent-bugs',         { para
 const getSprints       = (v) => api.get('/dashboard/sprints',             { params: { version: v } })
 const getQAActivity    = (v, s, d, e) => api.get('/dashboard/qa-activity', { params: { version: v, sprint: s || undefined, days: d, epic_key: e || undefined } })
 const getEpics         = ()          => api.get('/dashboard/epics')
+const getHandoverItems = (v)         => api.get('/dashboard/handover-items', { params: { version: v } })
+const getTransitions   = (k)         => api.get(`/coverage/test-transitions/${k}`)
+const applyTransition  = (body)      => api.post('/coverage/test-transition', body)
+const getAllocation     = (v, s)      => api.get('/dashboard/allocation', { params: { version: v || undefined, sprint: s || undefined } })
+const reassignIssue    = (key, id)   => api.post(`/dashboard/issue/${key}/qa-owner`, { account_id: id })
 
 function pct(n, d) { return d ? Math.round(n / d * 100) : 0 }
 
@@ -1717,6 +1722,500 @@ function downloadHTML(){
   )
 }
 
+// ── Allocation Tab ────────────────────────────────────────────────────────────
+function AllocationTab({ version, jiraBaseUrl }) {
+  const [sprintFilter, setSprintFilter] = useState('')
+  const [focusMember, setFocusMember]   = useState(null)   // null=All, ''=Unassigned, id=member
+  const [localAsgn, setLocalAsgn]       = useState({})     // key → {id, name}
+  const [reassignLd, setReassignLd]     = useState({})     // key → bool
+
+  const sprintQ = useQuery({
+    queryKey: ['sprints', version],
+    queryFn:  () => getSprints(version),
+    enabled:  !!version,
+    staleTime: 10 * 60 * 1000,
+  })
+  const sprints = sprintQ.data?.sprints || []
+
+  const q = useQuery({
+    queryKey: ['allocation', version, sprintFilter],
+    queryFn:  () => getAllocation(version || undefined, sprintFilter || undefined),
+    staleTime: 2 * 60 * 1000,
+  })
+
+  const rawItems = q.data?.items || []
+  const workload  = q.data?.workload  || []
+
+  // Merge local assignee overrides into items
+  const items = rawItems.map(i => {
+    const local = localAsgn[i.key]
+    return local ? { ...i, assignee: local.name, assignee_id: local.id } : i
+  })
+
+  // Recompute live workload counts from items (reflecting local reassignments)
+  const liveWorkload = useMemo(() => {
+    const counts = {}
+    workload.forEach(w => { counts[w.id] = { ...w, count: 0 } })
+    items.forEach(item => {
+      const aid = item.assignee_id || 'unassigned'
+      if (!counts[aid]) counts[aid] = { id: aid, name: item.assignee || 'Unassigned', count: 0 }
+      counts[aid].count++
+    })
+    return Object.values(counts).sort((a, b) => b.count - a.count || a.name.localeCompare(b.name))
+  }, [items, workload])
+
+  const filteredItems = useMemo(() => {
+    if (focusMember === null) return items
+    if (focusMember === '')   return items.filter(i => !i.assignee_id)
+    return items.filter(i => i.assignee_id === focusMember)
+  }, [items, focusMember])
+
+  const allMembers = liveWorkload.filter(w => w.id !== 'unassigned')
+  const maxCount   = Math.max(...liveWorkload.map(w => w.count), 1)
+
+  const doReassign = async (key, member) => {
+    setReassignLd(p => ({ ...p, [key]: true }))
+    try {
+      await reassignIssue(key, member.id === 'unassigned' ? null : member.id)
+      setLocalAsgn(p => ({ ...p, [key]: member }))
+    } catch {} finally { setReassignLd(p => ({ ...p, [key]: false })) }
+  }
+
+  const overloadStyle = (count) => {
+    if (count === 0) return { ring: 'ring-gray-200',  badge: 'bg-gray-100 text-gray-400',   bar: 'bg-gray-200',  label: ''           }
+    if (count <= 2)  return { ring: 'ring-green-300', badge: 'bg-green-100 text-green-700', bar: 'bg-green-400', label: 'OK'         }
+    if (count <= 4)  return { ring: 'ring-amber-300', badge: 'bg-amber-100 text-amber-700', bar: 'bg-amber-400', label: 'Busy'       }
+    return               { ring: 'ring-red-400',   badge: 'bg-red-100 text-red-700',     bar: 'bg-red-500',   label: 'Overloaded' }
+  }
+
+  return (
+    <div className="space-y-5">
+      {/* Header + filters */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="flex-1 min-w-0">
+          <h2 className="text-sm font-semibold text-gray-800">QA Allocation</h2>
+          <p className="text-xs text-gray-400 mt-0.5">Ready for Testing — assign &amp; balance workload</p>
+        </div>
+        <div className="flex items-center gap-2 flex-shrink-0">
+          <select value={sprintFilter} onChange={e => { setSprintFilter(e.target.value); setFocusMember(null) }}
+            className="text-xs border border-gray-200 rounded-lg px-2 py-1.5 text-gray-600 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300">
+            <option value="">All Sprints</option>
+            {sprints.map(s => {
+              const name = typeof s === 'string' ? s : (s.name || String(s))
+              return <option key={name} value={name}>{name}</option>
+            })}
+          </select>
+          <button onClick={() => q.refetch()} disabled={q.isFetching}
+            className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 text-xs font-medium hover:bg-indigo-100 transition-colors disabled:opacity-50">
+            <RefreshCw className={`h-3 w-3 ${q.isFetching ? 'animate-spin' : ''}`} />
+            {q.isFetching ? 'Loading…' : 'Refresh'}
+          </button>
+        </div>
+        {q.isError && <span className="text-xs text-red-500 w-full">{q.error?.message}</span>}
+      </div>
+
+      {/* Workload cards */}
+      <div className="flex flex-wrap gap-2">
+        <button onClick={() => setFocusMember(null)}
+          className={`px-3 py-2 rounded-xl text-xs font-medium border transition-all ${
+            focusMember === null ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm' : 'bg-white text-gray-600 border-gray-200 hover:border-indigo-300'
+          }`}>
+          All ({items.length})
+        </button>
+
+        {(() => {
+          const u = liveWorkload.find(w => w.id === 'unassigned')
+          const cnt = u?.count || 0
+          if (cnt === 0 && focusMember !== '') return null
+          return (
+            <button onClick={() => setFocusMember(focusMember === '' ? null : '')}
+              className={`flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium border transition-all ${
+                focusMember === '' ? 'bg-gray-800 text-white border-gray-800' : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+              }`}>
+              Unassigned
+              {cnt > 0 && <span className="bg-red-500 text-white rounded-full px-1.5 py-0.5 text-[10px] font-bold">{cnt}</span>}
+            </button>
+          )
+        })()}
+
+        {allMembers.map(member => {
+          const { ring, badge, bar, label } = overloadStyle(member.count)
+          const focused = focusMember === member.id
+          const barPct  = Math.round(member.count / maxCount * 100)
+          return (
+            <button key={member.id} onClick={() => setFocusMember(focused ? null : member.id)}
+              className={`flex flex-col gap-1 px-3 py-2 rounded-xl border transition-all min-w-[105px] text-left ${
+                focused ? `ring-2 ${ring} bg-white border-transparent` : 'bg-white border-gray-200 hover:border-indigo-200'
+              }`}>
+              <div className="flex items-center justify-between gap-1.5">
+                <span className="text-[11px] font-medium text-gray-700 truncate">{member.name.split(' ')[0]}</span>
+                <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded-full flex-shrink-0 ${badge}`}>{member.count}</span>
+              </div>
+              {label && <span className={`text-[9px] font-semibold uppercase tracking-wide ${badge} px-1 rounded self-start`}>{label}</span>}
+              <div className="h-1 bg-gray-100 rounded-full w-full">
+                <div className={`h-1 rounded-full transition-all ${bar}`} style={{ width: `${barPct}%` }} />
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      {/* Table */}
+      {q.isLoading ? (
+        <div className="text-center py-12 text-gray-400 text-sm">Loading…</div>
+      ) : filteredItems.length === 0 ? (
+        <div className="text-center py-12 text-gray-400 text-sm">No items{focusMember !== null ? ' for this filter' : ''}</div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-gray-100 shadow-sm">
+          <table className="w-full text-xs">
+            <thead>
+              <tr className="bg-gray-50 border-b border-gray-100">
+                {['Type','Key','Summary','Priority','Parent','Sprint','Assigned To'].map(h => (
+                  <th key={h} className="px-4 py-2.5 text-left font-semibold text-gray-500 uppercase tracking-wide text-[10px]">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-50">
+              {filteredItems.map(item => {
+                const loading = reassignLd[item.key]
+                const currentId = item.assignee_id || 'unassigned'
+                return (
+                  <tr key={item.key} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      {item.issuetype && (
+                        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                          item.issuetype === 'Bug'      ? 'bg-red-100 text-red-700' :
+                          item.issuetype === 'Story'    ? 'bg-green-100 text-green-700' :
+                          item.issuetype === 'Task'     ? 'bg-blue-100 text-blue-700' :
+                          item.issuetype === 'Sub-task' ? 'bg-purple-100 text-purple-700' :
+                          'bg-gray-100 text-gray-600'
+                        }`}>{item.issuetype}</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <a href={item.url} target="_blank" rel="noopener noreferrer"
+                        className="text-indigo-600 hover:text-indigo-800 font-mono font-medium">{item.key}</a>
+                    </td>
+                    <td className="px-4 py-2.5 max-w-xs">
+                      <span className="line-clamp-2 text-gray-700">{item.summary}</span>
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <span className={`inline-block w-2 h-2 rounded-full mr-1.5 ${PRIORITY_COLORS[item.priority] || 'bg-gray-300'}`} />
+                      <span className="text-gray-600">{item.priority || '—'}</span>
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      {item.parent_key
+                        ? <a href={item.parent_url} target="_blank" rel="noopener noreferrer"
+                            className="text-indigo-600 hover:text-indigo-800 font-mono text-[11px]"
+                            title={item.parent_summary}>{item.parent_key}</a>
+                        : <span className="text-gray-300">—</span>}
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap text-gray-500">{item.sprint || '—'}</td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        {loading && <span className="h-3 w-3 border border-indigo-400 border-t-transparent rounded-full animate-spin flex-shrink-0" />}
+                        <select value={currentId} disabled={loading}
+                          onChange={e => {
+                            const m = [{ id: 'unassigned', name: 'Unassigned' }, ...allMembers].find(x => x.id === e.target.value)
+                            if (m) doReassign(item.key, m)
+                          }}
+                          className="text-xs border border-gray-200 rounded-lg px-2 py-1 text-gray-700 bg-white focus:outline-none focus:ring-1 focus:ring-indigo-300 disabled:opacity-50 max-w-[170px]">
+                          <option value="unassigned">Unassigned</option>
+                          {allMembers.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+                        </select>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Handover Status Changer ───────────────────────────────────────────────────
+const HANDOVER_STATUS_COLORS = {
+  'Done': 'bg-green-100 text-green-700', 'DONE': 'bg-green-100 text-green-700',
+  'In Progress': 'bg-blue-100 text-blue-700',
+  'Ready for Testing': 'bg-purple-100 text-purple-700',
+  'To Do': 'bg-gray-100 text-gray-500', 'ToDo': 'bg-gray-100 text-gray-500',
+  'Blocked': 'bg-red-100 text-red-700', 'Reopened': 'bg-orange-100 text-orange-700',
+  'Ready For Deployment': 'bg-teal-100 text-teal-700',
+  'In Review': 'bg-indigo-100 text-indigo-700',
+}
+
+function HandoverStatusChanger({ itemKey, currentStatus, onChanged }) {
+  const [open, setOpen]           = useState(false)
+  const [transitions, setTrans]   = useState([])
+  const [loading, setLoading]     = useState(false)
+  const [applying, setApplying]   = useState(false)
+  const [localStatus, setLocal]   = useState(currentStatus)
+  const ref = useRef(null)
+
+  useEffect(() => { setLocal(currentStatus) }, [currentStatus])
+  useEffect(() => {
+    if (!open) return
+    const close = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [open])
+
+  const openDrop = async (e) => {
+    e.stopPropagation()
+    if (open) { setOpen(false); return }
+    setLoading(true)
+    try {
+      const d = await getTransitions(itemKey)
+      setTrans(d.transitions || [])
+      setOpen(true)
+    } catch {} finally { setLoading(false) }
+  }
+
+  const apply = async (e, t) => {
+    e.stopPropagation(); setOpen(false); setApplying(true)
+    try {
+      await applyTransition({ test_key: itemKey, transition_id: t.id })
+      const next = t.to_status || t.name
+      setLocal(next); onChanged?.(next)
+    } catch {} finally { setApplying(false) }
+  }
+
+  const cls = HANDOVER_STATUS_COLORS[localStatus] || 'bg-gray-100 text-gray-600'
+  return (
+    <div className="relative inline-block" ref={ref}>
+      <button onClick={openDrop} disabled={applying}
+        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-xs font-medium cursor-pointer select-none
+          ${cls} ${applying ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-75'}`}>
+        {(applying || loading) && <span className="h-2.5 w-2.5 border border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />}
+        <span>{localStatus || '—'}</span>
+        {!applying && !loading && <ChevronDown className="h-2.5 w-2.5 opacity-50 flex-shrink-0" />}
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-2xl min-w-[180px] py-1">
+          <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 py-1.5 border-b border-gray-100">Transition to…</p>
+          {transitions.length === 0 && <p className="text-xs text-gray-400 px-3 py-2">No transitions available</p>}
+          {transitions.map(t => (
+            <button key={t.id} onClick={(e) => apply(e, t)}
+              className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 transition-colors flex items-center justify-between gap-3">
+              <span className="text-gray-700 font-medium">{t.name}</span>
+              <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${HANDOVER_STATUS_COLORS[t.to_status] || 'bg-gray-100 text-gray-500'}`}>{t.to_status}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── Handover Tab ──────────────────────────────────────────────────────────────
+function HandoverTab({ version, jiraBaseUrl }) {
+  const [selected, setSelected]       = useState(new Set())
+  const [bulkTrans, setBulkTrans]     = useState([])
+  const [bulkOpen, setBulkOpen]       = useState(false)
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkApplying, setBulkApply]  = useState(false)
+  const [rowResults, setRowResults]   = useState({})
+  const [localStatuses, setLocalSt]   = useState({})
+  const bulkRef = useRef(null)
+
+  const q = useQuery({
+    queryKey: ['handover-items', version],
+    queryFn:  () => getHandoverItems(version),
+    enabled:  !!version,
+    staleTime: 5 * 60 * 1000,
+  })
+
+  useEffect(() => {
+    if (!bulkOpen) return
+    const close = (e) => { if (bulkRef.current && !bulkRef.current.contains(e.target)) setBulkOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [bulkOpen])
+
+  const items = q.data?.items || []
+
+  const toggleSelect = (key) => {
+    setSelected(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
+  }
+  const toggleAll = () => setSelected(prev => prev.size === items.length ? new Set() : new Set(items.map(i => i.key)))
+
+  const openBulk = async () => {
+    if (bulkOpen) { setBulkOpen(false); return }
+    const firstKey = [...selected][0]; if (!firstKey) return
+    setBulkLoading(true)
+    try { const d = await getTransitions(firstKey); setBulkTrans(d.transitions || []); setBulkOpen(true) }
+    catch {} finally { setBulkLoading(false) }
+  }
+
+  const applyBulk = async (t) => {
+    setBulkOpen(false); setBulkApply(true)
+    const keys = [...selected]
+    setRowResults(Object.fromEntries(keys.map(k => [k, 'pending'])))
+    const newStatus = t.to_status || t.name
+    const results = await Promise.allSettled(
+      keys.map(k => applyTransition({ test_key: k, transition_id: t.id })
+        .then(() => ({ key: k, ok: true })).catch(() => ({ key: k, ok: false })))
+    )
+    const nextR = {}; const nextSt = { ...localStatuses }
+    for (const r of results) {
+      const val = r.value
+      if (val?.ok) { nextR[val.key] = 'ok'; nextSt[val.key] = newStatus }
+      else if (val) { nextR[val.key] = 'error' }
+    }
+    setRowResults(nextR); setLocalSt(nextSt); setBulkApply(false)
+    setTimeout(() => { setSelected(new Set()); setRowResults({}) }, 2500)
+  }
+
+  const TYPE_COLORS = {
+    'Story': 'bg-green-100 text-green-700', 'Task': 'bg-blue-100 text-blue-700',
+    'Sub-task': 'bg-purple-100 text-purple-700', 'Bug': 'bg-red-100 text-red-700',
+  }
+
+  if (!version) return <p className="text-sm text-gray-400 text-center py-12">Select a version above</p>
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-800">Handover Process</h2>
+          <p className="text-xs text-gray-400 mt-0.5">Stories &amp; tasks with "handover" in description · {version}</p>
+          <p className="text-[10px] font-mono text-gray-300 mt-1 select-all">
+            project = TMT0 AND fixVersion = &quot;{version}&quot; AND description ~ &quot;handover&quot; ORDER BY updated DESC
+          </p>
+        </div>
+        <div className="flex items-center gap-3">
+          {q.isLoading && <span className="text-xs text-gray-400">Loading…</span>}
+          {q.isError   && <span className="text-xs text-red-500">{q.error?.message}</span>}
+          {!q.isLoading && !q.isError && <span className="text-xs text-gray-500 font-medium">{items.length} items</span>}
+          <button onClick={() => q.refetch()} className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-indigo-50 text-indigo-600 text-xs font-medium hover:bg-indigo-100 transition-colors">
+            <RefreshCw className="h-3 w-3" /> Refresh
+          </button>
+        </div>
+      </div>
+
+      {/* Bulk action bar */}
+      {selected.size > 0 && (
+        <div className="flex items-center gap-3 px-4 py-2 bg-indigo-50 border border-indigo-200 rounded-xl">
+          <span className="text-xs font-semibold text-indigo-700">{selected.size} selected</span>
+          <div className="relative" ref={bulkRef}>
+            <button onClick={openBulk} disabled={bulkLoading || bulkApplying}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-xs font-medium hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+              {(bulkLoading || bulkApplying) && <span className="h-3 w-3 border border-white border-t-transparent rounded-full animate-spin" />}
+              Change Status
+              {!bulkLoading && !bulkApplying && <ChevronDown className="h-3 w-3" />}
+            </button>
+            {bulkOpen && (
+              <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-2xl min-w-[210px] py-1">
+                <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 py-1.5 border-b border-gray-100">
+                  Apply to {selected.size} item{selected.size > 1 ? 's' : ''}…
+                </p>
+                {bulkTrans.map(t => (
+                  <button key={t.id} onClick={() => applyBulk(t)}
+                    className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 transition-colors flex items-center justify-between gap-3">
+                    <span className="text-gray-700 font-medium">{t.name}</span>
+                    <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${HANDOVER_STATUS_COLORS[t.to_status] || 'bg-gray-100 text-gray-500'}`}>{t.to_status}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+          <button onClick={() => setSelected(new Set())} className="ml-auto text-xs text-gray-400 hover:text-gray-600 transition-colors">Clear</button>
+        </div>
+      )}
+
+      {/* Empty state */}
+      {!q.isLoading && items.length === 0 && (
+        <div className="text-center py-16 text-gray-400 text-sm">
+          No stories or tasks with &ldquo;handover&rdquo; in description found for <span className="font-medium">{version}</span>
+        </div>
+      )}
+
+      {/* Table */}
+      {items.length > 0 && (
+        <div className="bg-white border border-gray-200 rounded-xl overflow-hidden">
+          <table className="min-w-full text-sm">
+            <thead className="bg-gray-50 border-b border-gray-100">
+              <tr>
+                <th className="px-3 py-2.5 w-8">
+                  <input type="checkbox"
+                    checked={items.length > 0 && selected.size === items.length}
+                    ref={el => { if (el) el.indeterminate = selected.size > 0 && selected.size < items.length }}
+                    onChange={toggleAll}
+                    className="h-3.5 w-3.5 accent-indigo-600 cursor-pointer"
+                  />
+                </th>
+                {['Key', 'Type', 'Summary', 'Status', 'Assignee', 'Parent'].map(h => (
+                  <th key={h} className="px-4 py-2.5 text-left text-xs font-semibold text-gray-500 uppercase whitespace-nowrap">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-100">
+              {items.map(item => {
+                const result = rowResults[item.key]
+                const rowBg = result === 'ok' ? 'bg-green-50' : result === 'error' ? 'bg-red-50'
+                  : selected.has(item.key) ? 'bg-indigo-50' : 'hover:bg-gray-50'
+                return (
+                  <tr key={item.key} className={`transition-colors ${rowBg}`}>
+                    <td className="px-3 py-2.5 w-8 align-middle">
+                      {result === 'ok'
+                        ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+                        : result === 'error'
+                        ? <X className="h-3.5 w-3.5 text-red-400" />
+                        : result === 'pending'
+                        ? <span className="h-3.5 w-3.5 border border-indigo-400 border-t-transparent rounded-full animate-spin inline-block" />
+                        : <input type="checkbox" checked={selected.has(item.key)}
+                            onChange={() => toggleSelect(item.key)}
+                            onClick={e => e.stopPropagation()}
+                            className="h-3.5 w-3.5 accent-indigo-600 cursor-pointer" />
+                      }
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <a href={item.url} target="_blank" rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1 text-indigo-600 font-mono text-xs font-medium hover:underline">
+                        {item.key} <ExternalLink className="h-3 w-3" />
+                      </a>
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-semibold ${TYPE_COLORS[item.issuetype] || 'bg-gray-100 text-gray-500'}`}>
+                        {item.issuetype}
+                      </span>
+                    </td>
+                    <td className="px-4 py-2.5 text-gray-700 max-w-sm">
+                      <span className="line-clamp-2">{item.summary}</span>
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      <HandoverStatusChanger
+                        itemKey={item.key}
+                        currentStatus={localStatuses[item.key] ?? item.status}
+                        onChanged={s => setLocalSt(p => ({ ...p, [item.key]: s }))}
+                      />
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap text-xs text-gray-500">
+                      {item.assignee || '—'}
+                    </td>
+                    <td className="px-4 py-2.5 whitespace-nowrap">
+                      {item.parent_key
+                        ? <a href={`${jiraBaseUrl}/browse/${item.parent_key}`} target="_blank" rel="noopener noreferrer"
+                            className="text-xs font-mono text-indigo-500 hover:underline flex items-center gap-0.5">
+                            {item.parent_key} <ExternalLink className="h-2.5 w-2.5" />
+                          </a>
+                        : <span className="text-xs text-gray-300">—</span>
+                      }
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function VersionQAStatusPage() {
   const [version, setVersion]    = useState('')
@@ -1802,8 +2301,10 @@ export default function VersionQAStatusPage() {
         {/* Tab bar */}
         <div className="flex border-b border-gray-200 -mb-2">
           {[
-            { id: 'overview',  label: 'Overview' },
-            { id: 'daily-qa',  label: 'Daily QA Summary' },
+            { id: 'overview',    label: 'Overview' },
+            { id: 'daily-qa',    label: 'Daily QA Summary' },
+            { id: 'allocation',  label: 'Allocation' },
+            { id: 'handover',    label: 'Handover Process' },
           ].map(tab => (
             <button
               key={tab.id}
@@ -1968,6 +2469,16 @@ export default function VersionQAStatusPage() {
           version
             ? <DailyQASummaryPanel version={version} jiraBaseUrl={jiraBaseUrl} allBugs={allBugs} />
             : <p className="text-sm text-gray-400 text-center py-12">Select a version above to view the Daily QA Summary</p>
+        )}
+
+        {/* ── Allocation tab ────────────────────────────────────────────────── */}
+        {activeTab === 'allocation' && (
+          <AllocationTab version={version} jiraBaseUrl={jiraBaseUrl} />
+        )}
+
+        {/* ── Handover Process tab ─────────────────────────────────────────── */}
+        {activeTab === 'handover' && (
+          <HandoverTab version={version} jiraBaseUrl={jiraBaseUrl} />
         )}
 
       </div>

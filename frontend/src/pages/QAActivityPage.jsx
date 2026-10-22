@@ -482,7 +482,7 @@ export default function QAActivityPage() {
 
         {/* ── Summary tiles ── */}
         {(isLoading || report) && (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+          <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
             <Tile label="Bugs Opened"    value={isLoading ? '…' : summary.bugs_opened}
                   icon={PlusCircle}      color="orange" sub={`of ${summary.bugs_active ?? '…'} updated`} />
             <Tile label="Bugs Closed"    value={isLoading ? '…' : summary.bugs_closed}
@@ -491,10 +491,6 @@ export default function QAActivityPage() {
                   icon={BookOpen}        color="purple" sub="Ready for Testing" />
             <Tile label="Stories Done"   value={isLoading ? '…' : summary.stories_done}
                   icon={CheckCircle2}    color="teal" />
-            <Tile label="Tests Added"    value={isLoading ? '…' : summary.tests_added}
-                  icon={FlaskConical}    color="blue" />
-            <Tile label="Tests Executed" value={isLoading ? '…' : summary.tests_executed}
-                  icon={Play}            color="green" sub="status changed" />
           </div>
         )}
 

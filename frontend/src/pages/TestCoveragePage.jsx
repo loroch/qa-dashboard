@@ -28,6 +28,7 @@ const addJiraComment         = (body) => api.post('/coverage/add-jira-comment', 
 const assignTest          = (body) => api.post('/coverage/assign-test', body).then(r => r.data)
 const getRegressionTests      = (v)    => api.get(`/coverage/regression-tests${v ? `?version=${encodeURIComponent(v)}` : ''}`).then(r => r.data)
 const getAutomationRegression = ()     => api.get('/coverage/automation-regression').then(r => r.data)
+const getCiPortalLatest       = ()     => api.get('/coverage/ci-portal-latest').then(r => r.data)
 const generateStoryTests  = (body) => api.post('/coverage/generate-story-tests', body, { timeout: 120000 }).then(r => r.data)
 const createStoryTests    = (body) => api.post('/coverage/create-story-tests', body).then(r => r.data)
 const getTestTransitions  = (k)    => api.get(`/coverage/test-transitions/${k}`).then(r => r.data)
@@ -562,8 +563,27 @@ function GenerateTestModal({ storyKey, storySummary, version, onClose, onCreated
 }
 
 // ── Epic Row ───────────────────────────────────────────────────────────────────
-function EpicRow({ epic, search, version, onGenerate }) {
+function EpicRow({ epic, search, version, onGenerate, collapseSignal = 0 }) {
+  const queryClient = useQueryClient()
   const [expanded, setExpanded] = useState(true)
+  const [expandedTests, setExpandedTests] = useState(new Set())
+  const [selectedTests, setSelectedTests] = useState(new Set())
+  const [bulkTransitions, setBulkTransitions] = useState([])
+  const [bulkOpen, setBulkOpen] = useState(false)
+  const [bulkLoading, setBulkLoading] = useState(false)
+  const [bulkApplying, setBulkApplying] = useState(false)
+  const [rowResults, setRowResults] = useState({})
+  const [localStatuses, setLocalStatuses] = useState({})
+  const bulkRef = useRef(null)
+
+  useEffect(() => { if (collapseSignal > 0) setExpanded(false) }, [collapseSignal])
+
+  useEffect(() => {
+    if (!bulkOpen) return
+    const close = (e) => { if (bulkRef.current && !bulkRef.current.contains(e.target)) setBulkOpen(false) }
+    document.addEventListener('mousedown', close)
+    return () => document.removeEventListener('mousedown', close)
+  }, [bulkOpen])
 
   const visibleStories = useMemo(() => {
     if (!search) return epic.stories
@@ -575,6 +595,48 @@ function EpicRow({ epic, search, version, onGenerate }) {
   }, [epic.stories, search])
 
   if (visibleStories.length === 0) return null
+
+  const toggleTest = (key) => {
+    setSelectedTests(prev => { const n = new Set(prev); n.has(key) ? n.delete(key) : n.add(key); return n })
+  }
+
+  const openBulkDropdown = async () => {
+    if (bulkOpen) { setBulkOpen(false); return }
+    const firstKey = [...selectedTests][0]
+    if (!firstKey) return
+    setBulkLoading(true)
+    try {
+      const d = await getTestTransitions(firstKey)
+      setBulkTransitions(d.transitions || [])
+      setBulkOpen(true)
+    } catch { } finally { setBulkLoading(false) }
+  }
+
+  const applyBulk = async (transition) => {
+    setBulkOpen(false)
+    setBulkApplying(true)
+    const keys = [...selectedTests]
+    setRowResults(Object.fromEntries(keys.map(k => [k, 'pending'])))
+    const newStatus = transition.to_status || transition.name
+    const results = await Promise.allSettled(
+      keys.map(k =>
+        postTestTransition({ test_key: k, transition_id: transition.id, version: version || null })
+          .then(() => ({ key: k, ok: true })).catch(() => ({ key: k, ok: false }))
+      )
+    )
+    const nextResults = {}
+    const nextStatuses = { ...localStatuses }
+    for (const r of results) {
+      const val = r.value
+      if (val?.ok) { nextResults[val.key] = 'ok'; nextStatuses[val.key] = newStatus }
+      else if (val) { nextResults[val.key] = 'error' }
+    }
+    setRowResults(nextResults)
+    setLocalStatuses(nextStatuses)
+    setBulkApplying(false)
+    queryClient.invalidateQueries(['coverage-version'])
+    setTimeout(() => { setSelectedTests(new Set()); setRowResults({}) }, 2500)
+  }
 
   return (
     <div className="border border-gray-200 rounded-xl overflow-hidden">
@@ -611,95 +673,185 @@ function EpicRow({ epic, search, version, onGenerate }) {
 
       {/* Stories table */}
       {expanded && (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm bg-white table-fixed">
-            <colgroup>
-              <col style={{ width: '140px' }} />
-              <col />
-              <col style={{ width: '160px' }} />
-              <col style={{ width: '230px' }} />
-              <col style={{ width: '210px' }} />
-            </colgroup>
-            <thead className="bg-gray-50 border-b border-gray-100">
-              <tr>
-                {['Story Key', 'Summary', 'Status', 'Test Cases', 'Test Status'].map(h => (
-                  <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {visibleStories.map(story => {
-                const jiraBase = story.url.split('/browse/')[0]
-                return (
-                  <tr key={story.key} className="hover:bg-gray-50">
-                    <td className="px-4 py-2.5">
-                      <a href={story.url} target="_blank" rel="noopener noreferrer"
-                        className="inline-flex items-center gap-1 text-brand-600 font-mono text-xs font-medium hover:underline">
-                        {story.key} <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </td>
-                    <td className="px-4 py-2.5 text-gray-700">
-                      <span className="line-clamp-2">{story.summary}</span>
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <StatusPill status={story.status} />
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {story.test_count > 0 ? (
-                        <div className="space-y-1">
-                          {(story.test_cases || (story.test_keys || []).map(k => ({ key: k, status: '' }))).slice(0, 4).map(tc => (
-                            <div key={tc.key} className="flex items-center gap-1.5">
-                              <a href={`${jiraBase}/browse/${tc.key}`}
-                                target="_blank" rel="noopener noreferrer"
-                                onClick={e => e.stopPropagation()}
-                                className="text-xs font-mono text-purple-600 hover:underline flex items-center gap-0.5 flex-shrink-0">
-                                {tc.key} <ExternalLink className="h-2.5 w-2.5 opacity-60" />
-                              </a>
-                              <StatusChanger testKey={tc.key} currentStatus={tc.status} version={version} />
-                            </div>
-                          ))}
-                          {(story.test_cases || story.test_keys || []).length > 4 && (
-                            <span className="text-xs text-gray-400">
-                              +{(story.test_cases || story.test_keys).length - 4} more
-                            </span>
-                          )}
-                        </div>
-                      ) : (
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          <XCircle className="h-4 w-4 text-red-400 flex-shrink-0" />
-                          <span className="text-xs text-red-500 font-medium">No tests</span>
-                          {onGenerate && (
-                            <button
-                              onClick={e => { e.stopPropagation(); onGenerate({ storyKey: story.key, storySummary: story.summary }) }}
-                              className="inline-flex items-center gap-1 text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium px-2 py-0.5 rounded-full transition-colors"
-                              title="Generate test cases with AI"
-                            >
-                              <Wand2 className="h-3 w-3" /> Generate
-                            </button>
-                          )}
-                        </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      <TestStatusSummary statuses={story.test_statuses} />
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <>
+          {/* Bulk action bar */}
+          {selectedTests.size > 0 && (
+            <div className="flex items-center gap-3 px-4 py-2 bg-purple-50 border-b border-purple-200">
+              <span className="text-xs font-semibold text-purple-700">
+                {selectedTests.size} test{selectedTests.size > 1 ? 's' : ''} selected
+              </span>
+              <div className="relative" ref={bulkRef}>
+                <button
+                  onClick={openBulkDropdown}
+                  disabled={bulkLoading || bulkApplying}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-purple-600 text-white text-xs font-medium hover:bg-purple-700 disabled:opacity-50 transition-colors"
+                >
+                  {(bulkLoading || bulkApplying) && <span className="h-3 w-3 border border-white border-t-transparent rounded-full animate-spin" />}
+                  Change Status
+                  {!bulkLoading && !bulkApplying && <ChevronDown className="h-3 w-3" />}
+                </button>
+                {bulkOpen && (
+                  <div className="absolute left-0 top-full mt-1 z-50 bg-white border border-gray-200 rounded-xl shadow-2xl min-w-[210px] py-1">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 py-1.5 border-b border-gray-100">
+                      Apply to {selectedTests.size} test{selectedTests.size > 1 ? 's' : ''}…
+                    </p>
+                    {bulkTransitions.map(t => {
+                      const toCls = STATUS_COLORS[t.to_status] || 'bg-gray-100 text-gray-500'
+                      return (
+                        <button key={t.id} onClick={() => applyBulk(t)}
+                          className="w-full text-left px-3 py-2 text-xs hover:bg-gray-50 transition-colors flex items-center justify-between gap-3">
+                          <span className="text-gray-700 font-medium">{t.name}</span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${toCls}`}>{t.to_status}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
+              <button onClick={() => setSelectedTests(new Set())} className="ml-auto text-xs text-gray-400 hover:text-gray-600 transition-colors">
+                Clear
+              </button>
+            </div>
+          )}
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm bg-white table-fixed">
+              <colgroup>
+                <col style={{ width: '140px' }} />
+                <col />
+                <col style={{ width: '160px' }} />
+                <col style={{ width: '250px' }} />
+                <col style={{ width: '210px' }} />
+              </colgroup>
+              <thead className="bg-gray-50 border-b border-gray-100">
+                <tr>
+                  {['Story Key', 'Summary', 'Status', 'Test Cases', 'Test Status'].map(h => (
+                    <th key={h} className="px-4 py-2 text-left text-xs font-semibold text-gray-500 uppercase tracking-wide whitespace-nowrap">{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {visibleStories.map(story => {
+                  const jiraBase = story.url.split('/browse/')[0]
+                  const allTCs = story.test_cases || (story.test_keys || []).map(k => ({ key: k, status: '' }))
+                  const showAll = expandedTests.has(story.key)
+                  const visibleTCs = showAll ? allTCs : allTCs.slice(0, 4)
+                  return (
+                    <tr key={story.key} className="hover:bg-gray-50">
+                      <td className="px-4 py-2.5">
+                        <a href={story.url} target="_blank" rel="noopener noreferrer"
+                          className="inline-flex items-center gap-1 text-brand-600 font-mono text-xs font-medium hover:underline">
+                          {story.key} <ExternalLink className="h-3 w-3" />
+                        </a>
+                      </td>
+                      <td className="px-4 py-2.5 text-gray-700">
+                        <span className="line-clamp-2">{story.summary}</span>
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <StatusPill status={story.status} />
+                      </td>
+                      <td className="px-4 py-2.5">
+                        {story.test_count > 0 ? (
+                          <div className="space-y-1">
+                            {visibleTCs.map(tc => {
+                              const result = rowResults[tc.key]
+                              return (
+                                <div key={tc.key} className="flex items-center gap-1.5">
+                                  {result === 'ok'
+                                    ? <Check className="h-3 w-3 text-green-500 flex-shrink-0" />
+                                    : result === 'error'
+                                    ? <XCircle className="h-3 w-3 text-red-400 flex-shrink-0" />
+                                    : result === 'pending'
+                                    ? <span className="h-3 w-3 border border-purple-400 border-t-transparent rounded-full animate-spin inline-block flex-shrink-0" />
+                                    : (
+                                      <input
+                                        type="checkbox"
+                                        checked={selectedTests.has(tc.key)}
+                                        onChange={() => toggleTest(tc.key)}
+                                        onClick={e => e.stopPropagation()}
+                                        className="h-3 w-3 accent-purple-600 cursor-pointer flex-shrink-0"
+                                      />
+                                    )
+                                  }
+                                  <a href={`${jiraBase}/browse/${tc.key}`}
+                                    target="_blank" rel="noopener noreferrer"
+                                    onClick={e => e.stopPropagation()}
+                                    className="text-xs font-mono text-purple-600 hover:underline flex items-center gap-0.5 flex-shrink-0">
+                                    {tc.key} <ExternalLink className="h-2.5 w-2.5 opacity-60" />
+                                  </a>
+                                  <StatusChanger
+                                    testKey={tc.key}
+                                    currentStatus={localStatuses[tc.key] ?? tc.status}
+                                    version={version}
+                                    onChanged={s => setLocalStatuses(p => ({ ...p, [tc.key]: s }))}
+                                  />
+                                </div>
+                              )
+                            })}
+                            {!showAll && allTCs.length > 4 && (
+                              <button
+                                onClick={e => { e.stopPropagation(); setExpandedTests(prev => new Set([...prev, story.key])) }}
+                                className="text-xs text-purple-500 hover:text-purple-700 hover:underline font-medium"
+                              >
+                                +{allTCs.length - 4} more
+                              </button>
+                            )}
+                            {showAll && allTCs.length > 4 && (
+                              <button
+                                onClick={e => { e.stopPropagation(); setExpandedTests(prev => { const n = new Set(prev); n.delete(story.key); return n }) }}
+                                className="text-xs text-gray-400 hover:text-gray-600 hover:underline"
+                              >
+                                Show less
+                              </button>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="flex items-center gap-1.5 flex-wrap">
+                            <XCircle className="h-4 w-4 text-red-400 flex-shrink-0" />
+                            <span className="text-xs text-red-500 font-medium">No tests</span>
+                            {onGenerate && (
+                              <button
+                                onClick={e => { e.stopPropagation(); onGenerate({ storyKey: story.key, storySummary: story.summary }) }}
+                                className="inline-flex items-center gap-1 text-xs bg-purple-100 hover:bg-purple-200 text-purple-700 font-medium px-2 py-0.5 rounded-full transition-colors"
+                                title="Generate test cases with AI"
+                              >
+                                <Wand2 className="h-3 w-3" /> Generate
+                              </button>
+                            )}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2.5">
+                        <TestStatusSummary statuses={story.test_statuses} />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   )
 }
 
 // ── Automation Regression Section ─────────────────────────────────────────────
-function AutomationRegressionSection({ query }) {
+function AutomationRegressionSection({ query, ciPortal }) {
   const [expanded, setExpanded] = useState(false)
   const data = query.data
+  const ci = ciPortal?.data
 
   const PLAN_COLORS = ['bg-blue-500', 'bg-purple-500', 'bg-teal-500', 'bg-orange-400']
+
+  const ciColor = !ci?.available ? 'text-gray-400'
+    : ci.pass_rate >= 80 ? 'text-green-600'
+    : ci.pass_rate >= 50 ? 'text-yellow-600'
+    : 'text-red-600'
+
+  const ciBadgeCls = !ci?.available ? 'bg-gray-100 text-gray-500'
+    : ci.pass_rate >= 80 ? 'bg-green-100 text-green-700'
+    : ci.pass_rate >= 50 ? 'bg-yellow-100 text-yellow-700'
+    : 'bg-red-100 text-red-600'
 
   return (
     <div className="border border-green-200 rounded-xl overflow-hidden mt-2">
@@ -723,6 +875,19 @@ function AutomationRegressionSection({ query }) {
                onClick={e => e.stopPropagation()}
                className="text-xs text-green-600 hover:underline flex items-center gap-0.5">
               <ExternalLink className="h-3 w-3" /> Jira
+            </a>
+          </div>
+        )}
+        {/* CI Portal Staging AS latest run */}
+        {ci?.available && (
+          <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-green-200" onClick={e => e.stopPropagation()}>
+            <span className="text-[10px] text-gray-400 hidden sm:inline">Staging AS</span>
+            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${ciBadgeCls}`}>
+              {ci.pass_rate}%
+            </span>
+            <a href={ci.report_url} target="_blank" rel="noopener noreferrer"
+               className={`text-xs hover:underline flex items-center gap-0.5 ${ciColor}`}>
+              <ExternalLink className="h-3 w-3" /> CI Portal
             </a>
           </div>
         )}
@@ -1184,6 +1349,7 @@ export default function TestCoveragePage() {
   const [tab, setTab] = useState('By Version')
   const [selectedVersion, setSelectedVersion] = useState('')
   const [storySearch, setStorySearch] = useState('')
+  const [collapseAll, setCollapseAll] = useState(0)
   const [assignTarget, setAssignTarget] = useState(null)
   const [assignSuccess, setAssignSuccess] = useState(null)
   const [generateTarget, setGenerateTarget] = useState(null)
@@ -1252,6 +1418,14 @@ export default function TestCoveragePage() {
     queryFn: getAutomationRegression,
     staleTime: 5 * 60 * 1000,
     refetchInterval: 5 * 60 * 1000,
+  })
+
+  const ciPortalQuery = useQuery({
+    queryKey: ['ci-portal-latest'],
+    queryFn: getCiPortalLatest,
+    staleTime: 2 * 60 * 1000,
+    refetchInterval: 5 * 60 * 1000,
+    retry: 1,
   })
 
   const issueQuery = useQuery({
@@ -1457,14 +1631,24 @@ export default function TestCoveragePage() {
 
                   {/* Epic/Story list */}
                   <div className="space-y-3">
+                    {filteredEpics.length > 0 && (
+                      <div className="flex justify-end">
+                        <button
+                          onClick={() => setCollapseAll(n => n + 1)}
+                          className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                        >
+                          Collapse All
+                        </button>
+                      </div>
+                    )}
                     {filteredEpics.map(epic => (
-                      <EpicRow key={epic.epic_key} epic={epic} search={storySearch} version={selectedVersion} onGenerate={setGenerateTarget} />
+                      <EpicRow key={epic.epic_key} epic={epic} search={storySearch} version={selectedVersion} onGenerate={setGenerateTarget} collapseSignal={collapseAll} />
                     ))}
                     {filteredEpics.length === 0 && (
                       <p className="text-center py-8 text-gray-400 text-sm">No results found.</p>
                     )}
                     <RegressionTestsSection query={regressionQuery} version={selectedVersion} />
-                    <AutomationRegressionSection query={automationRegressionQuery} />
+                    <AutomationRegressionSection query={automationRegressionQuery} ciPortal={ciPortalQuery} />
                   </div>
                 </>
               )}

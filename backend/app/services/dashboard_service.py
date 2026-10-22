@@ -882,6 +882,110 @@ class DashboardService:
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=600)
 
+    async def get_allocation_items(
+        self,
+        version: str | None = None,
+        sprint: str | None = None,
+        force_refresh: bool = False,
+    ) -> dict:
+        """RFT items with per-QA workload summary for the allocation/balancing view."""
+        import hashlib
+        slug = f"{version or 'all'}:{sprint or 'all'}"
+        cache_key = f"dashboard:allocation:{hashlib.md5(slug.encode()).hexdigest()[:10]}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            conditions = ['project = TMT0', 'status = "Ready for Testing"']
+            if version:
+                conditions.append(f'fixVersion = "{version}"')
+            if sprint:
+                conditions.append(f'sprint = "{sprint}"')
+            jql = " AND ".join(conditions) + " ORDER BY priority ASC, created ASC"
+            issues = await self.jira.search_issues(
+                jql,
+                fields=["summary", "status", "assignee", "priority", "customfield_10020", "issuetype", "parent"],
+                max_total=500,
+            )
+            items = []
+            for issue in issues:
+                f = issue.get("fields") or {}
+                sprint_raw = f.get("customfield_10020") or []
+                sprint_name = ""
+                if isinstance(sprint_raw, list) and sprint_raw:
+                    active = [s for s in sprint_raw if isinstance(s, dict) and s.get("state") == "active"]
+                    s_obj = (active[0] if active else sprint_raw[-1])
+                    sprint_name = s_obj.get("name", "") if isinstance(s_obj, dict) else ""
+                assignee = f.get("assignee") or {}
+                parent_raw = f.get("parent") or {}
+                items.append({
+                    "key": issue["key"],
+                    "url": f"{self.jira_base_url}/browse/{issue['key']}",
+                    "summary": f.get("summary", ""),
+                    "priority": (f.get("priority") or {}).get("name", "Medium"),
+                    "issuetype": (f.get("issuetype") or {}).get("name", ""),
+                    "parent_key": parent_raw.get("key", ""),
+                    "parent_summary": (parent_raw.get("fields") or {}).get("summary", ""),
+                    "parent_url": f"{self.jira_base_url}/browse/{parent_raw['key']}" if parent_raw.get("key") else "",
+                    "assignee_id": assignee.get("accountId", ""),
+                    "assignee": assignee.get("displayName", "Unassigned"),
+                    "sprint": sprint_name,
+                })
+            # Build workload per member
+            workload: dict = {}
+            for item in items:
+                aid = item["assignee_id"] or "unassigned"
+                name = item["assignee"] if item["assignee_id"] else "Unassigned"
+                if aid not in workload:
+                    workload[aid] = {"id": aid, "name": name, "count": 0}
+                workload[aid]["count"] += 1
+            # Ensure all configured team members appear (even with 0 items)
+            for mid, mname in self.team_members.items():
+                if mid not in workload:
+                    workload[mid] = {"id": mid, "name": mname, "count": 0}
+            return {
+                "items": items,
+                "workload": sorted(workload.values(), key=lambda x: (-x["count"], x["name"])),
+                "total": len(items),
+            }
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=120)
+
+    async def get_handover_items(self, version: str, force_refresh: bool = False) -> dict:
+        """Stories and tasks where description mentions 'handover' for a given fix version."""
+        import hashlib
+        cache_key = f"dashboard:handover:{hashlib.md5(version.encode()).hexdigest()[:8]}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            jql = (
+                f'project = TMT0 AND fixVersion = "{version}" '
+                f'AND description ~ "handover" '
+                f'ORDER BY updated DESC'
+            )
+            issues = await self.jira.search_issues(
+                jql,
+                fields=["summary", "status", "assignee", "issuetype", "parent"],
+                max_total=300,
+            )
+            items = []
+            for issue in issues:
+                f = issue.get("fields") or {}
+                parent_raw = f.get("parent") or {}
+                items.append({
+                    "key":       issue["key"],
+                    "url":       f"{self.jira_base_url}/browse/{issue['key']}",
+                    "summary":   f.get("summary", ""),
+                    "status":    (f.get("status") or {}).get("name", ""),
+                    "assignee":  (f.get("assignee") or {}).get("displayName", "Unassigned"),
+                    "issuetype": (f.get("issuetype") or {}).get("name", ""),
+                    "parent_key": parent_raw.get("key", ""),
+                })
+            return {"items": items, "version": version, "total": len(items)}
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
+
     async def get_qa_activity(
         self,
         version: str,

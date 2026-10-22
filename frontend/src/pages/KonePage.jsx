@@ -339,6 +339,7 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
     label: 'FROM_SITE',
     attachments: [], comment: '',
   })
+  const [localFiles, setLocalFiles] = useState([])
   const [submitting, setSubmitting] = useState(false)
   const [aiGenerating, setAiGenerating] = useState(false)
   const [result, setResult] = useState(null)
@@ -439,8 +440,27 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
         attachments: form.attachments,
         comment: form.comment || null,
       }, { timeout: 300000 })
-      setResult(res.data)
-      onCreated?.(ticket.key, res.data)
+      let finalResult = res.data
+      // Upload any locally-selected files
+      if (localFiles.length > 0 && res.data?.key) {
+        try {
+          const fd = new FormData()
+          localFiles.forEach(f => fd.append('files', f))
+          const attRes = await api.post(`/api/kone/issue/${res.data.key}/attachments`, fd, {
+            headers: { 'Content-Type': 'multipart/form-data' },
+            timeout: 300000,
+          })
+          const localResults = attRes.results || attRes.data?.results || []
+          finalResult = {
+            ...finalResult,
+            attachment_results: [...(finalResult.attachment_results || []), ...localResults],
+          }
+        } catch (e) {
+          console.warn('Local file upload failed', e)
+        }
+      }
+      setResult(finalResult)
+      onCreated?.(ticket.key, finalResult)
     } catch (e) {
       setError(e.response?.data?.detail || e.message || 'Unknown error')
     } finally { setSubmitting(false) }
@@ -453,19 +473,18 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
       const res = await api.post('/api/kone/ai-generate-bug-fields', {
         summary: form.summary, description: originalDescription,
       })
-      const aiSummary = res.data.summary ? `"${res.data.summary}"` : form.summary
-      // Compose description: original customer complaint + AI structured section
+      // Keep original summary unchanged
       let newDescription = originalDescription
       if (res.data.ai_description) {
+        const quoted = originalDescription ? `"${originalDescription}"` : ''
         const divider = '\n\n── AI Analysis ──────────────────────────────\n'
-        const aiSection = res.data.ai_description
-        newDescription = originalDescription
-          ? `${originalDescription}${divider}${aiSection}`
-          : aiSection
+        newDescription = quoted
+          ? `${quoted}${divider}${res.data.ai_description}`
+          : res.data.ai_description
       }
       setForm(f => ({
         ...f,
-        summary:            aiSummary,
+        summary:            f.summary,
         description:        newDescription,
         steps_to_reproduce: res.data.steps_to_reproduce || f.steps_to_reproduce,
         actual_result:      res.data.actual_result      || f.actual_result,
@@ -765,6 +784,40 @@ function CreateBugModal({ ticket, onClose, onCreated }) {
                   </div>
                 </div>
               )}
+
+              {/* Local file attachments */}
+              <div>
+                <label className="block text-xs font-semibold text-gray-600 mb-2">
+                  <Paperclip className="h-3.5 w-3.5 inline mr-1" />Attach local files
+                  <span className="font-normal text-gray-400 ml-1">— logs, videos, screenshots (uploaded after bug is created)</span>
+                </label>
+                <label className="inline-flex items-center gap-1.5 cursor-pointer px-3 py-1.5 text-xs font-medium rounded-lg border border-gray-300 bg-white hover:bg-gray-50 text-gray-600 transition-colors">
+                  <Paperclip className="h-3.5 w-3.5" />
+                  Choose files…
+                  <input type="file" multiple className="sr-only"
+                    accept=".txt,.log,.mp4,.mov,.avi,.mkv,.webm,.png,.jpg,.jpeg,.gif,.pdf,.zip,.json,.xml,.csv"
+                    onChange={e => {
+                      const picked = Array.from(e.target.files || [])
+                      setLocalFiles(prev => {
+                        const names = new Set(prev.map(f => f.name))
+                        return [...prev, ...picked.filter(f => !names.has(f.name))]
+                      })
+                      e.target.value = ''
+                    }} />
+                </label>
+                {localFiles.length > 0 && (
+                  <div className="mt-2 flex flex-wrap gap-1.5">
+                    {localFiles.map((f, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 text-xs bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2.5 py-1">
+                        {f.name}
+                        <span className="text-blue-400">({f.size > 1048576 ? `${(f.size/1048576).toFixed(0)}MB` : `${(f.size/1024).toFixed(0)}KB`})</span>
+                        <button type="button" onClick={() => setLocalFiles(prev => prev.filter((_, j) => j !== i))}
+                          className="ml-0.5 text-blue-400 hover:text-blue-600 font-bold leading-none">×</button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               <F label="Comment">
                 <textarea rows={2}

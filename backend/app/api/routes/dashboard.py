@@ -219,6 +219,35 @@ async def get_bugs_grouped_by_epic(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/allocation")
+async def get_allocation(
+    version: Optional[str] = Query(None),
+    sprint:  Optional[str] = Query(None),
+    refresh: bool          = Query(False),
+):
+    """RFT items with per-QA workload summary for the allocation view."""
+    try:
+        svc = get_dashboard_service()
+        return await svc.get_allocation_items(version=version or None, sprint=sprint or None, force_refresh=refresh)
+    except Exception as e:
+        logger.error(f"Allocation error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/handover-items")
+async def get_handover_items(
+    version: str = Query(..., description="Fix version to scope handover items"),
+    refresh: bool = Query(False),
+):
+    """Stories and tasks with 'handover' in description for the given fix version."""
+    try:
+        svc = get_dashboard_service()
+        return await svc.get_handover_items(version=version, force_refresh=refresh)
+    except Exception as e:
+        logger.error(f"Handover items error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/epics")
 async def get_epics(refresh: bool = Query(False)):
     """All epics in TMT0 project."""

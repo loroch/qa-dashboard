@@ -73,6 +73,10 @@ class Settings(BaseSettings):
     zoho_accounts_url: str = Field("https://accounts.zoho.com")
     zoho_desk_base_url: str = Field("https://desk.zoho.com")
 
+    # CI Portal (internal test-run results dashboard)
+    ci_portal_url: str = Field("http://192.168.35.149:8081", description="CI Portal base URL")
+    ci_portal_staging_suite_id: int = Field(5, description="Staging AS test suite ID in CI Portal")
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",")]

@@ -124,6 +124,40 @@ async def get_automation_regression(refresh: bool = Query(False)):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/ci-portal-latest")
+async def get_ci_portal_latest():
+    """Fetch the latest Staging AS test run from the CI Portal."""
+    import httpx
+    from app.config import get_settings
+    cfg = get_settings()
+    base = cfg.ci_portal_url.rstrip("/")
+    suite_id = cfg.ci_portal_staging_suite_id
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(f"{base}/api/runs", params={"test_suite_id": suite_id, "limit": 1})
+            resp.raise_for_status()
+            runs = resp.json()
+        if not runs:
+            return {"available": False}
+        run = runs[0]
+        return {
+            "available": True,
+            "run_id": run["id"],
+            "run_folder": run.get("run_folder", ""),
+            "test_suite_name": run.get("test_suite_name", ""),
+            "pass_rate": run.get("pass_rate", 0),
+            "passed_count": run.get("passed_count", 0),
+            "failed_count": run.get("failed_count", 0),
+            "total_count": run.get("total_count", 0),
+            "started_at": run.get("started_at", ""),
+            "report_url": f"{base}/runs/{run['id']}",
+            "portal_url": base,
+        }
+    except Exception as e:
+        logger.warning(f"CI Portal fetch error: {e}")
+        return {"available": False, "error": str(e)}
+
+
 @router.get("/regression-tests/export")
 async def export_regression_tests(
     version: Optional[str] = Query(None),

@@ -3,7 +3,7 @@ K-1 KONE service desk API routes.
 """
 import logging
 from typing import Optional, List
-from fastapi import APIRouter, Query, HTTPException, Response
+from fastapi import APIRouter, Query, HTTPException, Response, UploadFile, File
 from pydantic import BaseModel
 
 from app.services.kone_service import get_kone_service
@@ -144,6 +144,24 @@ async def create_kone_bug(body: KoneCreateBugRequest):
     except Exception as e:
         logger.error(f"KONE create-bug error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/issue/{key}/attachments")
+async def attach_local_files(key: str, files: List[UploadFile] = File(...)):
+    """Upload one or more local files as attachments to an existing TMT0 Jira issue."""
+    from app.jira.client import get_jira_client
+    jira = get_jira_client()
+    results = []
+    for f in files:
+        try:
+            data = await f.read()
+            ctype = f.content_type or "application/octet-stream"
+            await jira.upload_attachment(key, f.filename, ctype, data)
+            results.append({"name": f.filename, "success": True, "error": None})
+        except Exception as e:
+            logger.warning(f"Failed to attach {f.filename} to {key}: {e}")
+            results.append({"name": f.filename, "success": False, "error": str(e)})
+    return {"results": results}
 
 
 class KoneLinkBugRequest(BaseModel):
