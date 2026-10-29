@@ -172,6 +172,26 @@ class AutomationBugCandidateORM(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class ValidationRunORM(Base):
+    """One Validation Portal run: a Jira epic/story/bug/task checked against the
+    configured test environment (UI, DB, Elastic, Figma, AI review)."""
+    __tablename__ = "validation_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    issue_key = Column(String(50), nullable=False, index=True)
+    issue_type = Column(String(50), nullable=True)
+    issue_summary = Column(Text, nullable=True)
+    status = Column(String(20), default="pending", index=True)  # pending|running|done|error
+    options = Column(Text, nullable=True)     # JSON: selected checks + their options
+    env_snapshot = Column(Text, nullable=True)  # JSON: environment used (passwords stripped)
+    log_output = Column(Text, nullable=True)
+    results = Column(Text, nullable=True)     # JSON: per-check evidence
+    findings = Column(Text, nullable=True)    # JSON: list of findings (incl. filed bug keys)
+    error_text = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    finished_at = Column(DateTime, nullable=True)
+
+
 class SprintQAActivityORM(Base):
     """A QA activity planned for a Jira sprint — may be linked to a specific story."""
     __tablename__ = "sprint_qa_activities"

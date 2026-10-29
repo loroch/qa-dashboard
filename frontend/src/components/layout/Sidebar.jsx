@@ -22,6 +22,7 @@ const ALL_NAV = [
   { to: '/zoho-reports',   label: 'Zoho Reports',     icon: BarChart2,       roles: ['admin'] },
   { to: '/coverage',       label: 'Test Coverage',    icon: FlaskConical,    roles: ['admin', 'qa'] },
   { to: '/automation',     label: 'Automation',       icon: PlayCircle,      roles: ['admin'] },
+  { to: '/validation',     label: 'Validation Portal', icon: ShieldCheck,    roles: ['admin'] },
   { to: '/test-plans',     label: 'Test Plans',       icon: ClipboardList,   roles: ['admin'] },
   { to: '/release-notes',  label: 'Release Notes',    icon: FileText,        roles: ['admin'] },
   { to: '/investigation',  label: 'Investigation',    icon: GitBranch,       roles: ['admin'] },

@@ -15,7 +15,7 @@ from app.config import get_settings
 from app.database.db import init_db
 from app.services.changelog_service import get_changelog_service
 from app.services.dashboard_service import get_dashboard_service
-from app.api.routes import dashboard, changelog, export, jira_meta, zoho, coverage, test_generator, anomaly, test_plans, release_notes, investigation, bug_triage, bug_reporter, mexico_qa, kone, automation, sprint_planning, auth, activity
+from app.api.routes import dashboard, changelog, export, jira_meta, zoho, coverage, test_generator, anomaly, test_plans, release_notes, investigation, bug_triage, bug_reporter, mexico_qa, kone, automation, sprint_planning, auth, activity, env_validation
 
 logging.basicConfig(
     level=logging.INFO,
@@ -34,6 +34,8 @@ async def lifespan(app: FastAPI):
 
     # Initialize database
     await init_db()
+    from app.services.env_validation_service import get_env_validation_service
+    await get_env_validation_service().mark_interrupted_runs()
 
     # Seed initial changelog
     changelog_svc = get_changelog_service()
@@ -115,6 +117,7 @@ app.include_router(automation.router)
 app.include_router(sprint_planning.router)
 app.include_router(auth.router)
 app.include_router(activity.router)
+app.include_router(env_validation.router)
 
 
 @app.get("/health")

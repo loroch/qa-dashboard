@@ -27,6 +27,7 @@ import SprintPlanningPage from './pages/SprintPlanningPage'
 import VersionQAStatusPage from './pages/VersionQAStatusPage'
 import ProdBugsPage from './pages/ProdBugsPage'
 import QAActivityPage from './pages/QAActivityPage'
+import ValidationPortalPage from './pages/ValidationPortalPage'
 
 // Routes accessible by the QA role
 const QA_ALLOWED_PATHS = new Set(['/kone', '/coverage', '/bugs-by-version', '/qa-status'])
@@ -71,6 +72,7 @@ export default function App() {
             <Route path="/zoho-reports"      element={isAdmin ? <ZohoReportsPage />  : <Navigate to={QA_HOME} replace />} />
             <Route path="/changelog"         element={isAdmin ? <Changelog />         : <Navigate to={QA_HOME} replace />} />
             <Route path="/automation"        element={isAdmin ? <AutomationPage />    : <Navigate to={QA_HOME} replace />} />
+            <Route path="/validation"        element={isAdmin ? <ValidationPortalPage /> : <Navigate to={QA_HOME} replace />} />
             <Route path="/anomaly"           element={isAdmin ? <AnomalyPage />       : <Navigate to={QA_HOME} replace />} />
             <Route path="/test-plans"        element={isAdmin ? <TestPlansPage />     : <Navigate to={QA_HOME} replace />} />
             <Route path="/release-notes"     element={isAdmin ? <ReleaseNotesPage />  : <Navigate to={QA_HOME} replace />} />

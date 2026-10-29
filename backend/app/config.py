@@ -77,6 +77,32 @@ class Settings(BaseSettings):
     ci_portal_url: str = Field("http://192.168.35.149:8081", description="CI Portal base URL")
     ci_portal_staging_suite_id: int = Field(5, description="Staging AS test suite ID in CI Portal")
 
+    # Validation Portal — default test-environment profile (editable in the UI,
+    # these only seed it). Keep real values in .env, never in code.
+    validation_web_url: str = Field("https://staging.citylab.local")
+    validation_web_user: str = Field("")
+    validation_web_password: str = Field("")
+    validation_db_server: str = Field("")
+    validation_db_port: int = Field(1433)
+    validation_db_name: str = Field("Vulcan")
+    validation_db_user: str = Field("")
+    validation_db_password: str = Field("")
+    validation_es_url: str = Field("")
+    validation_es_index: str = Field("cinsight-logs-*")
+    validation_es_user: str = Field("")
+    validation_es_password: str = Field("")
+    validation_ssh_host: str = Field("")
+    validation_ssh_user: str = Field("")
+    validation_ssh_password: str = Field("")
+    validation_figma_email: str = Field("")
+
+    # Outgoing mail for Validation Portal reports
+    smtp_host: str = Field("smtp.office365.com")
+    smtp_port: int = Field(587)
+    smtp_user: str = Field("")
+    smtp_password: str = Field("")
+    smtp_from: str = Field("")
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",")]
