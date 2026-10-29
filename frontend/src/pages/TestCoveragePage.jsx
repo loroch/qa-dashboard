@@ -836,22 +836,18 @@ function EpicRow({ epic, search, version, onGenerate, collapseSignal = 0 }) {
 }
 
 // ── Automation Regression Section ─────────────────────────────────────────────
+function suiteBadgeCls(rate) {
+  return rate >= 80 ? 'bg-green-100 text-green-700'
+    : rate >= 50 ? 'bg-yellow-100 text-yellow-700'
+    : 'bg-red-100 text-red-600'
+}
+
 function AutomationRegressionSection({ query, ciPortal }) {
   const [expanded, setExpanded] = useState(false)
   const data = query.data
   const ci = ciPortal?.data
 
   const PLAN_COLORS = ['bg-blue-500', 'bg-purple-500', 'bg-teal-500', 'bg-orange-400']
-
-  const ciColor = !ci?.available ? 'text-gray-400'
-    : ci.pass_rate >= 80 ? 'text-green-600'
-    : ci.pass_rate >= 50 ? 'text-yellow-600'
-    : 'text-red-600'
-
-  const ciBadgeCls = !ci?.available ? 'bg-gray-100 text-gray-500'
-    : ci.pass_rate >= 80 ? 'bg-green-100 text-green-700'
-    : ci.pass_rate >= 50 ? 'bg-yellow-100 text-yellow-700'
-    : 'bg-red-100 text-red-600'
 
   return (
     <div className="border border-green-200 rounded-xl overflow-hidden mt-2">
@@ -865,28 +861,22 @@ function AutomationRegressionSection({ query, ciPortal }) {
           <span className="text-sm font-semibold text-green-800">Daily Automation Regression</span>
           <span className="ml-2 text-xs text-green-500">epic: TMT0-43524</span>
         </div>
-        {data && (
-          <div className="flex items-center gap-3 ml-auto">
-            <span className="text-xs text-gray-500">{data.total_plans} plans · {data.total_tests} tests</span>
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${data.overall_pct >= 80 ? 'bg-green-100 text-green-700' : data.overall_pct >= 50 ? 'bg-yellow-100 text-yellow-700' : 'bg-red-100 text-red-600'}`}>
-              {data.overall_pct}% passed
-            </span>
-            <a href={data.epic_url} target="_blank" rel="noopener noreferrer"
-               onClick={e => e.stopPropagation()}
-               className="text-xs text-green-600 hover:underline flex items-center gap-0.5">
-              <ExternalLink className="h-3 w-3" /> Jira
-            </a>
-          </div>
-        )}
-        {/* CI Portal Staging AS latest run */}
-        {ci?.available && (
-          <div className="flex items-center gap-1.5 ml-2 pl-2 border-l border-green-200" onClick={e => e.stopPropagation()}>
-            <span className="text-[10px] text-gray-400 hidden sm:inline">Staging AS</span>
-            <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${ciBadgeCls}`}>
-              {ci.pass_rate}%
-            </span>
-            <a href={ci.report_url} target="_blank" rel="noopener noreferrer"
-               className={`text-xs hover:underline flex items-center gap-0.5 ${ciColor}`}>
+
+        {/* CI Portal — one badge per suite */}
+        {ci?.available && ci.suites?.length > 0 && (
+          <div className="flex items-center gap-2 ml-auto" onClick={e => e.stopPropagation()}>
+            {ci.suites.map(s => (
+              <a key={s.suite_id} href={s.report_url} target="_blank" rel="noopener noreferrer"
+                 className="flex items-center gap-1 hover:opacity-80 transition-opacity"
+                 title={`${s.name}: ${s.passed}/${s.total} passed`}>
+                <span className="text-[10px] text-gray-500 hidden lg:inline">{s.name}</span>
+                <span className={`text-xs font-bold px-2 py-0.5 rounded-full ${suiteBadgeCls(s.pass_rate)}`}>
+                  {s.pass_rate}%
+                </span>
+              </a>
+            ))}
+            <a href={ci.portal_url} target="_blank" rel="noopener noreferrer"
+               className="text-xs text-blue-500 hover:underline flex items-center gap-0.5 pl-1 border-l border-green-200">
               <ExternalLink className="h-3 w-3" /> CI Portal
             </a>
           </div>
