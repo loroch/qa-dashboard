@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, CheckSquare, Users, AlertTriangle,
   Bug, Clock, TrendingUp, History, Ticket, BarChart2, FlaskConical, PlayCircle, Zap, Layers, ClipboardList, FileText, GitBranch, PenLine, Target, Globe, CalendarDays,
-  Moon, Sun, LogOut, ShieldCheck, UserCircle2, Activity, Flame
+  Moon, Sun, LogOut, ShieldCheck, UserCircle2, Activity, Flame, PieChart
 } from 'lucide-react'
 import { useDarkMode } from '../../hooks/useDarkMode'
 
@@ -23,6 +23,7 @@ const ALL_NAV = [
   { to: '/coverage',       label: 'Test Coverage',    icon: FlaskConical,    roles: ['admin', 'qa'] },
   { to: '/automation',     label: 'Automation',       icon: PlayCircle,      roles: ['admin'] },
   { to: '/validation',     label: 'Validation Portal', icon: ShieldCheck,    roles: ['admin'] },
+  { to: '/bi',             label: 'BI Analytics',     icon: PieChart,        roles: ['admin'] },
   { to: '/test-plans',     label: 'Test Plans',       icon: ClipboardList,   roles: ['admin'] },
   { to: '/release-notes',  label: 'Release Notes',    icon: FileText,        roles: ['admin'] },
   { to: '/investigation',  label: 'Investigation',    icon: GitBranch,       roles: ['admin'] },
