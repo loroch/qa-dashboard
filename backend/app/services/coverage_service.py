@@ -562,6 +562,55 @@ class CoverageService:
                 fields=["summary", "status", "parent", "issuelinks", "customfield_10014"],
             )
 
+            # Testing epic: children are Test/Xray Test issues, not Stories
+            if issue_type == "Epic" and not stories_raw:
+                tests_raw = await self._fetch_all(
+                    f'parent = "{key}" ORDER BY key ASC',
+                    fields=["summary", "status", "issuetype"],
+                )
+                if tests_raw:
+                    DONE_STS = {"Done", "Passed", "Pass"}
+                    test_stories = []
+                    for t in tests_raw:
+                        tf = t.get("fields", {})
+                        st = (tf.get("status") or {}).get("name", "")
+                        test_stories.append({
+                            "key":          t["key"],
+                            "url":          self._issue_url(t["key"]),
+                            "summary":      tf.get("summary", ""),
+                            "status":       st,
+                            "epic_key":     key,
+                            "test_count":   1,
+                            "test_keys":    [t["key"]],
+                            "test_cases":   [{"key": t["key"], "status": st}],
+                            "test_statuses": {st: 1},
+                        })
+                    covered = sum(1 for s in test_stories if s["status"] in DONE_STS)
+                    total   = len(test_stories)
+                    return {
+                        "issue_key":     key,
+                        "issue_type":    issue_type,
+                        "issue_mode":    "tests",
+                        "issue_summary": issue_summary,
+                        "summary": {
+                            "total_stories":     total,
+                            "covered_stories":   covered,
+                            "uncovered_stories": total - covered,
+                            "total_tests":       total,
+                            "coverage_pct":      round(covered / total * 100) if total else 0,
+                        },
+                        "by_epic": [{
+                            "epic_key":      key,
+                            "epic_url":      self._issue_url(key),
+                            "epic_summary":  issue_summary,
+                            "epic_status":   issue_status,
+                            "stories":       test_stories,
+                            "total_stories": total,
+                            "covered_stories": covered,
+                            "total_tests":   total,
+                        }],
+                    }
+
             # 3. Process stories (identical to get_by_version)
             epic_keys: set[str] = set()
             stories = []

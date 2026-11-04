@@ -1346,12 +1346,35 @@ export default function TestCoveragePage() {
   const [unlinkedSearch, setUnlinkedSearch] = useState('')
 
   // By Epic / Story tab state
-  const [issueSearch, setIssueSearch] = useState('')
+  const [issueSearch, setIssueSearch] = useState(() => {
+    try { const s = JSON.parse(localStorage.getItem('coverage:selectedIssue') || 'null'); return s?.key || '' } catch { return '' }
+  })
   const [issueResults, setIssueResults] = useState([])
   const [issueSearching, setIssueSearching] = useState(false)
-  const [selectedIssue, setSelectedIssue] = useState(null)  // {key, summary, type}
+  const [selectedIssue, setSelectedIssue] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('coverage:selectedIssue') || 'null') } catch { return null }
+  })
+  const [pinnedEpics, setPinnedEpics] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('coverage:pinnedEpics') || '[]') } catch { return [] }
+  })
   const [showIssueDrop, setShowIssueDrop] = useState(false)
   const issueSearchRef = useRef(null)
+
+  // Persist selected issue + recent list to localStorage
+  useEffect(() => {
+    try {
+      if (selectedIssue) {
+        localStorage.setItem('coverage:selectedIssue', JSON.stringify(selectedIssue))
+        setPinnedEpics(prev => {
+          const updated = [selectedIssue, ...prev.filter(p => p.key !== selectedIssue.key)].slice(0, 6)
+          localStorage.setItem('coverage:pinnedEpics', JSON.stringify(updated))
+          return updated
+        })
+      } else {
+        localStorage.removeItem('coverage:selectedIssue')
+      }
+    } catch {}
+  }, [selectedIssue])
 
   // Test Plan panel state
   const [testPlanOpen, setTestPlanOpen] = useState(false)
@@ -1651,6 +1674,22 @@ export default function TestCoveragePage() {
               {/* Autocomplete search */}
               <div ref={issueSearchRef} className="relative">
                 <label className="block text-sm font-medium text-gray-600 mb-1.5">Search Epic or Story</label>
+
+                {/* Recent epics chips */}
+                {pinnedEpics.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                    <span className="text-[11px] text-gray-400 font-medium">Recent:</span>
+                    {pinnedEpics.map(e => (
+                      <button key={e.key}
+                        onClick={() => { setSelectedIssue(e); setIssueSearch(e.key); setShowIssueDrop(false); setTestPlan(null); setTestPlanError(null); setTestPlanSavedAt(null); setTestPlanNotes(''); setTestPlanAttachments([]); setHandoverData(null); setHandoverError(null); setHandoverPushMsg(null); setHandoverSavedAt(null); setHandoverNotes('') }}
+                        className={`text-[11px] px-2 py-0.5 rounded-full border transition-colors ${selectedIssue?.key === e.key ? 'bg-brand-100 border-brand-300 text-brand-700 font-semibold' : 'bg-gray-50 border-gray-200 text-gray-500 hover:bg-brand-50 hover:border-brand-200'}`}
+                        title={e.summary}>
+                        {e.key}
+                      </button>
+                    ))}
+                  </div>
+                )}
+
                 <div className="flex gap-2">
                   <div className="relative flex-1">
                     <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -1730,13 +1769,14 @@ export default function TestCoveragePage() {
               {selectedIssue && issueQuery.data && !issueQuery.isLoading && (() => {
                 const d = issueQuery.data
                 const s = d.summary || {}
+                const isTestEpic = d.issue_mode === 'tests'
                 return (
                   <>
                     {/* Summary tiles */}
                     <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                      <SummaryTile label="Total Stories" value={s.total_stories} color="blue" />
-                      <SummaryTile label="Covered" value={s.covered_stories} color="green" sub={`${s.coverage_pct}%`} />
-                      <SummaryTile label="Uncovered" value={s.uncovered_stories} color="red" />
+                      <SummaryTile label={isTestEpic ? "Total Tests" : "Total Stories"} value={s.total_stories} color="blue" />
+                      <SummaryTile label={isTestEpic ? "Done" : "Covered"} value={s.covered_stories} color="green" sub={`${s.coverage_pct}%`} />
+                      <SummaryTile label={isTestEpic ? "Not Done" : "Uncovered"} value={s.uncovered_stories} color="red" />
                       <SummaryTile label="Test Cases" value={s.total_tests} color="purple" />
                     </div>
 
