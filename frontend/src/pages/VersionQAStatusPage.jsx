@@ -16,6 +16,8 @@ const getCoverage      = (v) => api.get('/coverage/by-version',           { para
 const getBugs          = (v) => api.get('/dashboard/bugs-by-version',     { params: { version: v } })
 const getRegression    = (v) => api.get('/coverage/regression-tests',     { params: { version: v } })
 const getBugsByEpic    = (v) => api.get('/dashboard/bugs-grouped-by-epic',{ params: { version: v } })
+const getByIssue       = (k) => api.get('/coverage/by-issue',             { params: { key: k, force_refresh: false } })
+const searchIssues     = (q) => api.get('/coverage/search-issues',        { params: { q } })
 const getRecentBugs    = (d) => api.get('/dashboard/recent-bugs',         { params: { days: d } })
 const getSprints       = (v) => api.get('/dashboard/sprints',             { params: { version: v } })
 const getQAActivity    = (v, s, d, e) => api.get('/dashboard/qa-activity', { params: { version: v, sprint: s || undefined, days: d, epic_key: e || undefined } })
@@ -2216,11 +2218,89 @@ function HandoverTab({ version, jiraBaseUrl }) {
   )
 }
 
+// ── Extra (ATP/Testing) Epic Row ──────────────────────────────────────────────
+function ExtraEpicRow({ epicKey, jiraBaseUrl, onRemove }) {
+  const { data, isLoading, isError } = useQuery({
+    queryKey: ['extra-epic', epicKey],
+    queryFn:  () => getByIssue(epicKey),
+    staleTime: 5 * 60 * 1000,
+  })
+
+  return (
+    <div className="border border-indigo-200 rounded-lg overflow-hidden">
+      {/* ATP header */}
+      <div className="flex items-center gap-2 px-4 py-2 bg-indigo-50 border-b border-indigo-100">
+        <span className="text-[10px] font-bold tracking-wide text-indigo-500 bg-indigo-100 px-1.5 py-0.5 rounded">ATP</span>
+        <a href={`${jiraBaseUrl}/browse/${epicKey}`} target="_blank" rel="noopener noreferrer"
+           className="text-xs font-mono text-brand-600 hover:underline flex items-center gap-0.5">
+          {epicKey} <ExternalLink className="h-2.5 w-2.5" />
+        </a>
+        {data?.issue_summary && (
+          <span className="text-xs text-gray-600 truncate flex-1">{data.issue_summary}</span>
+        )}
+        {data && (
+          <span className="text-xs text-gray-400 flex-shrink-0">
+            {data.summary?.total_stories ?? 0} tests
+          </span>
+        )}
+        <button onClick={onRemove}
+          className="ml-1 text-gray-300 hover:text-red-400 flex-shrink-0 transition-colors"
+          title="Remove from view">
+          <X className="h-3.5 w-3.5" />
+        </button>
+      </div>
+
+      {isLoading && <div className="px-4 py-3 text-xs text-gray-400">Loading…</div>}
+      {isError   && <div className="px-4 py-3 text-xs text-red-400">Could not load {epicKey}</div>}
+      {data && (data.by_epic || []).map(e => (
+        <CoverageEpicRow key={e.epic_key} epic={e} jiraBaseUrl={jiraBaseUrl} version={epicKey} />
+      ))}
+      {data && (data.by_epic || []).length === 0 && (
+        <p className="px-4 py-3 text-xs text-gray-400">No test data found for {epicKey}</p>
+      )}
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function VersionQAStatusPage() {
   const [version, setVersion]    = useState('')
   const [refreshKey, setRefresh] = useState(0)
   const [activeTab, setActiveTab] = useState('overview')  // 'overview' | 'daily-qa'
+
+  // Extra (ATP/testing) epics pinned alongside the version coverage
+  const [extraEpicKeys, setExtraEpicKeys] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('qa-status:extraEpics') || '[]') } catch { return [] }
+  })
+  const [showEpicSearch, setShowEpicSearch] = useState(false)
+  const [epicSearchText, setEpicSearchText] = useState('')
+  const [epicSearchResults, setEpicSearchResults] = useState([])
+  const [epicSearching, setEpicSearching] = useState(false)
+  const epicSearchRef = useRef(null)
+
+  useEffect(() => {
+    try { localStorage.setItem('qa-status:extraEpics', JSON.stringify(extraEpicKeys)) } catch {}
+  }, [extraEpicKeys])
+
+  // Debounce epic search
+  useEffect(() => {
+    if (epicSearchText.length < 2) { setEpicSearchResults([]); return }
+    setEpicSearching(true)
+    const t = setTimeout(() => {
+      searchIssues(epicSearchText)
+        .then(r => setEpicSearchResults((r.value || []).filter(x => x.type === 'Epic')))
+        .catch(() => setEpicSearchResults([]))
+        .finally(() => setEpicSearching(false))
+    }, 350)
+    return () => clearTimeout(t)
+  }, [epicSearchText])
+
+  // Close search dropdown on outside click
+  useEffect(() => {
+    const handler = e => { if (epicSearchRef.current && !epicSearchRef.current.contains(e.target)) setShowEpicSearch(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
 
   const versionsQ = useQuery({
     queryKey: ['qa-status-versions'],
@@ -2371,16 +2451,73 @@ export default function VersionQAStatusPage() {
                   </a>
                 </>
               )}
+              {/* Add testing epic button */}
+              <button
+                onClick={() => setShowEpicSearch(s => !s)}
+                className="ml-2 flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-colors flex-shrink-0"
+                title="Add an ATP / testing epic">
+                <Plus className="h-3 w-3" /> Add Epic
+              </button>
             </div>
-            <div className="p-3 space-y-2 max-h-[560px] overflow-y-auto">
+
+            {/* Epic search box */}
+            {showEpicSearch && (
+              <div ref={epicSearchRef} className="px-4 py-3 border-b border-indigo-100 bg-indigo-50/40 relative">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                  <input
+                    autoFocus
+                    className="w-full text-sm border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    placeholder="Search epic key or name…"
+                    value={epicSearchText}
+                    onChange={e => setEpicSearchText(e.target.value)}
+                  />
+                  {epicSearching && (
+                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
+                  )}
+                </div>
+                {epicSearchResults.length > 0 && (
+                  <div className="absolute z-30 left-4 right-4 top-full bg-white border border-gray-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
+                    {epicSearchResults.map(r => (
+                      <button key={r.key}
+                        disabled={extraEpicKeys.includes(r.key)}
+                        onClick={() => {
+                          if (!extraEpicKeys.includes(r.key)) setExtraEpicKeys(k => [...k, r.key])
+                          setEpicSearchText(''); setEpicSearchResults([]); setShowEpicSearch(false)
+                        }}
+                        className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-0 disabled:opacity-40">
+                        <div className="flex items-center gap-2">
+                          <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Epic</span>
+                          <span className="font-mono text-xs font-semibold text-brand-600">{r.key}</span>
+                          {extraEpicKeys.includes(r.key) && <span className="text-xs text-gray-400">already added</span>}
+                        </div>
+                        <p className="text-sm text-gray-700 mt-0.5 line-clamp-1">{r.summary}</p>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="p-3 space-y-2 max-h-[620px] overflow-y-auto">
               {coverageQ.isLoading && <Spinner label="Loading coverage…" />}
               {coverageQ.isError   && <ErrMsg msg={coverageQ.error?.message} />}
-              {cov && (cov.by_epic||[]).length===0 && (
+              {cov && (cov.by_epic||[]).length===0 && extraEpicKeys.length===0 && (
                 <p className="text-sm text-gray-400 text-center py-8">No epics for this version</p>
               )}
               {(cov?.by_epic||[]).map(e=>(
                 <CoverageEpicRow key={e.epic_key} epic={e} jiraBaseUrl={jiraBaseUrl} version={version} />
               ))}
+
+              {/* Extra ATP / testing epics */}
+              {extraEpicKeys.length > 0 && (
+                <div className="pt-1 border-t border-dashed border-indigo-200 mt-1 space-y-2">
+                  {extraEpicKeys.map(k => (
+                    <ExtraEpicRow key={k} epicKey={k} jiraBaseUrl={jiraBaseUrl}
+                      onRemove={() => setExtraEpicKeys(prev => prev.filter(x => x !== k))} />
+                  ))}
+                </div>
+              )}
             </div>
           </div>
 
