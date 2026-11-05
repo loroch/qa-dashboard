@@ -2284,17 +2284,15 @@ export default function VersionQAStatusPage() {
     try { localStorage.setItem('qa-status:combinedEpic', JSON.stringify(combinedEpic)) } catch {}
   }, [combinedEpic])
 
-  // Debounce epic search
+  // Debounce epic search — mirrors TestCoveragePage pattern exactly
   useEffect(() => {
-    if (epicSearchText.length < 2) { setEpicSearchResults([]); setShowEpicDrop(false); return }
-    if (combinedEpic && epicSearchText === combinedEpic.key) return
-    setEpicSearching(true)
-    const t = setTimeout(() => {
-      searchIssues(epicSearchText)
-        .then(arr => { setEpicSearchResults((arr || []).filter(x => x.type === 'Epic')); setShowEpicDrop(true) })
-        .catch(() => setEpicSearchResults([]))
-        .finally(() => setEpicSearching(false))
-    }, 350)
+    if (epicSearchText.length < 2) { setEpicSearchResults([]); return }
+    const t = setTimeout(async () => {
+      setEpicSearching(true)
+      try { setEpicSearchResults((await searchIssues(epicSearchText) || []).filter(x => x.type === 'Epic')) }
+      catch { setEpicSearchResults([]) }
+      finally { setEpicSearching(false) }
+    }, 300)
     return () => clearTimeout(t)
   }, [epicSearchText])
 
@@ -2420,8 +2418,8 @@ export default function VersionQAStatusPage() {
                     className="border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-indigo-300"
                     placeholder="Search epic…"
                     value={epicSearchText}
-                    onChange={e => { setEpicSearchText(e.target.value); if (combinedEpic) setCombinedEpic(null) }}
-                    onFocus={() => epicSearchResults.length > 0 && setShowEpicDrop(true)}
+                    onChange={e => { setEpicSearchText(e.target.value); setShowEpicDrop(true); if (combinedEpic) setCombinedEpic(null) }}
+                    onFocus={() => epicSearchText.length >= 2 && setShowEpicDrop(true)}
                   />
                   {epicSearching && (
                     <div className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
@@ -2443,12 +2441,18 @@ export default function VersionQAStatusPage() {
                       onClick={() => { setCombinedEpic(r); setEpicSearchText(r.key); setShowEpicDrop(false); setEpicSearchResults([]) }}
                       className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-0">
                       <div className="flex items-center gap-2">
-                        <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Epic</span>
+                        <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${r.type === 'Epic' ? 'bg-purple-100 text-purple-700' : 'bg-blue-100 text-blue-700'}`}>{r.type}</span>
                         <span className="font-mono text-xs font-semibold text-brand-600">{r.key}</span>
+                        {r.status && <span className="text-xs text-gray-400">{r.status}</span>}
                       </div>
                       <p className="text-xs text-gray-600 mt-0.5 line-clamp-1">{r.summary}</p>
                     </button>
                   ))}
+                </div>
+              )}
+              {showEpicDrop && !epicSearching && epicSearchText.length >= 2 && epicSearchResults.length === 0 && (
+                <div className="absolute z-50 top-full mt-1 left-0 bg-white border border-gray-200 rounded-xl shadow-xl px-4 py-3 text-sm text-gray-400 w-80">
+                  No epics found.
                 </div>
               )}
             </div>
