@@ -276,8 +276,13 @@ function CoverageEpicRow({ epic, jiraBaseUrl, version }) {
 }
 
 // ── Bug Breakdown ─────────────────────────────────────────────────────────────
-function BugBreakdown({ bugs, version, jiraBaseUrl }) {
+function BugBreakdown({ bugs, version, jiraBaseUrl, combinedEpicKey }) {
   const total = bugs.length
+
+  // Base JQL scope: version alone, or version + epic when one is selected
+  const bugScope = combinedEpicKey
+    ? `(fixVersion = "${version}" OR parent = "${combinedEpicKey}")`
+    : `fixVersion = "${version}"`
 
   const byPriority = useMemo(() => {
     const m = {}
@@ -297,7 +302,7 @@ function BugBreakdown({ bugs, version, jiraBaseUrl }) {
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">By Priority</p>
         <div className="space-y-1.5">
           {byPriority.map(([p, n]) => (
-            <a key={p} href={jiraFilter(jiraBaseUrl, `issuetype = Bug AND fixVersion = "${version}" AND priority = "${p}" ORDER BY created DESC`)}
+            <a key={p} href={jiraFilter(jiraBaseUrl, `issuetype = Bug AND ${bugScope} AND priority = "${p}" ORDER BY created DESC`)}
                target="_blank" rel="noopener noreferrer"
                className="flex items-center gap-2 hover:opacity-80 group">
               <span className="text-xs text-gray-600 w-16 flex-shrink-0">{p}</span>
@@ -314,7 +319,7 @@ function BugBreakdown({ bugs, version, jiraBaseUrl }) {
         <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">By Status</p>
         <div className="space-y-1.5">
           {byStatus.map(([s, n]) => (
-            <a key={s} href={jiraFilter(jiraBaseUrl, `issuetype = Bug AND fixVersion = "${version}" AND status = "${s}" ORDER BY priority DESC`)}
+            <a key={s} href={jiraFilter(jiraBaseUrl, `issuetype = Bug AND ${bugScope} AND status = "${s}" ORDER BY priority DESC`)}
                target="_blank" rel="noopener noreferrer"
                className="flex items-center gap-2 hover:opacity-80 group">
               <span className="text-xs text-gray-600 w-28 flex-shrink-0 truncate">{s}</span>
@@ -2387,6 +2392,11 @@ export default function VersionQAStatusPage() {
   // Combined epic rows for the coverage panel
   const combinedEpicRows = useMemo(() => combinedEpicQ.data?.by_epic || [], [combinedEpicQ.data])
 
+  // Jira JQL scope for bugs: version alone, or version + epic when selected
+  const bugScope = combinedEpic?.key
+    ? `(fixVersion = "${version}" OR parent = "${combinedEpic.key}")`
+    : `fixVersion = "${version}"`
+
   // Derive Jira base URL from first story URL in coverage data
   const jiraBaseUrl = useMemo(() => {
     const firstStory = (cov?.by_epic || [])[0]?.stories?.[0]
@@ -2540,11 +2550,11 @@ export default function VersionQAStatusPage() {
                                           sub={reg?`${pct(regDone,reg.total)}% passed`:null} color="indigo"
               href={reg?.jira_search_url || null} />
             <Tile label="Total Bugs"      value={bugStats.total}         color="red"
-              href={version ? jiraFilter(jiraBaseUrl, `issuetype = Bug AND fixVersion = "${version}" ORDER BY priority DESC`) : null} />
+              href={version ? jiraFilter(jiraBaseUrl, `issuetype = Bug AND ${bugScope} ORDER BY priority DESC`) : null} />
             <Tile label="Open Bugs"       value={bugStats.open}          color="orange"
-              href={version ? jiraFilter(jiraBaseUrl, `issuetype = Bug AND fixVersion = "${version}" AND status not in (Done, DONE, Closed, Removed) ORDER BY priority DESC`) : null} />
+              href={version ? jiraFilter(jiraBaseUrl, `issuetype = Bug AND ${bugScope} AND status not in (Done, DONE, Closed, Removed) ORDER BY priority DESC`) : null} />
             <Tile label="High / Critical" value={bugStats.high_critical} color="red"
-              href={version ? jiraFilter(jiraBaseUrl, `issuetype = Bug AND fixVersion = "${version}" AND priority in (Highest, High) ORDER BY status ASC`) : null} />
+              href={version ? jiraFilter(jiraBaseUrl, `issuetype = Bug AND ${bugScope} AND priority in (Highest, High) ORDER BY status ASC`) : null} />
           </div>
         )}
 
@@ -2618,7 +2628,7 @@ export default function VersionQAStatusPage() {
                 {bugs && (
                   <>
                     <span className="ml-auto text-xs text-gray-400">{allBugs.length} total</span>
-                    <a href={jiraFilter(jiraBaseUrl,`issuetype = Bug AND fixVersion = "${version}" ORDER BY priority DESC`)}
+                    <a href={jiraFilter(jiraBaseUrl,`issuetype = Bug AND ${bugScope} ORDER BY priority DESC`)}
                        target="_blank" rel="noopener noreferrer"
                        className="text-xs text-red-600 hover:underline flex items-center gap-0.5 ml-2">
                       <ExternalLink className="h-3 w-3" /> Jira
@@ -2635,7 +2645,7 @@ export default function VersionQAStatusPage() {
                   </p>
                 )}
                 {bugs && allBugs.length>0 && (
-                  <BugBreakdown bugs={allBugs} version={version} jiraBaseUrl={jiraBaseUrl} />
+                  <BugBreakdown bugs={allBugs} version={version} jiraBaseUrl={jiraBaseUrl} combinedEpicKey={combinedEpic?.key} />
                 )}
               </div>
             </div>
@@ -2648,7 +2658,7 @@ export default function VersionQAStatusPage() {
                 {bugsByEpicQ.data && (
                   <>
                     <span className="ml-auto text-xs text-gray-400">{bugsByEpicQ.data.epics?.length} epics</span>
-                    <a href={jiraFilter(jiraBaseUrl,`issuetype = Bug AND fixVersion = "${version}" ORDER BY priority DESC`)}
+                    <a href={jiraFilter(jiraBaseUrl,`issuetype = Bug AND ${bugScope} ORDER BY priority DESC`)}
                        target="_blank" rel="noopener noreferrer"
                        className="text-xs text-amber-600 hover:underline flex items-center gap-0.5 ml-2">
                       <ExternalLink className="h-3 w-3" /> Jira
