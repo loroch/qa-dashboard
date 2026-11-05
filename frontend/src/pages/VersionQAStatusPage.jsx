@@ -2268,27 +2268,30 @@ export default function VersionQAStatusPage() {
   const [refreshKey, setRefresh] = useState(0)
   const [activeTab, setActiveTab] = useState('overview')  // 'overview' | 'daily-qa'
 
-  // Extra (ATP/testing) epics pinned alongside the version coverage
-  const [extraEpicKeys, setExtraEpicKeys] = useState(() => {
-    try { return JSON.parse(localStorage.getItem('qa-status:extraEpics') || '[]') } catch { return [] }
+  // Combined epic: single testing epic whose data merges into all tiles
+  const [combinedEpic, setCombinedEpic] = useState(() => {
+    try { return JSON.parse(localStorage.getItem('qa-status:combinedEpic') || 'null') } catch { return null }
   })
-  const [showEpicSearch, setShowEpicSearch] = useState(false)
-  const [epicSearchText, setEpicSearchText] = useState('')
+  const [epicSearchText, setEpicSearchText] = useState(() => {
+    try { const s = JSON.parse(localStorage.getItem('qa-status:combinedEpic') || 'null'); return s?.key || '' } catch { return '' }
+  })
   const [epicSearchResults, setEpicSearchResults] = useState([])
   const [epicSearching, setEpicSearching] = useState(false)
+  const [showEpicDrop, setShowEpicDrop] = useState(false)
   const epicSearchRef = useRef(null)
 
   useEffect(() => {
-    try { localStorage.setItem('qa-status:extraEpics', JSON.stringify(extraEpicKeys)) } catch {}
-  }, [extraEpicKeys])
+    try { localStorage.setItem('qa-status:combinedEpic', JSON.stringify(combinedEpic)) } catch {}
+  }, [combinedEpic])
 
   // Debounce epic search
   useEffect(() => {
-    if (epicSearchText.length < 2) { setEpicSearchResults([]); return }
+    if (epicSearchText.length < 2) { setEpicSearchResults([]); setShowEpicDrop(false); return }
+    if (combinedEpic && epicSearchText === combinedEpic.key) return
     setEpicSearching(true)
     const t = setTimeout(() => {
       searchIssues(epicSearchText)
-        .then(r => setEpicSearchResults((r.value || []).filter(x => x.type === 'Epic')))
+        .then(r => { setEpicSearchResults((r.value || []).filter(x => x.type === 'Epic')); setShowEpicDrop(true) })
         .catch(() => setEpicSearchResults([]))
         .finally(() => setEpicSearching(false))
     }, 350)
@@ -2297,7 +2300,7 @@ export default function VersionQAStatusPage() {
 
   // Close search dropdown on outside click
   useEffect(() => {
-    const handler = e => { if (epicSearchRef.current && !epicSearchRef.current.contains(e.target)) setShowEpicSearch(false) }
+    const handler = e => { if (epicSearchRef.current && !epicSearchRef.current.contains(e.target)) setShowEpicDrop(false) }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
@@ -2318,13 +2321,39 @@ export default function VersionQAStatusPage() {
   const regressionQ  = useQuery({ queryKey:['qa-reg',       version,refreshKey], queryFn:()=>getRegression(version),  enabled, staleTime:5*60*1000 })
   const bugsByEpicQ  = useQuery({ queryKey:['qa-bugs-epic', version,refreshKey], queryFn:()=>getBugsByEpic(version),  enabled, staleTime:5*60*1000 })
 
+  const combinedEpicQ = useQuery({
+    queryKey: ['qa-combined-epic', combinedEpic?.key],
+    queryFn:  () => getByIssue(combinedEpic.key),
+    enabled:  !!combinedEpic?.key,
+    staleTime: 5 * 60 * 1000,
+  })
+
   const cov      = coverageQ.data
   const bugs     = bugsQ.data
   const reg      = regressionQ.data
   const allBugs  = bugs?.bugs || []
   const bugStats = bugs?.stats || {}
-  const summary  = cov?.summary || {}
+  const baseSummary = cov?.summary || {}
   const isLoading = coverageQ.isLoading || bugsQ.isLoading || regressionQ.isLoading || bugsByEpicQ.isLoading
+
+  // Merge base version summary with combined epic summary
+  const summary = useMemo(() => {
+    const extra = combinedEpic?.key && combinedEpicQ.data?.summary
+    if (!extra) return baseSummary
+    const totalS  = (baseSummary.total_stories  || 0) + (extra.total_stories  || 0)
+    const coveredS = (baseSummary.covered_stories || 0) + (extra.covered_stories || 0)
+    const totalT  = (baseSummary.total_tests     || 0) + (extra.total_stories   || 0) // tests = stories for test epics
+    return {
+      total_stories:     totalS,
+      covered_stories:   coveredS,
+      uncovered_stories: totalS - coveredS,
+      total_tests:       totalT,
+      coverage_pct:      totalS ? Math.round(coveredS / totalS * 100) : 0,
+    }
+  }, [baseSummary, combinedEpicQ.data, combinedEpic])
+
+  // Combined epic rows for the coverage panel
+  const combinedEpicRows = useMemo(() => combinedEpicQ.data?.by_epic || [], [combinedEpicQ.data])
 
   // Derive Jira base URL from first story URL in coverage data
   const jiraBaseUrl = useMemo(() => {
@@ -2337,12 +2366,15 @@ export default function VersionQAStatusPage() {
     return Object.entries(counts).filter(([s])=>DONE_STATUSES.has(s)).reduce((a,[,n])=>a+n,0)
   }, [reg])
 
-  // Stories in DONE status from coverage data
+  // Stories in DONE status from coverage data (version + combined epic)
   const { storiesDone, storiesDonePct } = useMemo(() => {
-    const allStories = (cov?.by_epic||[]).flatMap(e => e.stories||[])
-    const done = allStories.filter(s => s.status === 'DONE').length
+    const allStories = [
+      ...(cov?.by_epic||[]).flatMap(e => e.stories||[]),
+      ...combinedEpicRows.flatMap(e => e.stories||[]),
+    ]
+    const done = allStories.filter(s => s.status === 'DONE' || s.status === 'Done').length
     return { storiesDone: done, storiesDonePct: pct(done, allStories.length) }
-  }, [cov])
+  }, [cov, combinedEpicRows])
 
   return (
     <div className="flex flex-col min-h-screen bg-gray-50">
@@ -2359,8 +2391,8 @@ export default function VersionQAStatusPage() {
       </div>
 
       <div className="flex-1 p-6 space-y-5 max-w-7xl mx-auto w-full">
-        {/* Version selector */}
-        <div className="flex items-center gap-3">
+        {/* Version selector + combined epic picker */}
+        <div className="flex flex-wrap items-center gap-3">
           <label className="text-sm font-medium text-gray-600">Fix Version</label>
           <select value={version} onChange={e=>setVersion(e.target.value)}
             className="border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-brand-400">
@@ -2376,6 +2408,59 @@ export default function VersionQAStatusPage() {
               <ExternalLink className="h-3 w-3" /> All issues for {version}
             </a>
           )}
+
+          {/* Combined epic picker */}
+          <div className="flex items-center gap-2 ml-4 pl-4 border-l border-gray-200">
+            <label className="text-sm font-medium text-gray-500 whitespace-nowrap">+ Epic</label>
+            <div ref={epicSearchRef} className="relative">
+              <div className="flex items-center gap-1.5">
+                <div className="relative">
+                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
+                  <input
+                    className="border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 text-sm w-48 focus:outline-none focus:ring-2 focus:ring-indigo-300"
+                    placeholder="Search epic…"
+                    value={epicSearchText}
+                    onChange={e => { setEpicSearchText(e.target.value); if (combinedEpic) setCombinedEpic(null) }}
+                    onFocus={() => epicSearchResults.length > 0 && setShowEpicDrop(true)}
+                  />
+                  {epicSearching && (
+                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
+                  )}
+                </div>
+                {combinedEpic && (
+                  <button onClick={() => { setCombinedEpic(null); setEpicSearchText('') }}
+                    className="text-gray-300 hover:text-red-400 transition-colors" title="Remove combined epic">
+                    <X className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+
+              {/* Dropdown */}
+              {showEpicDrop && epicSearchResults.length > 0 && (
+                <div className="absolute z-50 top-full mt-1 left-0 bg-white border border-gray-200 rounded-xl shadow-xl max-h-56 overflow-y-auto w-80">
+                  {epicSearchResults.map(r => (
+                    <button key={r.key}
+                      onClick={() => { setCombinedEpic(r); setEpicSearchText(r.key); setShowEpicDrop(false); setEpicSearchResults([]) }}
+                      className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-0">
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Epic</span>
+                        <span className="font-mono text-xs font-semibold text-brand-600">{r.key}</span>
+                      </div>
+                      <p className="text-xs text-gray-600 mt-0.5 line-clamp-1">{r.summary}</p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            {combinedEpic && (
+              <span className="text-xs text-indigo-600 font-medium truncate max-w-[180px]" title={combinedEpic.summary}>
+                {combinedEpic.summary}
+              </span>
+            )}
+            {combinedEpic && combinedEpicQ.isLoading && (
+              <div className="h-3.5 w-3.5 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
+            )}
+          </div>
         </div>
 
         {/* Tab bar */}
@@ -2451,70 +2536,34 @@ export default function VersionQAStatusPage() {
                   </a>
                 </>
               )}
-              {/* Add testing epic button */}
-              <button
-                onClick={() => setShowEpicSearch(s => !s)}
-                className="ml-2 flex items-center gap-1 text-xs px-2 py-1 rounded-lg bg-indigo-100 text-indigo-700 hover:bg-indigo-200 transition-colors flex-shrink-0"
-                title="Add an ATP / testing epic">
-                <Plus className="h-3 w-3" /> Add Epic
-              </button>
             </div>
-
-            {/* Epic search box */}
-            {showEpicSearch && (
-              <div ref={epicSearchRef} className="px-4 py-3 border-b border-indigo-100 bg-indigo-50/40 relative">
-                <div className="relative">
-                  <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-gray-400" />
-                  <input
-                    autoFocus
-                    className="w-full text-sm border border-gray-200 rounded-lg pl-8 pr-3 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-300"
-                    placeholder="Search epic key or name…"
-                    value={epicSearchText}
-                    onChange={e => setEpicSearchText(e.target.value)}
-                  />
-                  {epicSearching && (
-                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2 h-3 w-3 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
-                  )}
-                </div>
-                {epicSearchResults.length > 0 && (
-                  <div className="absolute z-30 left-4 right-4 top-full bg-white border border-gray-200 rounded-xl shadow-xl max-h-56 overflow-y-auto">
-                    {epicSearchResults.map(r => (
-                      <button key={r.key}
-                        disabled={extraEpicKeys.includes(r.key)}
-                        onClick={() => {
-                          if (!extraEpicKeys.includes(r.key)) setExtraEpicKeys(k => [...k, r.key])
-                          setEpicSearchText(''); setEpicSearchResults([]); setShowEpicSearch(false)
-                        }}
-                        className="w-full text-left px-4 py-2.5 hover:bg-indigo-50 transition-colors border-b border-gray-100 last:border-0 disabled:opacity-40">
-                        <div className="flex items-center gap-2">
-                          <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-purple-100 text-purple-700">Epic</span>
-                          <span className="font-mono text-xs font-semibold text-brand-600">{r.key}</span>
-                          {extraEpicKeys.includes(r.key) && <span className="text-xs text-gray-400">already added</span>}
-                        </div>
-                        <p className="text-sm text-gray-700 mt-0.5 line-clamp-1">{r.summary}</p>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
 
             <div className="p-3 space-y-2 max-h-[620px] overflow-y-auto">
               {coverageQ.isLoading && <Spinner label="Loading coverage…" />}
               {coverageQ.isError   && <ErrMsg msg={coverageQ.error?.message} />}
-              {cov && (cov.by_epic||[]).length===0 && extraEpicKeys.length===0 && (
+              {cov && (cov.by_epic||[]).length===0 && !combinedEpic && (
                 <p className="text-sm text-gray-400 text-center py-8">No epics for this version</p>
               )}
               {(cov?.by_epic||[]).map(e=>(
                 <CoverageEpicRow key={e.epic_key} epic={e} jiraBaseUrl={jiraBaseUrl} version={version} />
               ))}
 
-              {/* Extra ATP / testing epics */}
-              {extraEpicKeys.length > 0 && (
-                <div className="pt-1 border-t border-dashed border-indigo-200 mt-1 space-y-2">
-                  {extraEpicKeys.map(k => (
-                    <ExtraEpicRow key={k} epicKey={k} jiraBaseUrl={jiraBaseUrl}
-                      onRemove={() => setExtraEpicKeys(prev => prev.filter(x => x !== k))} />
+              {/* Combined ATP / testing epic rows */}
+              {combinedEpic && (
+                <div className="pt-1 border-t border-dashed border-indigo-200 mt-1">
+                  {combinedEpicQ.isLoading && <Spinner label={`Loading ${combinedEpic.key}…`} />}
+                  {combinedEpicQ.isError && <ErrMsg msg={`Failed to load ${combinedEpic.key}`} />}
+                  {combinedEpicRows.map(e => (
+                    <div key={e.epic_key} className="mb-2">
+                      <div className="flex items-center gap-1.5 px-3 py-1 bg-indigo-50 rounded-t-lg border border-indigo-100 border-b-0">
+                        <span className="text-[10px] font-bold tracking-wide text-indigo-500 bg-indigo-100 px-1.5 py-0.5 rounded">ATP</span>
+                        <a href={`${jiraBaseUrl}/browse/${combinedEpic.key}`} target="_blank" rel="noopener noreferrer"
+                           className="text-xs font-mono text-brand-600 hover:underline flex items-center gap-0.5">
+                          {combinedEpic.key} <ExternalLink className="h-2.5 w-2.5" />
+                        </a>
+                      </div>
+                      <CoverageEpicRow epic={e} jiraBaseUrl={jiraBaseUrl} version={combinedEpic.key} />
+                    </div>
                   ))}
                 </div>
               )}
