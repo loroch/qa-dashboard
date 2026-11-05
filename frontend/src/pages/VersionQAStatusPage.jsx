@@ -18,6 +18,7 @@ const getRegression    = (v) => api.get('/coverage/regression-tests',     { para
 const getBugsByEpic    = (v) => api.get('/dashboard/bugs-grouped-by-epic',{ params: { version: v } })
 const getByIssue       = (k) => api.get('/coverage/by-issue',             { params: { key: k, force_refresh: false } })
 const searchIssues     = (q) => api.get('/coverage/search-issues',        { params: { q } })
+const getBugsByEpicKey = (k) => api.get('/dashboard/bugs-by-epic',        { params: { epic_key: k } })
 const getRecentBugs    = (d) => api.get('/dashboard/recent-bugs',         { params: { days: d } })
 const getSprints       = (v) => api.get('/dashboard/sprints',             { params: { version: v } })
 const getQAActivity    = (v, s, d, e) => api.get('/dashboard/qa-activity', { params: { version: v, sprint: s || undefined, days: d, epic_key: e || undefined } })
@@ -29,6 +30,11 @@ const getAllocation     = (v, s)      => api.get('/dashboard/allocation', { para
 const reassignIssue    = (key, id)   => api.post(`/dashboard/issue/${key}/qa-owner`, { account_id: id })
 
 function pct(n, d) { return d ? Math.round(n / d * 100) : 0 }
+function mergeCounts(a, b) {
+  const result = { ...(a || {}) }
+  Object.entries(b || {}).forEach(([k, v]) => { result[k] = (result[k] || 0) + v })
+  return result
+}
 
 // Derive Jira base URL from any browse URL: https://host/browse/KEY → https://host
 function jiraBase(url) {
@@ -2326,12 +2332,40 @@ export default function VersionQAStatusPage() {
     staleTime: 5 * 60 * 1000,
   })
 
+  const combinedEpicBugsQ = useQuery({
+    queryKey: ['qa-combined-epic-bugs', combinedEpic?.key],
+    queryFn:  () => getBugsByEpicKey(combinedEpic.key),
+    enabled:  !!combinedEpic?.key,
+    staleTime: 5 * 60 * 1000,
+  })
+
   const cov      = coverageQ.data
   const bugs     = bugsQ.data
   const reg      = regressionQ.data
-  const allBugs  = bugs?.bugs || []
-  const bugStats = bugs?.stats || {}
   const baseSummary = cov?.summary || {}
+
+  // Merge version bugs with combined epic bugs
+  const allBugs = useMemo(() => {
+    const vBugs = bugs?.bugs || []
+    const eBugs = combinedEpicBugsQ.data?.bugs || []
+    if (!eBugs.length) return vBugs
+    const seen = new Set(vBugs.map(b => b.key))
+    return [...vBugs, ...eBugs.filter(b => !seen.has(b.key))]
+  }, [bugs, combinedEpicBugsQ.data])
+
+  const bugStats = useMemo(() => {
+    const base = bugs?.stats || {}
+    const extra = combinedEpicBugsQ.data?.stats
+    if (!extra) return base
+    const merge = (a, b) => (a || 0) + (b || 0)
+    return {
+      total:        merge(base.total,        extra.total),
+      open:         merge(base.open,         extra.open),
+      high_critical:merge(base.high_critical,extra.high_critical),
+      by_priority:  mergeCounts(base.by_priority,  extra.by_priority),
+      by_status:    mergeCounts(base.by_status,     extra.by_status),
+    }
+  }, [bugs, combinedEpicBugsQ.data])
   const isLoading = coverageQ.isLoading || bugsQ.isLoading || regressionQ.isLoading || bugsByEpicQ.isLoading
 
   // Merge base version summary with combined epic summary
