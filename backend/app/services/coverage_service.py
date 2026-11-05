@@ -564,10 +564,32 @@ class CoverageService:
 
             # Testing epic: children are Test/Xray Test issues, not Stories
             if issue_type == "Epic" and not stories_raw:
-                tests_raw = await self._fetch_all(
+                all_children = await self._fetch_all(
                     f'parent = "{key}" ORDER BY key ASC',
                     fields=["summary", "status", "issuetype"],
                 )
+                # Only treat children as tests if they are actual test issue types
+                TEST_ISSUE_TYPES = {"Xray Test", "Test", "Test Case", "Sub-task"}
+                tests_raw = [
+                    c for c in all_children
+                    if (c.get("fields", {}).get("issuetype") or {}).get("name", "") in TEST_ISSUE_TYPES
+                ]
+                if not tests_raw:
+                    # All children are bugs (or no children) — return empty coverage
+                    return {
+                        "issue_key":     key,
+                        "issue_type":    issue_type,
+                        "issue_mode":    "bugs_only",
+                        "issue_summary": issue_summary,
+                        "summary": {
+                            "total_stories":     0,
+                            "covered_stories":   0,
+                            "uncovered_stories": 0,
+                            "total_tests":       0,
+                            "coverage_pct":      0,
+                        },
+                        "by_epic": [],
+                    }
                 if tests_raw:
                     DONE_STS = {"Done", "Passed", "Pass"}
                     test_stories = []
