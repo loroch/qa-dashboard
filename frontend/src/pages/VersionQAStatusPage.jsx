@@ -2360,17 +2360,18 @@ export default function VersionQAStatusPage() {
 
   const bugStats = useMemo(() => {
     const base = bugs?.stats || {}
-    const extra = combinedEpicBugsQ.data?.stats
-    if (!extra) return base
-    const merge = (a, b) => (a || 0) + (b || 0)
+    if (!combinedEpicBugsQ.data?.bugs?.length) return base
+    // Derive tile counts from the deduplicated allBugs array to avoid double-counting
+    // bugs that appear in both the fixVersion set and the epic's children
+    const open = allBugs.filter(b => b.status_category !== 'Done').length
+    const highCrit = allBugs.filter(b => b.priority === 'Highest' || b.priority === 'High' || b.priority === 'Critical').length
     return {
-      total:        merge(base.total,        extra.total),
-      open:         merge(base.open,         extra.open),
-      high_critical:merge(base.high_critical,extra.high_critical),
-      by_priority:  mergeCounts(base.by_priority,  extra.by_priority),
-      by_status:    mergeCounts(base.by_status,     extra.by_status),
+      ...base,
+      total:         allBugs.length,
+      open,
+      high_critical: highCrit,
     }
-  }, [bugs, combinedEpicBugsQ.data])
+  }, [bugs, combinedEpicBugsQ.data, allBugs])
   const isLoading = coverageQ.isLoading || bugsQ.isLoading || regressionQ.isLoading || bugsByEpicQ.isLoading
 
   // Merge base version summary with combined epic summary
