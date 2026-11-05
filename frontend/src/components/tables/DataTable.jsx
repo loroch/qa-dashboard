@@ -479,6 +479,7 @@ export function IssueTable({
               {col('QA Est.', 'qa_estimate_hours')}
               {col('Version', 'fix_versions')}
               {col('Bundle', 'bundle')}
+              {col('Parent', 'parent_key')}
               {col('Activity', 'activity')}
               {col('Aging', 'days_in_status')}
               {col('Updated', 'updated')}
@@ -531,6 +532,17 @@ export function IssueTable({
                 <td className="px-3 py-2.5 whitespace-nowrap text-gray-500 text-xs max-w-[120px] truncate">
                   {issue.epic_name || issue.bundle || '—'}
                 </td>
+                <td className="px-3 py-2.5 whitespace-nowrap text-xs">
+                  {issue.parent_key
+                    ? <a href={issue.parent_url || '#'} target="_blank" rel="noopener noreferrer"
+                         className="inline-flex items-center gap-1 font-mono text-brand-600 hover:underline"
+                         title={issue.parent_name || issue.parent_key}>
+                        {issue.parent_key}
+                        <ExternalLink className="h-2.5 w-2.5" />
+                      </a>
+                    : <span className="text-gray-400">—</span>
+                  }
+                </td>
                 <td className="px-3 py-2.5 whitespace-nowrap">
                   {issue.activity
                     ? <Badge label={issue.activity} variant="default" />
@@ -546,7 +558,7 @@ export function IssueTable({
               </tr>
             ))}
             {sorted.length === 0 && (
-              <tr><td colSpan={13} className="text-center py-8 text-gray-400 text-sm">No issues match the current filter.</td></tr>
+              <tr><td colSpan={14} className="text-center py-8 text-gray-400 text-sm">No issues match the current filter.</td></tr>
             )}
           </tbody>
         </table>
