@@ -1,0 +1,1 @@
+{"name":"qa-dashboard","private":true,"dependencies":{"playwright":"^1.65.0"}}

@@ -832,7 +832,10 @@ Return ONLY JSON with exactly these keys: explanation, how_it_works, key_points,
         script.write_text(UI_PROBE_SCRIPT, encoding="utf-8")
         cfg = {"url": web["url"], "user": web["user"], "password": web["password"], "navLabels": nav,
                "maxWaitS": int(ui.get("max_wait_s") or 90), "shotPrefix": str(SCRATCH_DIR / f"run_{run_id}")}
-        env = {**os.environ, "PROBE_CONFIG": json.dumps(cfg)}
+        node_modules = Path(__file__).parent.parent.parent.parent / "node_modules"
+        existing_node_path = os.environ.get("NODE_PATH", "")
+        node_path = str(node_modules) + (os.pathsep + existing_node_path if existing_node_path else "")
+        env = {**os.environ, "PROBE_CONFIG": json.dumps(cfg), "NODE_PATH": node_path}
         timeout = 120 + cfg["maxWaitS"] * (len(nav) + 1)
         await self._log(run_id, f"ui: Launching Playwright (Chromium, headless)")
         await self._log(run_id, f"ui: Navigating to {web['url']}")
