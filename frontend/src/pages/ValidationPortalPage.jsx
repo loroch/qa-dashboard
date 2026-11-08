@@ -438,6 +438,50 @@ function ChecksPanel({ options, setOptions, profile }) {
   )
 }
 
+// ── Quick Run Bar ─────────────────────────────────────────────────────────────
+const SHORT = { jira:'Jira', ui:'Playwright', spec:'Spec', figma:'Figma', db:'DB', elastic:'Elastic', tests:'Tests', ai:'AI Review' }
+
+function QuickRunBar({ options, setOptions, onRun, running, disabled }) {
+  const c = options.checks
+  const toggle = (id) => setOptions(o => ({ ...o, checks: { ...o.checks, [id]: !o.checks[id] } }))
+  const count  = Object.values(c).filter(Boolean).length
+
+  return (
+    <div className="mt-4 flex flex-wrap items-center gap-2 p-3 rounded-xl bg-slate-50 dark:bg-slate-800/60 border border-slate-200 dark:border-slate-700">
+      <span className="text-xs font-semibold text-slate-500 uppercase tracking-wide whitespace-nowrap mr-1">Run checks:</span>
+      {CHECKS.map(ch => {
+        const on = !!c[ch.id]
+        return (
+          <button
+            key={ch.id}
+            onClick={() => toggle(ch.id)}
+            title={ch.desc}
+            className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+              on
+                ? 'bg-brand-600 text-white border-brand-600 shadow-sm'
+                : 'bg-white dark:bg-slate-700 text-slate-500 dark:text-slate-300 border-slate-200 dark:border-slate-600 hover:border-brand-400 hover:text-brand-600'
+            }`}
+          >
+            <ch.icon className="h-3.5 w-3.5 flex-shrink-0" />
+            {SHORT[ch.id]}
+          </button>
+        )
+      })}
+      <div className="flex-1" />
+      <button
+        onClick={onRun}
+        disabled={running || disabled || !count}
+        className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+      >
+        {running
+          ? <><Loader2 className="h-4 w-4 animate-spin" />Running…</>
+          : <><Play className="h-4 w-4" />Run {count} check{count !== 1 ? 's' : ''}</>
+        }
+      </button>
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Results
 // ---------------------------------------------------------------------------
@@ -925,6 +969,16 @@ export default function ValidationPortalPage() {
           </div>
           {issue.isError && <p className="text-sm text-red-600 mb-2">{apiErr(issue.error)}</p>}
           {issue.data && <IssueCard issue={issue.data} />}
+          {issue.data && (
+            <QuickRunBar
+              options={options}
+              setOptions={setOptions}
+              onRun={() => start.mutate()}
+              running={start.isPending}
+              disabled={!profile || !selectedChecks}
+            />
+          )}
+          {start.isError && <p className="text-sm text-red-600 mt-2">{apiErr(start.error)}</p>}
           {explain.isPending && !explain.data && <p className="text-sm text-gray-500 mt-3 flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Reading the item and writing the explanation + test plan… (about 30–60 s)</p>}
           {explain.isError && <p className="text-sm text-red-600 mt-2">{apiErr(explain.error)}</p>}
           {explain.data && (
@@ -942,7 +996,6 @@ export default function ValidationPortalPage() {
             </button>
           }>
           <ChecksPanel options={options} setOptions={setOptions} profile={profile} />
-          {start.isError && <p className="text-sm text-red-600 mt-2">{apiErr(start.error)}</p>}
         </Section>
 
         {runId && <RunView key={runId} runId={runId} />}
