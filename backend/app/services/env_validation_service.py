@@ -749,17 +749,27 @@ Return ONLY JSON with exactly these keys: explanation, how_it_works, key_points,
                 ("figma", self._check_figma), ("db", self._check_db), ("elastic", self._check_elastic),
                 ("tests", self._check_tests), ("ai", self._check_ai),
             ]
+            enabled_steps = [name for name, _ in steps if checks.get(name)]
+            total_steps = len(enabled_steps)
+            results["progress"] = {"current": 0, "total": total_steps, "step": ""}
+            await self._log(run_id, f"Running {total_steps} check(s): {', '.join(enabled_steps)}")
+            step_index = 0
+
             for name, fn in steps:
                 if not checks.get(name):
                     continue
+                step_index += 1
+                results["progress"] = {"current": step_index - 1, "total": total_steps, "step": name}
                 if name == "ai":
                     results["_existing_findings"] = [f"[{f['check']}] {f['title']}" for f in findings]
-                await self._log(run_id, f"▶ {name}")
+                await self._log(run_id, f"▶ [{step_index}/{total_steps}] {name}")
                 try:
                     results[name] = await fn(run_id, issue, profile, options, results, add)
+                    results["progress"] = {"current": step_index, "total": total_steps, "step": name}
                 except Exception as exc:
                     logger.warning("validation check %s failed on run %s: %s", name, run_id, exc, exc_info=True)
                     results[name] = {"error": str(exc)}
+                    results["progress"] = {"current": step_index, "total": total_steps, "step": name}
                     await self._log(run_id, f"✖ {name} failed: {exc}")
                     add(name, "info", f"Check '{name}' could not run", str(exc))
                 results.pop("_existing_findings", None)
@@ -768,8 +778,9 @@ Return ONLY JSON with exactly these keys: explanation, how_it_works, key_points,
             findings.sort(key=lambda f: SEVERITY_ORDER.get(f["severity"], 9))
             for i, f in enumerate(findings, 1):
                 f["id"] = f"F{i}"
+            results["progress"] = {"current": total_steps, "total": total_steps, "step": "done"}
             await self._update(run_id, status="done", results=results, findings=findings, finished_at=_now())
-            await self._log(run_id, f"Done — {len(findings)} findings")
+            await self._log(run_id, f"✔ Done — {len(findings)} findings")
         except Exception as exc:
             logger.error("validation run %s errored: %s", run_id, exc, exc_info=True)
             await self._update(run_id, status="error", error_text=str(exc), results=results,
@@ -823,6 +834,11 @@ Return ONLY JSON with exactly these keys: explanation, how_it_works, key_points,
                "maxWaitS": int(ui.get("max_wait_s") or 90), "shotPrefix": str(SCRATCH_DIR / f"run_{run_id}")}
         env = {**os.environ, "PROBE_CONFIG": json.dumps(cfg)}
         timeout = 120 + cfg["maxWaitS"] * (len(nav) + 1)
+        await self._log(run_id, f"ui: Launching Playwright (Chromium, headless)")
+        await self._log(run_id, f"ui: Navigating to {web['url']}")
+        await self._log(run_id, f"ui: Logging in as {web['user']} / {'•' * min(len(web.get('password') or ''), 8)}")
+        if nav:
+            await self._log(run_id, f"ui: Menu items to probe: {', '.join(nav)}")
         # The RESULT_JSON line carries every API call of the probe — far above
         # asyncio's default 64 KB readline limit.
         proc = await asyncio.create_subprocess_exec("node", str(script), stdout=asyncio.subprocess.PIPE,
@@ -838,7 +854,21 @@ Return ONLY JSON with exactly these keys: explanation, how_it_works, key_points,
                 line = raw.decode("utf-8", errors="ignore").rstrip()
                 lines.append(line)
                 if line.startswith("[probe]"):
-                    await self._log(run_id, "ui: " + line[8:])
+                    msg = line[8:].strip()
+                    # Enrich key probe events with more readable messages
+                    if msg.startswith("opening "):
+                        await self._log(run_id, f"ui: → Opening {msg[8:]}")
+                    elif msg.startswith("logging in as "):
+                        await self._log(run_id, f"ui: → Logging in as {msg[14:]}")
+                    elif msg.startswith("logged in:"):
+                        await self._log(run_id, f"ui: → Login result: {msg[10:].strip()}")
+                    elif msg.startswith('clicking "'):
+                        label = msg[10:].split('"')[0]
+                        await self._log(run_id, f"ui: → Clicking menu item \"{label}\"")
+                    elif '"' in msg and ('settled' in msg or 'loading' in msg or 'not found' in msg):
+                        await self._log(run_id, f"ui: → {msg}")
+                    else:
+                        await self._log(run_id, f"ui: {msg}")
         try:
             await asyncio.wait_for(asyncio.gather(pump(), proc.wait()), timeout=timeout)
         except asyncio.TimeoutError:

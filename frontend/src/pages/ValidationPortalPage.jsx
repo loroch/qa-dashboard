@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import axios from 'axios'
@@ -838,6 +838,199 @@ function EvidenceTabs({ run }) {
   )
 }
 
+// ── Wizard Step Bar ──────────────────────────────────────────────────────────
+function StepBar({ step }) {
+  const steps = [
+    { n: 1, label: 'Understand' },
+    { n: 2, label: 'Environment' },
+    { n: 3, label: 'Select & Run' },
+    { n: 4, label: 'Live Execution' },
+  ]
+  return (
+    <div className="flex items-center gap-1 mb-1">
+      {steps.map((s, i) => (
+        <div key={s.n} className="flex items-center">
+          <div className={`flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold transition-all ${
+            s.n < step  ? 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300' :
+            s.n === step ? 'bg-brand-600 text-white shadow-sm' :
+            'bg-gray-100 text-gray-400 dark:bg-slate-700 dark:text-slate-500'
+          }`}>
+            {s.n < step
+              ? <CheckCircle2 className="h-3 w-3" />
+              : <span className="h-4 w-4 rounded-full border-2 flex items-center justify-center text-[10px] leading-none
+                  border-current">{s.n}</span>
+            }
+            {s.label}
+          </div>
+          {i < steps.length - 1 && (
+            <div className={`h-px w-6 mx-0.5 ${s.n < step ? 'bg-green-400' : 'bg-gray-200 dark:bg-slate-600'}`} />
+          )}
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Progress Bar ──────────────────────────────────────────────────────────────
+function ProgressBar({ current, total, stepName }) {
+  const pct = total ? Math.min(100, Math.round((current / total) * 100)) : 0
+  const done = current >= total && total > 0
+  return (
+    <div className="mb-3">
+      <div className="flex items-center justify-between text-xs mb-1.5">
+        <span className="text-gray-500 dark:text-slate-400">
+          {done ? 'All checks complete' : stepName ? `Running: ${stepName}  (${current}/${total})` : `${current}/${total} checks`}
+        </span>
+        <span className={`font-bold ${done ? 'text-green-600' : 'text-brand-600'}`}>{pct}%</span>
+      </div>
+      <div className="h-2 bg-gray-100 dark:bg-slate-700 rounded-full overflow-hidden">
+        <div
+          className={`h-2 rounded-full transition-all duration-700 ${done ? 'bg-green-500' : 'bg-brand-500'}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+    </div>
+  )
+}
+
+// ── Verbose Log Renderer ──────────────────────────────────────────────────────
+const LOG_STYLES = {
+  step:    'text-blue-400 font-semibold',
+  done:    'text-green-400 font-semibold',
+  error:   'text-red-400 font-semibold',
+  browser: 'text-teal-300',
+  jira:    'text-indigo-300',
+  db:      'text-orange-300',
+  elastic: 'text-purple-300',
+  ai:      'text-violet-300',
+  figma:   'text-pink-300',
+  spec:    'text-cyan-300',
+  tests:   'text-yellow-300',
+  meta:    'text-gray-400',
+  default: 'text-green-300',
+}
+
+function logLineStyle(raw) {
+  const line = raw.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '')
+  if (line.startsWith('▶') || line.startsWith('Running '))  return LOG_STYLES.step
+  if (line.startsWith('✔') || line.startsWith('Done'))       return LOG_STYLES.done
+  if (line.startsWith('✖') || line.startsWith('Run failed')) return LOG_STYLES.error
+  if (line.startsWith('ui:'))      return LOG_STYLES.browser
+  if (line.startsWith('jira:'))    return LOG_STYLES.jira
+  if (line.startsWith('db:'))      return LOG_STYLES.db
+  if (line.startsWith('elastic:')) return LOG_STYLES.elastic
+  if (line.startsWith('ai:'))      return LOG_STYLES.ai
+  if (line.startsWith('figma:'))   return LOG_STYLES.figma
+  if (line.startsWith('spec:'))    return LOG_STYLES.spec
+  if (line.startsWith('tests:'))   return LOG_STYLES.tests
+  if (line.startsWith('Loading') || line.startsWith('Epic') || line.startsWith('Story')) return LOG_STYLES.meta
+  return LOG_STYLES.default
+}
+
+function VerboseLog({ log, active }) {
+  const lines = (log || 'Starting…').split('\n').filter(Boolean)
+  const endRef = useRef(null)
+  useEffect(() => { if (active) endRef.current?.scrollIntoView({ behavior: 'smooth' }) }, [log, active])
+  return (
+    <div className={`bg-gray-900 rounded-lg overflow-auto font-mono text-[11px] leading-relaxed p-3 ${active ? 'max-h-80' : 'max-h-48'}`}>
+      {lines.map((line, i) => {
+        const ts    = line.match(/^\[(\d{2}:\d{2}:\d{2})\]/)?.[1]
+        const rest  = line.replace(/^\[\d{2}:\d{2}:\d{2}\]\s*/, '')
+        const cls   = logLineStyle(line)
+        return (
+          <div key={i} className="flex gap-2 hover:bg-white/5 rounded px-1 -mx-1">
+            {ts && <span className="text-gray-600 flex-shrink-0 select-none">{ts}</span>}
+            <span className={cls}>{rest}</span>
+          </div>
+        )
+      })}
+      <div ref={endRef} />
+    </div>
+  )
+}
+
+// ── Environment Readiness Panel ───────────────────────────────────────────────
+const ENV_CHECKS = [
+  { key: 'web',   label: 'Web client',   icon: Globe,          target: 'web' },
+  { key: 'db',    label: 'Database',     icon: Database,       target: 'db'  },
+  { key: 'elastic',label:'Elasticsearch',icon: Search,         target: 'elastic' },
+  { key: 'figma', label: 'Figma',        icon: FigmaIcon,      target: 'figma' },
+  { key: 'jira',  label: 'Jira',         icon: ClipboardCheck, target: 'jira' },
+  { key: 'ai',    label: 'AI (Claude)',  icon: Sparkles,       target: 'ai' },
+]
+
+function EnvReadinessPanel({ profile, options }) {
+  const [results, setResults] = useState({}) // key → {status:'ok'|'fail'|'running', msg}
+
+  const test = async (key, target) => {
+    setResults(r => ({ ...r, [key]: { status: 'running' } }))
+    try {
+      const d = await api.post(`/validation/test/${target}`, { profile }).then(r => r.data)
+      setResults(r => ({ ...r, [key]: { status: d.ok ? 'ok' : 'fail', msg: d.error || d.message || '' } }))
+    } catch (e) {
+      setResults(r => ({ ...r, [key]: { status: 'fail', msg: e.message } }))
+    }
+  }
+
+  const testAll = () => ENV_CHECKS.forEach(c => test(c.key, c.target))
+
+  // Which services are relevant to selected checks
+  const needed = new Set([
+    options.checks.ui      && 'web',
+    options.checks.db      && 'db',
+    options.checks.elastic && 'elastic',
+    options.checks.figma   && 'figma',
+    true                   && 'jira',
+    options.checks.ai      && 'ai',
+  ].filter(Boolean))
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-gray-500 dark:text-slate-400">Test connectivity before running. Only services used by selected checks are required.</p>
+        <button className="btn-secondary text-xs flex items-center gap-1" onClick={testAll}>
+          <PlugZap className="h-3.5 w-3.5" />Test all
+        </button>
+      </div>
+      <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+        {ENV_CHECKS.map(c => {
+          const r = results[c.key]
+          const req = needed.has(c.key)
+          return (
+            <div key={c.key} className={`flex items-center gap-2 rounded-lg border px-3 py-2 ${
+              r?.status === 'ok'      ? 'border-green-300 bg-green-50 dark:bg-green-900/20' :
+              r?.status === 'fail'    ? 'border-red-300 bg-red-50 dark:bg-red-900/20' :
+              r?.status === 'running' ? 'border-blue-300 bg-blue-50 dark:bg-blue-900/20' :
+              req ? 'border-gray-300 bg-white dark:bg-slate-800' : 'border-gray-200 bg-gray-50 dark:bg-slate-800/50'
+            }`}>
+              <c.icon className={`h-4 w-4 flex-shrink-0 ${
+                r?.status === 'ok' ? 'text-green-500' : r?.status === 'fail' ? 'text-red-500' : 'text-gray-400'
+              }`} />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1">
+                  <span className={`text-xs font-medium ${req ? 'text-gray-700 dark:text-slate-200' : 'text-gray-500'}`}>{c.label}</span>
+                  {req && <span className="text-[9px] text-brand-500 font-bold">REQ</span>}
+                </div>
+                {r?.msg && <p className="text-[10px] text-red-500 truncate" title={r.msg}>{r.msg}</p>}
+              </div>
+              {r?.status === 'running'
+                ? <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500 flex-shrink-0" />
+                : r?.status === 'ok'
+                ? <CheckCircle2 className="h-3.5 w-3.5 text-green-500 flex-shrink-0" />
+                : r?.status === 'fail'
+                ? <XCircle className="h-3.5 w-3.5 text-red-500 flex-shrink-0" />
+                : <button className="text-xs text-brand-500 hover:underline flex-shrink-0 font-medium"
+                    onClick={() => test(c.key, c.target)}>Test</button>
+              }
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+// ── Run View (Step 4) ─────────────────────────────────────────────────────────
 function RunView({ runId }) {
   const qc = useQueryClient()
   const { data: run } = useQuery({
@@ -847,25 +1040,48 @@ function RunView({ runId }) {
   })
   if (!run) return <div className="card p-5"><Loader2 className="h-4 w-4 animate-spin" /></div>
   const active = ['pending', 'running'].includes(run.status)
+  const prog   = run.results?.progress || {}
+  const hasProgress = prog.total > 0
+
   return (
     <>
-      <Section
-        title={`Run #${run.id} — ${run.issue_key} ${run.issue_summary || ''}`}
-        icon={active ? Loader2 : run.status === 'done' ? CheckCircle2 : XCircle}
-        defaultOpen={true}
-        right={
-          <div className="flex items-center gap-2 text-xs">
+      <div className="card p-4 space-y-3">
+        {/* Run header */}
+        <div className="flex items-center gap-2 flex-wrap">
+          {active
+            ? <Loader2 className="h-4 w-4 animate-spin text-brand-500" />
+            : run.status === 'done'
+            ? <CheckCircle2 className="h-4 w-4 text-green-500" />
+            : <XCircle className="h-4 w-4 text-red-500" />
+          }
+          <span className="text-sm font-semibold text-gray-700 dark:text-slate-200">
+            Run #{run.id} — {run.issue_key} {run.issue_summary}
+          </span>
+          <div className="flex items-center gap-1 ml-auto">
             {Object.entries(run.finding_counts || {}).filter(([, n]) => n).map(([s, n]) => (
-              <span key={s} className={`px-1.5 py-0.5 rounded font-semibold ${SEV_STYLE[s]}`}>{n} {s}</span>
+              <span key={s} className={`px-1.5 py-0.5 rounded text-xs font-semibold ${SEV_STYLE[s]}`}>{n} {s}</span>
             ))}
-            <span className="text-gray-500">{run.status}</span>
-            {!active && <a className="btn-secondary text-xs flex items-center gap-1" href={`${BASE_URL}/validation/runs/${run.id}/report`} target="_blank" rel="noreferrer"><FileText className="h-3.5 w-3.5" />Report</a>}
+            <span className="text-xs text-gray-400 ml-1">{run.status}</span>
+            {!active && (
+              <a className="btn-secondary text-xs flex items-center gap-1 ml-2"
+                href={`${BASE_URL}/validation/runs/${run.id}/report`} target="_blank" rel="noreferrer">
+                <FileText className="h-3.5 w-3.5" />Report
+              </a>
+            )}
           </div>
-        }
-      >
-        <pre className={`text-[11px] bg-gray-900 text-green-300 rounded p-3 overflow-auto ${active ? 'max-h-72' : 'max-h-40'}`}>{run.log_output || 'Starting…'}</pre>
-        {run.error && <p className="text-sm text-red-600 mt-2">{run.error}</p>}
-      </Section>
+        </div>
+
+        {/* Progress bar */}
+        {hasProgress && (
+          <ProgressBar current={prog.current} total={prog.total}
+            stepName={prog.step !== 'done' ? prog.step : ''} />
+        )}
+
+        {/* Verbose log */}
+        <VerboseLog log={run.log_output} active={active} />
+        {run.error && <p className="text-sm text-red-600">{run.error}</p>}
+      </div>
+
       {(run.findings?.length > 0 || !active) && (
         <Section title={`Findings (${run.findings?.length || 0})`} icon={Bug}>
           <FindingsList run={run} onChanged={() => qc.invalidateQueries({ queryKey: ['validation-run', runId] })} />
@@ -880,16 +1096,46 @@ function RunView({ runId }) {
   )
 }
 
+// ── Wizard Step Card ──────────────────────────────────────────────────────────
+function WizardCard({ step, currentStep, title, icon: Icon, children, right }) {
+  const done    = step < currentStep
+  const active  = step === currentStep
+  const pending = step > currentStep
+  return (
+    <div className={`rounded-xl border transition-all ${
+      active  ? 'border-brand-400 shadow-sm bg-white dark:bg-slate-800' :
+      done    ? 'border-green-300 bg-green-50/50 dark:bg-green-900/10 dark:border-green-800' :
+      'border-gray-200 dark:border-slate-700 bg-gray-50/50 dark:bg-slate-800/40'
+    }`}>
+      <div className="flex items-center gap-3 px-5 py-3">
+        <div className={`flex h-7 w-7 items-center justify-center rounded-full text-xs font-bold flex-shrink-0 ${
+          active  ? 'bg-brand-600 text-white' :
+          done    ? 'bg-green-500 text-white' :
+          'bg-gray-200 text-gray-500 dark:bg-slate-600 dark:text-slate-400'
+        }`}>
+          {done ? <CheckCircle2 className="h-4 w-4" /> : step}
+        </div>
+        {Icon && <Icon className={`h-4 w-4 flex-shrink-0 ${active ? 'text-brand-600 dark:text-brand-300' : done ? 'text-green-600' : 'text-gray-400'}`} />}
+        <h2 className={`font-semibold text-sm flex-1 ${pending ? 'text-gray-400 dark:text-slate-500' : ''}`}>{title}</h2>
+        {right && <div>{right}</div>}
+      </div>
+      {!pending && <div className="px-5 pb-5">{children}</div>}
+    </div>
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Page
 // ---------------------------------------------------------------------------
 
 export default function ValidationPortalPage() {
   const qc = useQueryClient()
-  const [profile, setProfile] = useState(null)
+  const [profile, setProfile]   = useState(null)
   const [issueKey, setIssueKey] = useState('')
-  const [options, setOptions] = useState(DEFAULT_OPTIONS)
-  const [runId, setRunId] = useState(null)
+  const [options, setOptions]   = useState(DEFAULT_OPTIONS)
+  const [runId, setRunId]       = useState(null)
+  const [wizardStep, setWizardStep] = useState(1)
+  const [envOpen, setEnvOpen]   = useState(false)
 
   const profileQ = useQuery({ queryKey: ['validation-profile'], queryFn: () => api.get('/validation/profile').then(r => r.data) })
   useEffect(() => {
@@ -906,12 +1152,19 @@ export default function ValidationPortalPage() {
     mutationFn: ({ key, refresh }) => api.post(`/validation/issue/${encodeURIComponent(key)}/explain${refresh ? '?refresh=true' : ''}`).then(r => r.data),
   })
   const [applied, setApplied] = useState(false)
+
   const loadIssue = () => {
     if (!issueKey.trim()) return
     explain.reset(); setApplied(false)
     issue.mutate(issueKey.trim().toUpperCase())
   }
   const currentKey = issue.data?.root.key || issueKey.trim().toUpperCase()
+
+  // Advance wizard to step 2 when issue loads
+  useEffect(() => { if (issue.data && wizardStep < 2) setWizardStep(2) }, [issue.data])
+  // Advance to step 4 when a run starts
+  useEffect(() => { if (runId && wizardStep < 4) setWizardStep(4) }, [runId])
+
   const applySuggestions = () => {
     const s = explain.data?.suggested_settings || {}
     const wanted = new Set((explain.data?.tests || []).map(t => t.check).filter(c => c in DEFAULT_OPTIONS.checks))
@@ -923,9 +1176,9 @@ export default function ValidationPortalPage() {
       elastic: { ...o.elastic, keywords: (s.elastic_keywords || []).length ? s.elastic_keywords.join(', ') : o.elastic.keywords },
     }))
     setApplied(true)
+    if (wizardStep < 3) setWizardStep(3)
   }
 
-  // Sensible defaults once an issue is loaded: count its endpoints in Elastic, use its Figma links
   useEffect(() => {
     if (!issue.data) return
     if (!options.db.queries.length && /event|map|severity/i.test(issue.data.root.summary + JSON.stringify(issue.data.children.map(c => c.summary)))) {
@@ -951,61 +1204,107 @@ export default function ValidationPortalPage() {
   return (
     <div className="flex-1 flex flex-col min-w-0">
       <Header title="Validation Portal" />
-      <div className="flex-1 p-6 space-y-5 overflow-auto">
-        {profileQ.isError && <div className="card p-4 text-sm text-red-600">Could not load the environment profile: {apiErr(profileQ.error)}</div>}
-        {profile && <EnvironmentPanel profile={profile} setProfile={setProfile} />}
+      <div className="flex-1 p-6 space-y-4 overflow-auto">
 
-        <Section title="What to validate" icon={ClipboardCheck}>
-          <div className="flex gap-2 mb-3">
-            <input className={inputCls + ' max-w-xs font-mono'} placeholder="Epic / Story / Bug / Task key — e.g. TMT0-38353"
-              value={issueKey} onChange={e => setIssueKey(e.target.value)} onKeyDown={e => e.key === 'Enter' && loadIssue()} />
+        {profileQ.isError && <div className="card p-4 text-sm text-red-600">Could not load environment profile: {apiErr(profileQ.error)}</div>}
+
+        {/* Wizard step indicator */}
+        <StepBar step={wizardStep} />
+
+        {/* ── Step 1: Understand ─────────────────────────────────────────────── */}
+        <WizardCard step={1} currentStep={wizardStep} title="Understand the issue" icon={ClipboardCheck}>
+          <div className="flex flex-wrap gap-2 mb-3">
+            <input
+              className={inputCls + ' max-w-xs font-mono'}
+              placeholder="Epic / Story / Bug / Task — e.g. TMT0-38353"
+              value={issueKey}
+              onChange={e => setIssueKey(e.target.value)}
+              onKeyDown={e => e.key === 'Enter' && loadIssue()}
+            />
             <button className="btn-secondary flex items-center gap-1" onClick={loadIssue} disabled={issue.isPending || !issueKey.trim()}>
               {issue.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Search className="h-4 w-4" />}Load
             </button>
-            <button className="btn-secondary flex items-center gap-1" title="Explain in simple words + recommended tests"
+            <button className="btn-secondary flex items-center gap-1"
               onClick={() => explain.mutate({ key: currentKey })} disabled={explain.isPending || !currentKey}>
               {explain.isPending && !explain.variables?.refresh ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}Explain &amp; test plan
             </button>
           </div>
           {issue.isError && <p className="text-sm text-red-600 mb-2">{apiErr(issue.error)}</p>}
           {issue.data && <IssueCard issue={issue.data} />}
-          {issue.data && (
-            <QuickRunBar
-              options={options}
-              setOptions={setOptions}
-              onRun={() => start.mutate()}
-              running={start.isPending}
-              disabled={!profile || !selectedChecks}
-            />
+          {explain.isPending && !explain.data && (
+            <p className="text-sm text-gray-500 mt-3 flex items-center gap-2">
+              <Loader2 className="h-4 w-4 animate-spin" />Reading the issue and writing the test plan… (30–60 s)
+            </p>
           )}
-          {start.isError && <p className="text-sm text-red-600 mt-2">{apiErr(start.error)}</p>}
-          {explain.isPending && !explain.data && <p className="text-sm text-gray-500 mt-3 flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" />Reading the item and writing the explanation + test plan… (about 30–60 s)</p>}
           {explain.isError && <p className="text-sm text-red-600 mt-2">{apiErr(explain.error)}</p>}
           {explain.data && (
             <ExplainPanel data={explain.data} applied={applied} onApply={applySuggestions}
               regenerating={explain.isPending && explain.variables?.refresh}
               onRegenerate={() => explain.mutate({ key: explain.data.issue_key, refresh: true })} />
           )}
-        </Section>
+        </WizardCard>
 
-        <Section title={`Automatic validation — ${selectedChecks} checks selected`} icon={Play}
+        {/* ── Step 2: Environment readiness ──────────────────────────────────── */}
+        <WizardCard step={2} currentStep={wizardStep} title="Check environment readiness" icon={Server}
           right={
-            <button className="btn-primary flex items-center gap-1 text-sm" onClick={() => start.mutate()}
-              disabled={start.isPending || !(issue.data || issueKey.trim()) || !profile || !selectedChecks}>
-              {start.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}Run validation
+            wizardStep === 2 && (
+              <button className="btn-primary text-xs" onClick={() => setWizardStep(3)}>
+                Proceed to checks →
+              </button>
+            )
+          }
+        >
+          {profile && <EnvReadinessPanel profile={profile} options={options} />}
+          <div className="mt-4 border-t border-gray-200 dark:border-slate-700 pt-3">
+            <button className="text-xs text-brand-600 dark:text-brand-300 hover:underline flex items-center gap-1"
+              onClick={() => setEnvOpen(o => !o)}>
+              {envOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+              Edit environment settings / credentials
             </button>
-          }>
-          <ChecksPanel options={options} setOptions={setOptions} profile={profile} />
-        </Section>
+            {envOpen && profile && (
+              <div className="mt-3">
+                <EnvironmentPanel profile={profile} setProfile={setProfile} onSaved={() => {}} />
+              </div>
+            )}
+          </div>
+        </WizardCard>
 
-        {runId && <RunView key={runId} runId={runId} />}
+        {/* ── Step 3: Select & Run ───────────────────────────────────────────── */}
+        <WizardCard step={3} currentStep={wizardStep} title="Select checks &amp; run" icon={Play}>
+          {/* Quick chip strip */}
+          <QuickRunBar
+            options={options}
+            setOptions={setOptions}
+            onRun={() => start.mutate()}
+            running={start.isPending}
+            disabled={!profile || !selectedChecks || !(issue.data || issueKey.trim())}
+          />
+          {start.isError && <p className="text-sm text-red-600 mt-2">{apiErr(start.error)}</p>}
 
+          {/* Detailed check settings (collapsible) */}
+          <div className="mt-4">
+            <Section title={`Advanced check settings (${selectedChecks} checks active)`} icon={ClipboardCheck} defaultOpen={false}>
+              <ChecksPanel options={options} setOptions={setOptions} profile={profile} />
+            </Section>
+          </div>
+        </WizardCard>
+
+        {/* ── Step 4: Live execution & results ───────────────────────────────── */}
+        <WizardCard step={4} currentStep={wizardStep} title="Live execution &amp; results" icon={Play}>
+          {runId
+            ? <RunView key={runId} runId={runId} />
+            : <p className="text-sm text-gray-500">No run started yet. Click Run in Step 3 to begin.</p>
+          }
+        </WizardCard>
+
+        {/* ── Recent runs ────────────────────────────────────────────────────── */}
         <Section title="Recent runs" icon={History} defaultOpen={!runId}>
           {!runsQ.data?.length && <p className="text-sm text-gray-500">No runs yet.</p>}
           <ul className="divide-y divide-gray-100 dark:divide-slate-700">
             {(runsQ.data || []).map(r => (
-              <li key={r.id} className={`py-2 flex items-center gap-3 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 px-2 rounded ${r.id === runId ? 'bg-brand-50 dark:bg-slate-700/50' : ''}`}
-                onClick={() => setRunId(r.id)}>
+              <li key={r.id}
+                className={`py-2 flex items-center gap-3 text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-slate-800 px-2 rounded ${r.id === runId ? 'bg-brand-50 dark:bg-slate-700/50' : ''}`}
+                onClick={() => { setRunId(r.id); setWizardStep(4) }}>
                 <span className="text-gray-500 w-10">#{r.id}</span>
                 <span className="font-mono w-28">{r.issue_key}</span>
                 <span className="flex-1 truncate">{r.issue_summary}</span>
