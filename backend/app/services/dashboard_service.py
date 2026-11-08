@@ -882,6 +882,80 @@ class DashboardService:
 
         return await self.cache.get_or_fetch(cache_key, fetch, ttl=600)
 
+    async def get_sprint_summary(self, version: str, force_refresh: bool = False) -> list[dict]:
+        """Per-sprint story + bug counts for the sprint timeline chart."""
+        import hashlib
+        cache_key = f"dashboard:sprint_summary:{hashlib.md5(version.encode()).hexdigest()[:8]}"
+        if force_refresh:
+            self.cache.invalidate(cache_key)
+
+        async def fetch():
+            bugs_jql = (
+                f'project = TMT0 AND issuetype = Bug AND fixVersion = "{version}" '
+                f'ORDER BY created DESC'
+            )
+            stories_jql = (
+                f'project = TMT0 AND issuetype = Story AND fixVersion = "{version}" '
+                f'ORDER BY status ASC'
+            )
+            bugs_raw, stories_raw = await asyncio.gather(
+                self.jira.search_issues(
+                    bugs_jql,
+                    fields=["status", "customfield_10020"],
+                    max_total=2000,
+                ),
+                self.jira.search_issues(
+                    stories_jql,
+                    fields=["status", "customfield_10020"],
+                    max_total=2000,
+                ),
+            )
+
+            sprint_data: dict[str, dict] = {}
+
+            def _ensure(name: str, state: str, sid: str) -> dict:
+                if name not in sprint_data:
+                    sprint_data[name] = {
+                        "sprint_name": name,
+                        "sprint_state": state,
+                        "sprint_id": sid,
+                        "bugs_total": 0,
+                        "bugs_open": 0,
+                        "stories_total": 0,
+                        "stories_done": 0,
+                    }
+                return sprint_data[name]
+
+            for b in bugs_raw:
+                f = b.get("fields") or {}
+                sprints = f.get("customfield_10020") or []
+                sp = sprints[-1] if sprints else None
+                name  = sp.get("name", "No Sprint")  if isinstance(sp, dict) else "No Sprint"
+                state = sp.get("state", "")           if isinstance(sp, dict) else ""
+                sid   = str(sp.get("id", ""))         if isinstance(sp, dict) else ""
+                entry = _ensure(name, state, sid)
+                entry["bugs_total"] += 1
+                status_cat = ((f.get("status") or {}).get("statusCategory") or {}).get("name", "")
+                if status_cat != "Done":
+                    entry["bugs_open"] += 1
+
+            for s in stories_raw:
+                f = s.get("fields") or {}
+                sprints = f.get("customfield_10020") or []
+                sp = sprints[-1] if sprints else None
+                name  = sp.get("name", "No Sprint")  if isinstance(sp, dict) else "No Sprint"
+                state = sp.get("state", "")           if isinstance(sp, dict) else ""
+                sid   = str(sp.get("id", ""))         if isinstance(sp, dict) else ""
+                entry = _ensure(name, state, sid)
+                entry["stories_total"] += 1
+                status_name = (f.get("status") or {}).get("name", "")
+                if status_name in ("Done", "DONE"):
+                    entry["stories_done"] += 1
+
+            return sorted(sprint_data.values(), key=lambda x: x["sprint_name"])
+
+        return await self.cache.get_or_fetch(cache_key, fetch, ttl=300)
+
     async def get_allocation_items(
         self,
         version: str | None = None,

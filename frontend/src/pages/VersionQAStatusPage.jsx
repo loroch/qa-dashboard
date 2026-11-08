@@ -21,6 +21,7 @@ const searchIssues     = (q) => api.get('/coverage/search-issues',        { para
 const getBugsByEpicKey = (k) => api.get('/dashboard/bugs-by-epic',        { params: { epic_key: k } })
 const getRecentBugs    = (d) => api.get('/dashboard/recent-bugs',         { params: { days: d } })
 const getSprints       = (v) => api.get('/dashboard/sprints',             { params: { version: v } })
+const getSprintSummary = (v) => api.get('/dashboard/sprint-summary',      { params: { version: v } })
 const getQAActivity    = (v, s, d, e) => api.get('/dashboard/qa-activity', { params: { version: v, sprint: s || undefined, days: d, epic_key: e || undefined } })
 const getEpics         = ()          => api.get('/dashboard/epics')
 const getHandoverItems = (v)         => api.get('/dashboard/handover-items', { params: { version: v } })
@@ -2273,6 +2274,56 @@ function ExtraEpicRow({ epicKey, jiraBaseUrl, onRemove }) {
   )
 }
 
+// ── Sprint Timeline Chart ─────────────────────────────────────────────────────
+function SprintTimelineChart({ data, selectedSprints }) {
+  if (!data?.length) return null
+
+  const chartData = data
+    .filter(d => !selectedSprints?.size || selectedSprints.has(d.sprint_name))
+    .map(d => ({
+      ...d,
+      stories_pending: Math.max(0, (d.stories_total || 0) - (d.stories_done || 0)),
+      bugs_closed:     Math.max(0, (d.bugs_total    || 0) - (d.bugs_open    || 0)),
+      shortName:       d.sprint_name.replace(/^.*?(?:Sprint\s*|S-)(\d+\w*)$/i, 'S$1')
+                                    .replace(/^K1-S-[\d.]+[-_]/, '')
+                                    .slice(0, 14),
+    }))
+
+  if (!chartData.length) return null
+
+  const hasStories = chartData.some(d => d.stories_total > 0)
+  const hasBugs    = chartData.some(d => d.bugs_total    > 0)
+
+  return (
+    <div className="bg-white border border-gray-100 rounded-xl shadow-sm overflow-hidden">
+      <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-100 bg-gray-50">
+        <BarChart2 className="h-4 w-4 text-gray-500" />
+        <span className="text-sm font-semibold text-gray-700">Sprint Timeline</span>
+        <span className="ml-auto text-xs text-gray-400">{chartData.length} sprint{chartData.length !== 1 ? 's' : ''}</span>
+      </div>
+      <div className="p-4" style={{ height: 300 }}>
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 10, right: 20, left: 0, bottom: 60 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+            <XAxis dataKey="shortName" tick={{ fontSize: 10, fill: '#6b7280' }} angle={-40} textAnchor="end" interval={0} />
+            <YAxis tick={{ fontSize: 10, fill: '#6b7280' }} allowDecimals={false} />
+            <Tooltip
+              contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e5e7eb' }}
+              formatter={(val, name) => [val, name]}
+              labelFormatter={(_label, payload) => payload?.[0]?.payload?.sprint_name || _label}
+            />
+            <Legend iconSize={10} wrapperStyle={{ fontSize: 11, paddingTop: 8 }} />
+            {hasStories && <Bar dataKey="stories_done"    name="Stories Done"    fill="#22c55e" stackId="stories" radius={[0,0,0,0]} />}
+            {hasStories && <Bar dataKey="stories_pending" name="Stories Pending" fill="#93c5fd" stackId="stories" radius={[2,2,0,0]} />}
+            {hasBugs    && <Bar dataKey="bugs_open"       name="Bugs Open"       fill="#f97316" stackId="bugs"    radius={[0,0,0,0]} />}
+            {hasBugs    && <Bar dataKey="bugs_closed"     name="Bugs Closed"     fill="#d1d5db" stackId="bugs"    radius={[2,2,0,0]} />}
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
+  )
+}
+
 // ── Page ──────────────────────────────────────────────────────────────────────
 export default function VersionQAStatusPage() {
   const [version, setVersion]    = useState('')
@@ -2291,6 +2342,20 @@ export default function VersionQAStatusPage() {
   const [showEpicDrop, setShowEpicDrop] = useState(false)
   const epicSearchRef = useRef(null)
 
+  // Sprint filter state
+  const [selectedSprints, setSelectedSprints] = useState(new Set())
+  const [showSprintDrop, setShowSprintDrop]   = useState(false)
+  const sprintDropRef = useRef(null)
+
+  const toggleSprint = useCallback((name) => {
+    setSelectedSprints(prev => {
+      const next = new Set(prev)
+      if (next.has(name)) next.delete(name)
+      else next.add(name)
+      return next
+    })
+  }, [])
+
   useEffect(() => {
     try { localStorage.setItem('qa-status:combinedEpic', JSON.stringify(combinedEpic)) } catch {}
   }, [combinedEpic])
@@ -2307,9 +2372,12 @@ export default function VersionQAStatusPage() {
     return () => clearTimeout(t)
   }, [epicSearchText])
 
-  // Close search dropdown on outside click
+  // Close search dropdowns on outside click
   useEffect(() => {
-    const handler = e => { if (epicSearchRef.current && !epicSearchRef.current.contains(e.target)) setShowEpicDrop(false) }
+    const handler = e => {
+      if (epicSearchRef.current && !epicSearchRef.current.contains(e.target)) setShowEpicDrop(false)
+      if (sprintDropRef.current && !sprintDropRef.current.contains(e.target)) setShowSprintDrop(false)
+    }
     document.addEventListener('mousedown', handler)
     return () => document.removeEventListener('mousedown', handler)
   }, [])
@@ -2344,6 +2412,20 @@ export default function VersionQAStatusPage() {
     staleTime: 5 * 60 * 1000,
   })
 
+  const sprintsQ = useQuery({
+    queryKey: ['qa-sprints', version],
+    queryFn:  () => getSprints(version),
+    enabled,
+    staleTime: 10 * 60 * 1000,
+  })
+  const sprintSummaryQ = useQuery({
+    queryKey: ['qa-sprint-summary', version, refreshKey],
+    queryFn:  () => getSprintSummary(version),
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  })
+  const sprints = useMemo(() => sprintsQ.data?.sprints || [], [sprintsQ.data])
+
   const cov      = coverageQ.data
   const bugs     = bugsQ.data
   const reg      = regressionQ.data
@@ -2358,20 +2440,21 @@ export default function VersionQAStatusPage() {
     return [...vBugs, ...eBugs.filter(b => !seen.has(b.key))]
   }, [bugs, combinedEpicBugsQ.data])
 
+  // Client-side sprint filter on the deduplicated bug set
+  const sprintFilteredBugs = useMemo(() => {
+    if (!selectedSprints.size) return allBugs
+    return allBugs.filter(b => b.sprint && selectedSprints.has(b.sprint.name))
+  }, [allBugs, selectedSprints])
+
   const bugStats = useMemo(() => {
     const base = bugs?.stats || {}
-    if (!combinedEpicBugsQ.data?.bugs?.length) return base
-    // Derive tile counts from the deduplicated allBugs array to avoid double-counting
-    // bugs that appear in both the fixVersion set and the epic's children
-    const open = allBugs.filter(b => b.status_category !== 'Done').length
-    const highCrit = allBugs.filter(b => b.priority === 'Highest' || b.priority === 'High' || b.priority === 'Critical').length
-    return {
-      ...base,
-      total:         allBugs.length,
-      open,
-      high_critical: highCrit,
-    }
-  }, [bugs, combinedEpicBugsQ.data, allBugs])
+    const src  = sprintFilteredBugs
+    if (!combinedEpicBugsQ.data?.bugs?.length && !selectedSprints.size) return base
+    const open     = src.filter(b => b.status_category !== 'Done').length
+    const highCrit = src.filter(b => b.priority === 'Highest' || b.priority === 'High' || b.priority === 'Critical').length
+    return { ...base, total: src.length, open, high_critical: highCrit }
+  }, [bugs, combinedEpicBugsQ.data, sprintFilteredBugs, selectedSprints])
+
   const isLoading = coverageQ.isLoading || bugsQ.isLoading || regressionQ.isLoading || bugsByEpicQ.isLoading
 
   // Merge base version summary with combined epic summary
@@ -2510,6 +2593,61 @@ export default function VersionQAStatusPage() {
               <div className="h-3.5 w-3.5 border-2 border-indigo-300 border-t-indigo-600 rounded-full animate-spin" />
             )}
           </div>
+
+          {/* Sprint multi-select filter */}
+          {version && (
+            <div className="flex items-center gap-2 ml-4 pl-4 border-l border-gray-200" ref={sprintDropRef}>
+              <label className="text-sm font-medium text-gray-500 whitespace-nowrap">Sprints</label>
+              <div className="relative">
+                <button
+                  onClick={() => setShowSprintDrop(d => !d)}
+                  className="flex items-center gap-1.5 border border-gray-200 rounded-lg px-3 py-1.5 text-sm text-gray-600 bg-white hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-indigo-300 min-w-[110px]"
+                >
+                  <span className="flex-1 text-left">
+                    {selectedSprints.size === 0 ? 'All sprints' : `${selectedSprints.size} selected`}
+                  </span>
+                  <ChevronDown className="h-3.5 w-3.5 text-gray-400 flex-shrink-0" />
+                </button>
+                {showSprintDrop && (
+                  <div className="absolute z-50 top-full mt-1 left-0 bg-white border border-gray-200 rounded-xl shadow-xl max-h-64 overflow-y-auto w-60">
+                    <div className="sticky top-0 bg-white border-b border-gray-100 px-3 py-2 flex items-center justify-between">
+                      <span className="text-xs font-semibold text-gray-500">Select Sprints</span>
+                      {selectedSprints.size > 0 && (
+                        <button onClick={() => setSelectedSprints(new Set())}
+                          className="text-xs text-red-400 hover:text-red-600 font-medium">Clear all</button>
+                      )}
+                    </div>
+                    {sprints.length === 0 && (
+                      <p className="px-3 py-3 text-xs text-gray-400 text-center">
+                        {sprintsQ.isLoading ? 'Loading…' : 'No sprints found'}
+                      </p>
+                    )}
+                    {sprints.map(sp => (
+                      <label key={sp.id} className="flex items-center gap-2 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+                        <input type="checkbox"
+                          checked={selectedSprints.has(sp.name)}
+                          onChange={() => toggleSprint(sp.name)}
+                          className="rounded text-indigo-600 focus:ring-indigo-500 flex-shrink-0"
+                        />
+                        <span className="text-xs text-gray-700 flex-1 truncate" title={sp.name}>{sp.name}</span>
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded flex-shrink-0 ${
+                          sp.state === 'active' ? 'bg-green-100 text-green-700' :
+                          sp.state === 'future' ? 'bg-blue-100 text-blue-700' :
+                          'bg-gray-100 text-gray-500'
+                        }`}>{sp.state}</span>
+                      </label>
+                    ))}
+                  </div>
+                )}
+              </div>
+              {selectedSprints.size > 0 && (
+                <button onClick={() => setSelectedSprints(new Set())}
+                  className="text-gray-300 hover:text-red-400 transition-colors" title="Clear sprint filter">
+                  <X className="h-4 w-4" />
+                </button>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Tab bar */}
@@ -2557,6 +2695,11 @@ export default function VersionQAStatusPage() {
             <Tile label="High / Critical" value={bugStats.high_critical} color="red"
               href={version ? jiraFilter(jiraBaseUrl, `issuetype = Bug AND ${bugScope} AND priority in (Highest, High) ORDER BY status ASC`) : null} />
           </div>
+        )}
+
+        {/* Sprint timeline chart */}
+        {sprintSummaryQ.data?.length > 0 && (
+          <SprintTimelineChart data={sprintSummaryQ.data} selectedSprints={selectedSprints} />
         )}
 
         {/* Story resolution bar */}
@@ -2628,7 +2771,7 @@ export default function VersionQAStatusPage() {
                 <span className="text-sm font-semibold text-red-800">Bug Breakdown</span>
                 {bugs && (
                   <>
-                    <span className="ml-auto text-xs text-gray-400">{allBugs.length} total</span>
+                    <span className="ml-auto text-xs text-gray-400">{sprintFilteredBugs.length} total{selectedSprints.size > 0 ? ` (${selectedSprints.size} sprint${selectedSprints.size > 1 ? 's' : ''})` : ''}</span>
                     <a href={jiraFilter(jiraBaseUrl,`issuetype = Bug AND ${bugScope} ORDER BY priority DESC`)}
                        target="_blank" rel="noopener noreferrer"
                        className="text-xs text-red-600 hover:underline flex items-center gap-0.5 ml-2">
@@ -2645,8 +2788,8 @@ export default function VersionQAStatusPage() {
                     <CheckCircle2 className="h-4 w-4 text-green-500" /> No bugs for this version
                   </p>
                 )}
-                {bugs && allBugs.length>0 && (
-                  <BugBreakdown bugs={allBugs} version={version} jiraBaseUrl={jiraBaseUrl} combinedEpicKey={combinedEpic?.key} />
+                {bugs && sprintFilteredBugs.length>0 && (
+                  <BugBreakdown bugs={sprintFilteredBugs} version={version} jiraBaseUrl={jiraBaseUrl} combinedEpicKey={combinedEpic?.key} />
                 )}
               </div>
             </div>
@@ -2693,8 +2836,8 @@ export default function VersionQAStatusPage() {
         </div>
 
         {/* Recently Opened Bugs */}
-        {bugs && allBugs.length > 0 && (
-          <RecentBugsPanel bugs={allBugs} version={version} jiraBaseUrl={jiraBaseUrl} />
+        {bugs && sprintFilteredBugs.length > 0 && (
+          <RecentBugsPanel bugs={sprintFilteredBugs} version={version} jiraBaseUrl={jiraBaseUrl} />
         )}
 
         </>} {/* end overview tab */}
@@ -2702,7 +2845,7 @@ export default function VersionQAStatusPage() {
         {/* ── Daily QA Summary tab ─────────────────────────────────────────── */}
         {activeTab === 'daily-qa' && (
           version
-            ? <DailyQASummaryPanel version={version} jiraBaseUrl={jiraBaseUrl} allBugs={allBugs} />
+            ? <DailyQASummaryPanel version={version} jiraBaseUrl={jiraBaseUrl} allBugs={sprintFilteredBugs} />
             : <p className="text-sm text-gray-400 text-center py-12">Select a version above to view the Daily QA Summary</p>
         )}
 

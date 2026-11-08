@@ -123,6 +123,20 @@ async def get_sprints(version: str = Query(..., description="Fix version name"))
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/sprint-summary")
+async def get_sprint_summary(
+    version: str = Query(..., description="Fix version name"),
+    refresh: bool = Query(False),
+):
+    """Per-sprint story + bug counts for a fix version (for timeline chart)."""
+    try:
+        svc = get_dashboard_service()
+        return await svc.get_sprint_summary(version, force_refresh=refresh)
+    except Exception as e:
+        logger.error(f"sprint-summary error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/qa-activity")
 async def get_qa_activity(
     version:   str           = Query(...,  description="Fix version name"),
