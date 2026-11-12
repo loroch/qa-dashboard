@@ -55,7 +55,8 @@ TEST_SCHEMA = {
 }
 
 
-async def _claude(prompt: str, schema: dict, max_tokens: int = 12000) -> dict:
+async def _claude(prompt, schema: dict, max_tokens: int = 12000) -> dict:
+    """prompt: a string, or a list of content blocks (text + images)."""
     s = get_settings()
     if not s.anthropic_api_key:
         raise ValueError("ANTHROPIC_API_KEY is not set")
@@ -246,6 +247,121 @@ data named 'QA-HUB <timestamp>' and clean it up in a final step. Keep it under 1
         data = await _claude(prompt, schema, max_tokens=8000)
         data["issue_key"] = d["key"]
         data["name"] = f"{d['key']} — {d['summary'][:80]}"
+        return data
+
+    # ------------------------------------------------------------------
+    async def explain_failure(self, run_id: int, refresh: bool = False) -> dict:
+        """Why a lab run failed: product bug, script problem, environment or test data — with the evidence,
+        a corrected script when the script is at fault, and a bug draft when the product is."""
+        from app.services.nextgen_lab_service import get_nextgen_lab_service
+        lab = get_nextgen_lab_service()
+        run = await lab.get_run(run_id)
+        if not run:
+            raise ValueError(f"No lab run #{run_id}")
+        if run["status"] in ("pending", "running"):
+            raise ValueError("The run is still in progress")
+        res = run.get("result") or {}
+        if res.get("explanation") and not refresh:
+            return res["explanation"]
+        if run["status"] == "passed":
+            raise ValueError("This run passed — nothing to explain")
+
+        steps = res.get("steps") or []
+        failed = next((s for s in steps if not s.get("ok")), None)
+        step_lines = "\n".join(f"  {'OK  ' if s.get('ok') else 'FAIL'} {s.get('name')} ({s.get('ms')} ms) {s.get('url', '')}"
+                               for s in steps) or "  (no step completed)"
+        ticket = ""
+        if run.get("issue_key"):
+            try:
+                d = await self.hub.issue_detail(run["issue_key"])
+                ticket = (f"\nTICKET {d['key']} ({d['type']}, {d.get('status', '')}): {d['summary']}\n"
+                          f"{(d.get('description') or '')[:4000]}\n")
+                ux = self.hub.ux_context(d["key"])
+                if ux:
+                    ticket += f"\nUX REFERENCE (agreed acceptance criteria):\n{ux[:5000]}\n"
+                code = d.get("code_state") or (d.get("row") or {}).get("code_state")
+                if code:
+                    ticket += f"Code state of the ticket: {code} (is the change deployed on the environment?)\n"
+            except Exception as exc:  # the explanation is still useful without the ticket
+                ticket = f"\n(ticket {run['issue_key']} could not be read: {exc})\n"
+
+        log_tail = (run.get("log") or "")[-6000:]
+        prompt_text = f"""A Playwright run against the K1-NG dev environment ({run.get('env_url')}) failed. Explain why to a QA engineer.
+
+RUN #{run['id']} "{run['name']}" — status {run['status']}
+{ticket}
+STEPS:
+{step_lines}
+
+FAILED STEP: {(failed or {}).get('name', '(none — the script failed outside a step)')}
+ERROR: {(failed or {}).get('detail') or (failed or {}).get('error') or res.get('error') or '(none)'}
+PAGE AT FAILURE: {(failed or {}).get('url', '')}  title: {(failed or {}).get('title', '')}
+
+ACCESSIBILITY OUTLINE OF THE PAGE AT FAILURE (what the user could actually see/click):
+{((failed or {}).get('outline') or '(not captured)')[:10000]}
+
+FAILED API CALLS (status method path):
+{chr(10).join(sorted(set(res.get('failedRequests') or []))[:60]) or '(none)'}
+
+BROWSER CONSOLE ERRORS:
+{chr(10).join(sorted(set(res.get('console') or []))[:40]) or '(none)'}
+
+SCRIPT:
+{run.get('script', '')[:12000]}
+
+LOG (tail):
+{log_tail}
+
+Harness facts: login(), open(route) (waits for the rendered shell, never networkidle — the app keeps SSE streams
+open), step(), expect.visible/text/ok with 15 s default timeouts; locator.waitFor timing out usually means the
+element the script looked for is not on the page — compare the selector with the outline and screenshot.
+
+Decide the most likely verdict:
+- product_bug: the app misbehaves vs the ticket/UX spec (wrong data, 4xx/5xx from the API on a valid action, broken page)
+- not_deployed: the feature the script checks is not on the environment yet (ticket code not deployed)
+- script_issue: the app looks fine but the script used a wrong selector/route/text/timing or a wrong assumption
+- environment: environment down/slow, auth/session, certificate, infrastructure
+- test_data: missing or unexpected data or permissions for the QA account
+- unclear: the evidence is not enough — say what to look at
+Base every claim on the evidence above (quote the selector, the outline line, the API call). If the script is at fault,
+return a corrected FULL script body in fixed_script (same harness API, keep the passing steps); otherwise fixed_script is "".
+If it is a product bug, fill bug with a ready-to-file draft; otherwise leave its fields empty."""
+        content: list = [{"type": "text", "text": prompt_text}]
+        if failed and failed.get("shot"):
+            p = lab.screenshot_path(run_id, failed["shot"])
+            if p.exists():
+                import base64
+                content.insert(0, {"type": "image", "source": {"type": "base64", "media_type": "image/png",
+                                                               "data": base64.b64encode(p.read_bytes()).decode()}})
+                content.insert(1, {"type": "text", "text": "Screenshot of the page when the step failed."})
+
+        schema = {
+            "type": "object",
+            "properties": {
+                "verdict": {"type": "string", "enum": ["product_bug", "not_deployed", "script_issue", "environment",
+                                                       "test_data", "unclear"]},
+                "confidence": {"type": "string", "enum": ["high", "medium", "low"]},
+                "summary": {"type": "string"},
+                "what_happened": {"type": "string"},
+                "evidence": {"type": "array", "items": {"type": "string"}},
+                "root_cause": {"type": "string"},
+                "next_steps": {"type": "array", "items": {"type": "string"}},
+                "fixed_script": {"type": "string"},
+                "fix_explanation": {"type": "string"},
+                "bug": {"type": "object", "properties": {
+                    "title": {"type": "string"}, "steps": {"type": "array", "items": {"type": "string"}},
+                    "expected": {"type": "string"}, "actual": {"type": "string"}, "severity": {"type": "string"}},
+                    "required": ["title", "steps", "expected", "actual", "severity"], "additionalProperties": False},
+            },
+            "required": ["verdict", "confidence", "summary", "what_happened", "evidence", "root_cause", "next_steps",
+                         "fixed_script", "fix_explanation", "bug"],
+            "additionalProperties": False,
+        }
+        data = await _claude(content, schema, max_tokens=12000)
+        data["failed_step"] = (failed or {}).get("name")
+        data["generated_at"] = datetime.now(timezone.utc).isoformat()
+        data["model"] = AI_MODEL
+        await lab.save_explanation(run_id, data)
         return data
 
     # ------------------------------------------------------------------

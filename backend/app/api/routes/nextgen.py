@@ -10,6 +10,7 @@ GET  /notifications  POST /notifications/read[/{id}]
 POST /ai/briefing  POST /ai/alt-tests  POST /ai/lab-script
 GET  /slack                    GET|POST /slack/summary (AI digest)   POST /slack/summary/action (tick done)
 GET  /lab/templates  GET /lab/runs  POST /lab/runs  GET /lab/runs/{id}  GET /lab/runs/{id}/shot/{n}
+POST /lab/runs/{id}/explain    AI: why the run failed (bug / script / env / data) + fixed script / bug draft
 """
 import asyncio
 import logging
@@ -214,6 +215,13 @@ async def lab_run_detail(run_id: int):
     if not run:
         raise HTTPException(status_code=404, detail="No such run")
     return run
+
+
+@router.post("/lab/runs/{run_id}/explain")
+async def lab_explain(run_id: int, body: Optional[dict] = None):
+    """AI explanation of a failed run (cached on the run; {"refresh": true} asks again)."""
+    return await _guard(get_nextgen_ai_service().explain_failure(run_id, bool((body or {}).get("refresh"))),
+                        "Failure explanation")
 
 
 @router.get("/lab/runs/{run_id}/shot/{n}")

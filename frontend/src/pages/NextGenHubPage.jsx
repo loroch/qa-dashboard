@@ -775,6 +775,77 @@ function Environment({ snap }) {
 
 // ---------------------------------------------------------------- playwright lab
 
+const VERDICT = {
+  product_bug: ['Product bug', 'red'], not_deployed: ['Not deployed yet', 'purple'], script_issue: ['Script issue', 'amber'],
+  environment: ['Environment', 'blue'], test_data: ['Test data / permissions', 'blue'], unclear: ['Unclear', 'gray'],
+}
+
+function bugText(b, run) {
+  return [`${b.title}`, '', `Found by NextGen QA Hub lab run #${run.id} on ${run.env_url}${run.issue_key ? ` (${run.issue_key})` : ''}`,
+    `Severity: ${b.severity}`, '', 'Steps to reproduce:', ...b.steps.map((s, i) => `${i + 1}. ${s}`), '',
+    `Expected: ${b.expected}`, `Actual: ${b.actual}`].join('\n')
+}
+
+function FailureExplanation({ run, onApplyScript, autoRef }) {
+  const qc = useQueryClient()
+  const [copied, setCopied] = useState('')
+  const stored = run.result?.explanation
+  const explain = useMutation({
+    mutationFn: (refresh) => post(`/lab/runs/${run.id}/explain`, { refresh: !!refresh }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['ng-lab-run', run.id] }),
+  })
+  if (autoRef) autoRef.current = () => { if (!explain.isPending) explain.mutate(false) }
+  const x = explain.data || stored
+  const copy = (what, text) => { navigator.clipboard.writeText(text); setCopied(what); setTimeout(() => setCopied(''), 1500) }
+  const [label, tone] = VERDICT[x?.verdict] || VERDICT.unclear
+  return (
+    <div className="border-2 border-amber-300 dark:border-amber-600/60 bg-amber-50/60 dark:bg-amber-900/10 rounded p-3 text-xs space-y-2">
+      <div className="flex flex-wrap items-center gap-2">
+        <Sparkles className="h-4 w-4 text-amber-600" />
+        <span className="font-semibold text-sm flex-1">Why did it fail?</span>
+        {!x && <button className="btn-primary text-xs flex items-center gap-1" disabled={explain.isPending} onClick={() => explain.mutate(false)}>
+          {explain.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+          {explain.isPending ? 'Analysing the screenshot, page and log…' : 'Explain failure'}</button>}
+        {x && <button className="text-brand-600 hover:underline flex items-center gap-1" disabled={explain.isPending} onClick={() => explain.mutate(true)}>
+          <RefreshCw className={`h-3 w-3 ${explain.isPending ? 'animate-spin' : ''}`} />Ask again</button>}
+      </div>
+      {!x && !explain.isPending && <p className="text-gray-600 dark:text-slate-400">Claude reads the failure screenshot, what was on the page, the failed API calls, console errors, the script and the ticket, and says whether it is a product bug, a script problem, the environment or test data — with a fixed script or a bug draft.</p>}
+      <ErrorBox error={explain.error} />
+      {x && (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <Pill tone={tone}>{label}</Pill><Pill>{x.confidence} confidence</Pill>
+            {x.failed_step && <span className="text-gray-500">step “{x.failed_step}”</span>}
+          </div>
+          <p className="text-sm font-medium">{x.summary}</p>
+          <p>{x.what_happened}</p>
+          {x.root_cause && <p><b>Root cause:</b> {x.root_cause}</p>}
+          {!!x.evidence?.length && <><p className="font-medium">Evidence</p><ul className="list-disc ml-4 space-y-0.5">{x.evidence.map((e, i) => <li key={i}>{e}</li>)}</ul></>}
+          {!!x.next_steps?.length && <><p className="font-medium">Next steps</p><ol className="list-decimal ml-4 space-y-0.5">{x.next_steps.map((e, i) => <li key={i}>{e}</li>)}</ol></>}
+          {x.fixed_script && (
+            <div className="space-y-1">
+              <p className="font-medium">Suggested script fix</p>
+              {x.fix_explanation && <p>{x.fix_explanation}</p>}
+              <div className="flex gap-2">
+                <button className="btn-secondary text-xs flex items-center gap-1" onClick={() => onApplyScript(x.fixed_script)}><Wand2 className="h-3 w-3" />Load the fixed script</button>
+                <button className="btn-secondary text-xs flex items-center gap-1" onClick={() => copy('script', x.fixed_script)}><Copy className="h-3 w-3" />{copied === 'script' ? 'Copied' : 'Copy'}</button>
+              </div>
+            </div>
+          )}
+          {x.bug?.title && (
+            <div className="space-y-1 border-t border-amber-200 dark:border-amber-700/40 pt-2">
+              <p className="font-medium">Bug draft <span className="font-normal text-gray-500">(not filed — review it, then file it in Jira yourself)</span></p>
+              <pre className="whitespace-pre-wrap bg-white dark:bg-slate-900 rounded p-2 border border-gray-200 dark:border-slate-700">{bugText(x.bug, run)}</pre>
+              <button className="btn-secondary text-xs flex items-center gap-1" onClick={() => copy('bug', bugText(x.bug, run))}><Copy className="h-3 w-3" />{copied === 'bug' ? 'Copied' : 'Copy bug text'}</button>
+            </div>
+          )}
+          <p className="text-gray-400">{x.model} · {ago(x.generated_at)}</p>
+        </>
+      )}
+    </div>
+  )
+}
+
 function Lab({ draft, clearDraft, jiraBase }) {
   const qc = useQueryClient()
   const tpl = useQuery({ queryKey: ['ng-lab-tpl'], queryFn: () => get('/lab/templates') })
@@ -807,6 +878,7 @@ function Lab({ draft, clearDraft, jiraBase }) {
     queryKey: ['ng-lab-run', runId], enabled: !!runId, queryFn: () => get(`/lab/runs/${runId}`),
     refetchInterval: (q) => (['pending', 'running'].includes(q.state.data?.status) ? 1500 : false),
   })
+  const explainRef = useRef(null)
   const logRef = useRef(null)
   useEffect(() => { if (logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight }, [detail.data?.log])
   const sel = 'border border-gray-300 dark:border-slate-600 dark:bg-slate-800 rounded px-2 py-1 text-xs'
@@ -859,6 +931,10 @@ function Lab({ draft, clearDraft, jiraBase }) {
             <div className="space-y-3">
               <pre ref={logRef} className="bg-slate-950 text-slate-200 text-[11px] rounded p-2 h-48 overflow-auto whitespace-pre-wrap">{d.log || 'Starting…'}</pre>
               {res?.error && <ErrorBox error={res.error} />}
+              {['failed', 'error'].includes(d.status) && (
+                <FailureExplanation key={d.id} run={d} autoRef={explainRef}
+                                    onApplyScript={(s) => { setScript(s); setName(d.name); setIssueKey(d.issue_key || '') }} />
+              )}
               {res?.steps && (
                 <div className="space-y-2">
                   {res.steps.map((s, i) => (
@@ -867,6 +943,8 @@ function Lab({ draft, clearDraft, jiraBase }) {
                       <div className="flex-1 text-xs">
                         <p className="font-medium">{s.name} <span className="text-gray-500 font-normal">{s.ms} ms</span></p>
                         {s.error && <p className="text-red-600 dark:text-red-400">{s.error}</p>}
+                        {!s.ok && !res.explanation && <button className="text-brand-600 hover:underline flex items-center gap-1 mt-0.5" onClick={() => explainRef.current?.()}>
+                          <Sparkles className="h-3 w-3" />Why did this step fail?</button>}
                         <p className="text-gray-400 truncate">{s.url}</p>
                       </div>
                       {s.shot && <a href={`${BASE_URL}/nextgen/lab/runs/${d.id}/shot/${s.shot}`} target="_blank" rel="noreferrer">

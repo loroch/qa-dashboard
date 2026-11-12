@@ -63,7 +63,13 @@ const log = (...a) => console.log('[lab]', ...a);
       log(`  ok (${Date.now() - t0} ms)`);
     } catch (e) {
       const msg = String((e && e.message) || e).split('\n')[0].slice(0, 600);
-      out.steps.push({ name, ok: false, ms: Date.now() - t0, error: msg, shot: await snap(), url: page.url() });
+      const detail = String((e && e.message) || e).slice(0, 2500);
+      // what the page actually offered at the moment of failure — the "Explain failure" AI reads it
+      let outline = '';
+      try { outline = await page.locator('body').ariaSnapshot({ timeout: 5000 }); }
+      catch (_) { outline = await page.locator('body').innerText({ timeout: 3000 }).catch(() => ''); }
+      out.steps.push({ name, ok: false, ms: Date.now() - t0, error: msg, detail, outline: String(outline).slice(0, 12000),
+                       shot: await snap(), url: page.url(), title: await page.title().catch(() => '') });
       log('  FAILED:', msg);
       throw e;
     }
@@ -258,6 +264,14 @@ class NextGenLabService:
                 "log": "\n".join(live) if live is not None else (r.log_output or ""),
                 "result": json.loads(r.result_json) if r.result_json else None,
                 "created_at": _iso(r.created_at), "finished_at": _iso(r.finished_at)}
+
+    async def save_explanation(self, run_id: int, explanation: dict) -> None:
+        async with get_session_factory()() as session:
+            r = await session.get(NextGenLabRunORM, run_id)
+            res = json.loads(r.result_json) if r.result_json else {}
+            res["explanation"] = explanation
+            r.result_json = json.dumps(res)
+            await session.commit()
 
     async def list_runs(self, limit: int = 50) -> list[dict]:
         async with get_session_factory()() as session:
