@@ -114,7 +114,7 @@ class Settings(BaseSettings):
     nextgen_jira_project: str = Field("K1NG")
     nextgen_poll_minutes: int = Field(15, description="Background refresh of the hub snapshot")
     slack_bot_token: str = Field("", description="Slack bot token (channels:history, channels:read, users:read)")
-    nextgen_slack_channels: str = Field("next-gen*", description="Comma-separated names or patterns")
+    nextgen_slack_channels: str = Field("*next-gen*,*nextgen*,*next_gen*,k1-ng*,k1ng*", description="Comma-separated names or patterns")
     xai_api_key: str = Field("", description="xAI (Grok) API key for the alternative-test advisor")
     xai_model: str = Field("grok-4")
     xai_base_url: str = Field("https://api.x.ai/v1")

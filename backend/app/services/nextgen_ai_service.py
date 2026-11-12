@@ -371,15 +371,21 @@ If it is a product bug, fill bug with a ready-to-file draft; otherwise leave its
         cannot be read, and missing scopes, are reported as setup hints rather than errors."""
         cfg = await self.hub.get_config(reveal=True)
         sl = cfg["slack"]
-        if not sl.get("token"):
+        # A user token (xoxp-) reads with that person's own access: every private channel they are in.
+        # A bot token (xoxb-) sees private channels only after /invite.
+        token = sl.get("user_token") or sl.get("token")
+        as_user = bool(sl.get("user_token"))
+        if not token:
             return {"configured": False, "channels": []}
         days = days or int(sl.get("days") or 3)
-        patterns = [c.strip().lstrip("#") for c in (sl.get("channels") or "").split(",") if c.strip()]
-        headers = {"Authorization": f"Bearer {sl['token']}"}
+        patterns = [c.strip().lstrip("#").lower() for c in (sl.get("channels") or "").split(",") if c.strip()]
+        headers = {"Authorization": f"Bearer {token}"}
         oldest = str((datetime.now(timezone.utc) - timedelta(days=days)).timestamp())
         hints = []
         async with httpx.AsyncClient(base_url="https://slack.com/api", headers=headers, timeout=30) as c:
             auth = (await c.post("/auth.test")).json()
+            if not auth.get("ok"):
+                raise RuntimeError(f"Slack {'user' if as_user else 'bot'} token rejected: {auth.get('error')}")
             workspace = (auth.get("url") or "").rstrip("/")
             channels, cursor, scopes = [], None, ""
             while True:
@@ -395,24 +401,38 @@ If it is a product bug, fill bug with a ready-to-file draft; otherwise leave its
                 cursor = (r.get("response_metadata") or {}).get("next_cursor")
                 if not cursor:
                     break
+            who = "your user token" if as_user else "the bot token"
             if "users:read" not in scopes:
-                hints.append("The bot token has no users:read scope, so authors show as Slack user IDs — add it and reinstall the app.")
+                hints.append(f"{who[0].upper() + who[1:]} has no users:read scope, so authors show as Slack user IDs — add it and reinstall the app.")
 
             def matches(ch):
-                return any(fnmatch.fnmatch(ch["name"], p) or ch["id"] == p for p in patterns)
+                name = ch["name"].lower()
+                return any(fnmatch.fnmatch(name, p) or ch["id"].lower() == p for p in patterns)
             selected = [ch for ch in channels if matches(ch)]
+            bot = auth.get("user") or "bot"
             for p in patterns:
-                if "*" not in p and not any(ch["name"] == p or ch["id"] == p for ch in channels):
-                    hints.append(f"#{p} is not visible to the bot — if it is private, run /invite @{auth.get('user') or 'bot'} in it.")
+                if "*" not in p and not any(ch["name"].lower() == p or ch["id"].lower() == p for ch in channels):
+                    hints.append(f"#{p} is not visible to {who}" + ("" if as_user else f" — if it is private, run /invite @{bot} in it."))
+
+            # public channels: the bot can join on its own when it has channels:join
+            for ch in selected:
+                if not ch.get("is_member") and not ch.get("is_private") and not as_user and "channels:join" in scopes:
+                    j = (await c.post("/conversations.join", data={"channel": ch["id"]})).json()
+                    ch["is_member"] = bool(j.get("ok"))
             not_member = [ch["name"] for ch in selected if not ch.get("is_member")]
-            if any("*" in p for p in patterns):
-                hints.append(f"Private channels appear only after /invite @{auth.get('user') or 'bot'} — "
-                             f"visible now: {', '.join('#' + ch['name'] for ch in selected) or 'none'}.")
+            if not as_user:
+                hints.append(f"The bot sees private channels only after /invite @{bot} (visible now: "
+                             f"{', '.join('#' + ch['name'] for ch in selected) or 'none'}). To read every next-gen "
+                             "channel you are in without inviting it, add a Slack user token in Settings.")
+                if any(not ch.get("is_private") for ch in selected if ch["name"] in not_member) and "channels:join" not in scopes:
+                    hints.append("Add the channels:join scope so the bot joins the public next-gen channels by itself "
+                                 f"({', '.join('#' + n for n in not_member)}), or /invite @{bot} there.")
             out = []
             for ch in sorted(selected, key=lambda x: x["name"]):
                 if not ch.get("is_member"):
-                    out.append({"name": ch["name"], "id": ch["id"], "messages": [],
-                                "error": f"the bot is not a member — /invite @{auth.get('user') or 'bot'} in #{ch['name']}"})
+                    out.append({"name": ch["name"], "id": ch["id"], "messages": [], "private": ch.get("is_private"),
+                                "error": ("you are not a member of this channel" if as_user else
+                                          f"the bot is not a member — /invite @{bot} in #{ch['name']}")})
                     continue
                 h = (await c.get("/conversations.history", params={"channel": ch["id"], "oldest": oldest, "limit": 300})).json()
                 if not h.get("ok"):
@@ -427,8 +447,8 @@ If it is a product bug, fill bug with a ready-to-file draft; otherwise leave its
                         rr = (await c.get("/conversations.replies", params={"channel": ch["id"], "ts": m["ts"], "limit": 100})).json()
                         msg["thread"] = [await self._slack_msg(c, x, workspace, ch["id"]) for x in rr.get("messages", [])[1:]]
                     msgs.append(msg)
-                out.append({"name": ch["name"], "id": ch["id"], "messages": msgs})
-        return {"configured": True, "days": days, "workspace": workspace, "bot": auth.get("user"),
+                out.append({"name": ch["name"], "id": ch["id"], "messages": msgs, "private": ch.get("is_private")})
+        return {"configured": True, "days": days, "workspace": workspace, "bot": auth.get("user"), "as_user": as_user,
                 "patterns": patterns, "channels": out, "hints": hints, "not_member": not_member}
 
     async def _slack_msg(self, c: httpx.AsyncClient, m: dict, workspace: str, channel_id: str) -> dict:
@@ -614,15 +634,17 @@ Every item cites the message ids it comes from in `refs` (e.g. ["M12","M14"]). U
             out["jira"] = {"ok": True, "detail": f"{p.get('key')} — {p.get('name')}"}
         except Exception as exc:
             out["jira"] = {"ok": False, "detail": str(exc)[:300]}
-        if cfg["slack"].get("token"):
+        slack_token = cfg["slack"].get("user_token") or cfg["slack"].get("token")
+        if slack_token:
+            kind = "user token" if cfg["slack"].get("user_token") else "bot"
             try:
                 async with httpx.AsyncClient(timeout=20) as c:
-                    r = (await c.post("https://slack.com/api/auth.test", headers={"Authorization": f"Bearer {cfg['slack']['token']}"})).json()
-                out["slack"] = {"ok": r.get("ok"), "detail": f"{r.get('team')} as {r.get('user')}" if r.get("ok") else r.get("error")}
+                    r = (await c.post("https://slack.com/api/auth.test", headers={"Authorization": f"Bearer {slack_token}"})).json()
+                out["slack"] = {"ok": r.get("ok"), "detail": f"{r.get('team')} as {r.get('user')} ({kind})" if r.get("ok") else r.get("error")}
             except Exception as exc:
                 out["slack"] = {"ok": False, "detail": str(exc)[:200]}
         else:
-            out["slack"] = {"ok": None, "detail": "no bot token"}
+            out["slack"] = {"ok": None, "detail": "no Slack token"}
         if cfg["grok"].get("api_key"):
             try:
                 async with httpx.AsyncClient(timeout=30) as c:

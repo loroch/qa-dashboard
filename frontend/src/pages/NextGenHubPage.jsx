@@ -1190,7 +1190,7 @@ function Slack({ openIssue }) {
         <span>Last</span>
         <select className={sel} value={days} onChange={e => setDays(Number(e.target.value))}>
           {[1, 3, 7, 14, 30].map(n => <option key={n} value={n}>{n} day{n > 1 ? 's' : ''}</option>)}</select>
-        <span className="text-xs text-gray-500">Channels matching <code>{(d.patterns || []).join(', ')}</code> · bot @{d.bot}</span>
+        <span className="text-xs text-gray-500">Channels matching <code>{(d.patterns || []).join(', ')}</code> · {d.as_user ? <>reading as <b>{d.bot}</b> (your user token)</> : <>bot @{d.bot}</>} · {d.channels.length} channel{d.channels.length === 1 ? '' : 's'}</span>
         {q.isFetching && <Loader2 className="h-4 w-4 animate-spin" />}
       </div>
       {!!d.hints?.length && (
@@ -1203,10 +1203,10 @@ function Slack({ openIssue }) {
         <h3 className="font-semibold text-sm">Messages</h3>
         <label className="text-xs flex items-center gap-1"><input type="checkbox" checked={alertsOnly} onChange={e => setAlertsOnly(e.target.checked)} />only messages with alerts or tickets</label>
       </div>
-      {!d.channels.length && <Card><p className="text-sm text-gray-500">No channel matches yet — invite the bot to the next-gen channels.</p></Card>}
+      {!d.channels.length && <Card><p className="text-sm text-gray-500">No next-gen channel is visible yet — add your Slack user token in Settings, or /invite the bot to the next-gen channels.</p></Card>}
       <div className="grid xl:grid-cols-2 gap-4">
         {d.channels.map(ch => (
-          <Card key={ch.id || ch.name} title={`#${ch.name}`} icon={MessageSquare} right={<span className="text-xs text-gray-500">{ch.messages.length} messages</span>}>
+          <Card key={ch.id || ch.name} title={`#${ch.name}${ch.private ? " (private)" : ""}`} icon={MessageSquare} right={<span className="text-xs text-gray-500">{ch.messages.length} messages</span>}>
             {ch.error && <ErrorBox error={ch.error} />}
             <div className="space-y-2 max-h-[38rem] overflow-auto">
               {ch.messages.filter(m => !alertsOnly || m.alerts.length || m.keys.length).map(m => <SlackMessage key={m.ts} m={m} openIssue={openIssue} />)}
@@ -1256,7 +1256,9 @@ const FIELDS = [
   ['repo', 'GitLab repository', [['path', 'Local clone path'], ['url', 'Clone URL'], ['token', 'GitLab token (read_repository) — only to clone', 'password'],
     ['main_branch', 'Main branch'], ['deploy_branch', 'Branch deployed to dev']]],
   ['jira', 'Jira', [['project', 'Project key']]],
-  ['slack', 'Slack', [['token', 'Bot token (xoxb-…)', 'password'], ['channels', 'Channels (comma separated)'], ['days', 'Days to show']]],
+  ['slack', 'Slack', [['token', 'Bot token (xoxb-…)', 'password'],
+    ['user_token', 'User token (xoxp-…) — optional: reads every private next-gen channel you are in, no invite needed', 'password'],
+    ['channels', 'Channels (comma separated, * wildcards, case-insensitive)'], ['days', 'Days to show']]],
   ['grok', 'Grok (xAI) test advisor', [['api_key', 'API key', 'password'], ['model', 'Model'], ['base_url', 'API base URL']]],
   ['ux', 'UX reference', [['url', 'Prototype URL (epic-by-epic UX spec)'], ['figma_file_key', 'Figma file key of the epic pages']]],
 ]

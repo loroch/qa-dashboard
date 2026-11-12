@@ -39,7 +39,7 @@ SETTINGS_KEY = "nextgen_settings"
 SNAPSHOT_KEY = "nextgen_last_snapshot"
 KEYMAP_KEY = "nextgen_key_map"
 MASK = "••••••••"
-SECRET_FIELDS = [("env", "password"), ("repo", "token"), ("slack", "token"), ("grok", "api_key")]
+SECRET_FIELDS = [("env", "password"), ("repo", "token"), ("slack", "token"), ("slack", "user_token"), ("grok", "api_key")]
 KEY_RE = re.compile(r"\b(K1NG|KNG)-(\d+)\b")
 MERGE_RE = re.compile(r"Merge branch '([^']+)' into")
 DATA_DIR = Path(__file__).parent.parent.parent / "data"
@@ -225,7 +225,7 @@ class NextGenHubService:
             "repo": {"path": s.nextgen_repo_path, "url": s.nextgen_repo_url, "token": s.nextgen_gitlab_token,
                      "main_branch": "main", "deploy_branch": "develop"},
             "jira": {"project": s.nextgen_jira_project},
-            "slack": {"token": s.slack_bot_token, "channels": s.nextgen_slack_channels, "days": 3},
+            "slack": {"token": s.slack_bot_token, "user_token": "", "channels": s.nextgen_slack_channels, "days": 3},
             "grok": {"api_key": s.xai_api_key, "model": s.xai_model, "base_url": s.xai_base_url},
             # The prototype that publishes the epic-by-epic UX spec, and the Figma file of its pages
             "ux": {"url": "https://k1-platform.kabatone.app/?ng=0.1", "figma_file_key": "QDgQIZWrjhbLmWMooY02Nh"},
@@ -259,6 +259,8 @@ class NextGenHubService:
                 cfg[section].update({k: v for k, v in values.items() if v is not None})
             elif section in cfg and not isinstance(cfg[section], dict):
                 cfg[section] = values
+        if (cfg["slack"].get("channels") or "").strip() == "next-gen*":   # old default missed #nextgen-*
+            cfg["slack"]["channels"] = self._defaults()["slack"]["channels"]
         s = get_settings()
         cfg["derived"] = {"jira_base_url": s.jira_base_url, "claude_configured": bool(s.anthropic_api_key),
                           "figma_configured": bool(s.figma_api_token)}
