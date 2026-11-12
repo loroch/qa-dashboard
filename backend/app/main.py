@@ -4,6 +4,7 @@ QA Manager Dashboard - FastAPI Application Entry Point
 import logging
 import os
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -15,7 +16,7 @@ from app.config import get_settings
 from app.database.db import init_db
 from app.services.changelog_service import get_changelog_service
 from app.services.dashboard_service import get_dashboard_service
-from app.api.routes import dashboard, changelog, export, jira_meta, zoho, coverage, test_generator, anomaly, test_plans, release_notes, investigation, bug_triage, bug_reporter, mexico_qa, kone, automation, sprint_planning, auth, activity, env_validation, bi
+from app.api.routes import dashboard, changelog, export, jira_meta, zoho, coverage, test_generator, anomaly, test_plans, release_notes, investigation, bug_triage, bug_reporter, mexico_qa, kone, automation, sprint_planning, auth, activity, env_validation, bi, nextgen
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +37,8 @@ async def lifespan(app: FastAPI):
     await init_db()
     from app.services.env_validation_service import get_env_validation_service
     await get_env_validation_service().mark_interrupted_runs()
+    from app.services.nextgen_lab_service import get_nextgen_lab_service
+    await get_nextgen_lab_service().mark_interrupted()
 
     # Seed initial changelog
     changelog_svc = get_changelog_service()
@@ -50,6 +53,13 @@ async def lifespan(app: FastAPI):
         replace_existing=True,
         max_instances=1,
     )
+    # NextGen QA Hub: the environment is cheap to poll (deployments, outages); the full
+    # snapshot (git + Jira + correlation) and the Slack scan run less often.
+    scheduler.add_job(_nextgen_env_check, trigger=IntervalTrigger(minutes=5), id="nextgen_env",
+                      replace_existing=True, max_instances=1)
+    scheduler.add_job(_nextgen_refresh, trigger=IntervalTrigger(minutes=max(5, settings.nextgen_poll_minutes)),
+                      id="nextgen_refresh", replace_existing=True, max_instances=1,
+                      next_run_time=datetime.now(timezone.utc) + timedelta(seconds=30))
     scheduler.start()
     logger.info(f"Scheduler started: full refresh every {refresh_hours}h")
 
@@ -68,6 +78,30 @@ async def _background_refresh():
     """Called by APScheduler every N hours."""
     svc = get_dashboard_service()
     await svc.refresh_all()
+
+
+async def _nextgen_env_check():
+    from app.services.nextgen_hub_service import get_nextgen_hub_service
+    try:
+        await get_nextgen_hub_service().check_env()
+    except Exception as exc:
+        logger.warning("NextGen env check failed: %s", exc)
+
+
+async def _nextgen_refresh():
+    from app.services.nextgen_hub_service import get_nextgen_hub_service
+    from app.services.nextgen_ai_service import get_nextgen_ai_service
+    hub = get_nextgen_hub_service()
+    if not hub.build_state["running"]:
+        try:
+            await hub.build_snapshot()
+        except Exception as exc:
+            logger.warning("NextGen refresh failed: %s", exc)
+    try:
+        await get_nextgen_ai_service().slack_scan()
+        await get_nextgen_ai_service().auto_slack_summary(every_hours=6)
+    except Exception as exc:
+        logger.warning("NextGen Slack scan failed: %s", exc)
 
 
 # -----------------------------------------------------------------------
@@ -119,6 +153,7 @@ app.include_router(auth.router)
 app.include_router(activity.router)
 app.include_router(env_validation.router)
 app.include_router(bi.router)
+app.include_router(nextgen.router)
 
 
 @app.get("/health")

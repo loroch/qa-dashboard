@@ -241,6 +241,55 @@ class AiContentORM(Base):
     generated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
+class NextGenEnvSnapshotORM(Base):
+    """One health/version reading of the NextGen dev environment — the history shows
+    every deployment (git SHA change) and every outage."""
+    __tablename__ = "nextgen_env_snapshots"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    checked_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    env_url = Column(Text, nullable=False)
+    git_sha = Column(String(64), nullable=True, index=True)
+    version = Column(String(50), nullable=True)
+    release = Column(String(50), nullable=True)
+    built_at = Column(String(50), nullable=True)
+    healthy = Column(Integer, default=0)   # 1 = /healthz ok
+    ready = Column(Integer, default=0)     # 1 = /readyz ready
+    login_ok = Column(Integer, nullable=True)  # null = no credentials configured
+    details = Column(Text, nullable=True)  # JSON: per-endpoint status/latency, readiness checks, error
+
+
+class NextGenNotificationORM(Base):
+    """Background findings shown in the hub (deployments, outages, new bugs, Slack alerts)."""
+    __tablename__ = "nextgen_notifications"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    level = Column(String(20), default="info")        # info | warning | critical
+    category = Column(String(30), default="general")  # deploy | env | jira | slack | repo | lab
+    title = Column(Text, nullable=False)
+    detail = Column(Text, nullable=True)
+    link = Column(Text, nullable=True)
+    read = Column(Integer, default=0, index=True)
+
+
+class NextGenLabRunORM(Base):
+    """One embedded Playwright run against the NextGen environment."""
+    __tablename__ = "nextgen_lab_runs"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(String(200), nullable=False)
+    issue_key = Column(String(50), nullable=True, index=True)
+    kind = Column(String(20), default="script")   # script | smoke | ai
+    env_url = Column(Text, nullable=True)
+    script = Column(Text, nullable=False)
+    status = Column(String(20), default="pending", index=True)  # pending|running|passed|failed|error
+    log_output = Column(Text, nullable=True)
+    result_json = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    finished_at = Column(DateTime, nullable=True)
+
+
 # Engine and session factory
 _engine = None
 _session_factory = None

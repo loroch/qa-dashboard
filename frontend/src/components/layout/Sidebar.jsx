@@ -2,7 +2,7 @@ import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, CheckSquare, Users, AlertTriangle,
   Bug, Clock, TrendingUp, History, Ticket, BarChart2, FlaskConical, PlayCircle, Zap, Layers, ClipboardList, FileText, GitBranch, PenLine, Target, Globe, CalendarDays,
-  Moon, Sun, LogOut, ShieldCheck, UserCircle2, Activity, Flame, PieChart
+  Moon, Sun, LogOut, ShieldCheck, UserCircle2, Activity, Flame, PieChart, Rocket
 } from 'lucide-react'
 import { useDarkMode } from '../../hooks/useDarkMode'
 
@@ -20,6 +20,8 @@ const ALL_NAV = [
   { to: '/trends',         label: 'Trends',           icon: TrendingUp,      roles: ['admin'] },
   { to: '/zoho',           label: 'Zoho Desk',        icon: Ticket,          roles: ['admin'] },
   { to: '/zoho-reports',   label: 'Zoho Reports',     icon: BarChart2,       roles: ['admin'] },
+  // Kept in the middle of the list and drawn framed in amber: the main NextGen workspace
+  { to: '/nextgen',        label: 'NextGen QA Hub',   icon: Rocket,          roles: ['admin'], highlight: true },
   { to: '/coverage',       label: 'Test Coverage',    icon: FlaskConical,    roles: ['admin', 'qa'] },
   { to: '/automation',     label: 'Automation',       icon: PlayCircle,      roles: ['admin'] },
   { to: '/validation',     label: 'Validation Portal', icon: ShieldCheck,    roles: ['admin'] },
@@ -71,21 +73,28 @@ export function Sidebar({ user, onLogout }) {
 
       {/* Nav */}
       <nav className="flex-1 px-3 py-4 space-y-0.5 overflow-y-auto">
-        {nav.map(({ to, label, icon: Icon }) => (
+        {nav.map(({ to, label, icon: Icon, highlight }) => (
           <NavLink
             key={to}
             to={to}
             end={to === '/'}
             className={({ isActive }) =>
-              `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                isActive
-                  ? 'bg-white/20 text-white font-medium'
-                  : 'text-brand-100 hover:bg-white/10 hover:text-white'
-              }`
+              highlight
+                ? `flex items-center gap-3 px-3 py-2 my-1.5 rounded-lg text-sm font-semibold border-2 transition-colors ${
+                    isActive
+                      ? 'bg-amber-400 border-amber-200 text-brand-900 shadow-lg shadow-amber-500/30'
+                      : 'bg-amber-400/15 border-amber-400 text-amber-100 hover:bg-amber-400/30'
+                  }`
+                : `flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                    isActive
+                      ? 'bg-white/20 text-white font-medium'
+                      : 'text-brand-100 hover:bg-white/10 hover:text-white'
+                  }`
             }
           >
             <Icon className="h-4 w-4 shrink-0" />
-            {label}
+            <span className="flex-1">{label}</span>
+            {highlight && <span className="text-[9px] font-bold uppercase tracking-wide bg-amber-300 text-brand-900 rounded px-1">Key</span>}
           </NavLink>
         ))}
       </nav>

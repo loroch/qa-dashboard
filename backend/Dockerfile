@@ -10,13 +10,15 @@ RUN pip install --no-cache-dir -r requirements.txt
 # (Phase 2) drafts a Playwright script per Jira Test issue and executes it as a
 # subprocess from this image. Baked in at build time so a run never needs a
 # runtime download of the browser binary.
-RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg \
+RUN apt-get update && apt-get install -y --no-install-recommends curl gnupg git \
     && curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
     && apt-get install -y --no-install-recommends nodejs \
     && rm -rf /var/lib/apt/lists/*
 RUN npm install -g playwright@1.61.1 \
     && npx playwright install --with-deps chromium
 ENV NODE_PATH=/usr/lib/node_modules
+# The NextGen hub reads a K1-NG clone mounted from the host; its owner differs from the container user
+RUN git config --system --add safe.directory '*'
 
 # Copy source
 COPY . .

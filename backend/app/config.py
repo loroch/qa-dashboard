@@ -103,6 +103,22 @@ class Settings(BaseSettings):
     smtp_password: str = Field("")
     smtp_from: str = Field("")
 
+    # NextGen QA Hub — defaults only; every value is editable in the hub's Settings tab.
+    # Keep real secrets in .env, never in code.
+    nextgen_env_url: str = Field("https://k1-ng-dev.lab.kabatone.app")
+    nextgen_env_user: str = Field("")
+    nextgen_env_password: str = Field("")
+    nextgen_repo_path: str = Field("", description="Local clone of the K1-NG monorepo; cloned into data/ when empty")
+    nextgen_repo_url: str = Field("https://gitlab.com/promad-cad-all/k1-nextgen/monorepo.git")
+    nextgen_gitlab_token: str = Field("", description="GitLab token with read_repository, used only when no local clone exists")
+    nextgen_jira_project: str = Field("K1NG")
+    nextgen_poll_minutes: int = Field(15, description="Background refresh of the hub snapshot")
+    slack_bot_token: str = Field("", description="Slack bot token (channels:history, channels:read, users:read)")
+    nextgen_slack_channels: str = Field("next-gen*", description="Comma-separated names or patterns")
+    xai_api_key: str = Field("", description="xAI (Grok) API key for the alternative-test advisor")
+    xai_model: str = Field("grok-4")
+    xai_base_url: str = Field("https://api.x.ai/v1")
+
     @property
     def cors_origins_list(self) -> List[str]:
         return [o.strip() for o in self.cors_origins.split(",")]

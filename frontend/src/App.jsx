@@ -29,6 +29,7 @@ import ProdBugsPage from './pages/ProdBugsPage'
 import QAActivityPage from './pages/QAActivityPage'
 import ValidationPortalPage from './pages/ValidationPortalPage'
 import BIPage from './pages/BIPage'
+import NextGenHubPage from './pages/NextGenHubPage'
 
 // Routes accessible by the QA role
 const QA_ALLOWED_PATHS = new Set(['/kone', '/coverage', '/bugs-by-version', '/qa-status'])
@@ -75,6 +76,7 @@ export default function App() {
             <Route path="/automation"        element={isAdmin ? <AutomationPage />    : <Navigate to={QA_HOME} replace />} />
             <Route path="/validation"        element={isAdmin ? <ValidationPortalPage /> : <Navigate to={QA_HOME} replace />} />
             <Route path="/bi"                element={isAdmin ? <BIPage />            : <Navigate to={QA_HOME} replace />} />
+            <Route path="/nextgen"           element={isAdmin ? <NextGenHubPage />    : <Navigate to={QA_HOME} replace />} />
             <Route path="/anomaly"           element={isAdmin ? <AnomalyPage />       : <Navigate to={QA_HOME} replace />} />
             <Route path="/test-plans"        element={isAdmin ? <TestPlansPage />     : <Navigate to={QA_HOME} replace />} />
             <Route path="/release-notes"     element={isAdmin ? <ReleaseNotesPage />  : <Navigate to={QA_HOME} replace />} />

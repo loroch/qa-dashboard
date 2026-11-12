@@ -11,3 +11,6 @@ build/
 .DS_Store
 data/
 *.log
+
+# NextGen QA Hub repo mount (Docker)
+nextgen-repo/
